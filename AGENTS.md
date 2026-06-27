@@ -58,6 +58,10 @@ make sandbox-down     # tear it down
   `install pip … --python <minor>` + the verb; `bootstrap` writes `pip.conf`.
   Verified on Alpine/musl vs PyPI. Package management is **multi-language by
   design** (per-manager verbs + neutral types) — see memory.
-- **Phase 5 — next.** `pip.install` Tier 1 (Popo-side fetch + relay) for the
-  offline/non-mirrored case — reuses the resolve stage. Console-script shebang
-  rewriting also lands around here (plan §5).
+- **Phase 5 — done.** `pip.install` Tier 1 relay (`internal/pip/relay.go`):
+  controller cross-platform `pip download` → relay wheels via `RemoteFS` →
+  offline install in-sandbox (tier=relay). `--tier auto|mirror|relay`. Verified on
+  Alpine/musl with a C-extension wheel.
+- **Phase 6 — next.** `web.fetch` with venue routing + the SSRF floor + egress
+  gating/fetch-rewrites (§6.1) + the audit log. (Console-script shebang rewriting
+  is still outstanding — fold in when pip console scripts first matter.)
