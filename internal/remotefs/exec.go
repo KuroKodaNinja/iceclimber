@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"os"
 	"sort"
 	"strings"
 
@@ -63,6 +64,16 @@ func (e *ExecFS) Rename(ctx context.Context, oldpath, newpath string) error {
 	// POSIX mv replaces an existing target atomically (same filesystem).
 	res, err := e.r.Run(ctx, "mv "+remote.ShellQuote(oldpath)+" "+remote.ShellQuote(newpath), nil)
 	return e.check("rename", oldpath, res, err)
+}
+
+func (e *ExecFS) Chmod(ctx context.Context, path string, mode os.FileMode) error {
+	res, err := e.r.Run(ctx, fmt.Sprintf("chmod %o %s", mode.Perm(), remote.ShellQuote(path)), nil)
+	return e.check("chmod", path, res, err)
+}
+
+func (e *ExecFS) Symlink(ctx context.Context, target, link string) error {
+	res, err := e.r.Run(ctx, "ln -s "+remote.ShellQuote(target)+" "+remote.ShellQuote(link), nil)
+	return e.check("symlink", link, res, err)
 }
 
 func (e *ExecFS) check(op, path string, res remote.Result, err error) error {

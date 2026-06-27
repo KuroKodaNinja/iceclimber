@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 
 	"github.com/pkg/sftp"
@@ -86,6 +87,26 @@ func (s *SFTPFS) Rename(ctx context.Context, oldpath, newpath string) error {
 	// target; plain Rename would fail if newpath exists.
 	if err := s.c.PosixRename(oldpath, newpath); err != nil {
 		return fmt.Errorf("sftpfs rename %s: %w", oldpath, err)
+	}
+	return nil
+}
+
+func (s *SFTPFS) Chmod(ctx context.Context, path string, mode os.FileMode) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.c.Chmod(path, mode); err != nil {
+		return fmt.Errorf("sftpfs chmod %s: %w", path, err)
+	}
+	return nil
+}
+
+func (s *SFTPFS) Symlink(ctx context.Context, target, link string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.c.Symlink(target, link); err != nil {
+		return fmt.Errorf("sftpfs symlink %s: %w", link, err)
 	}
 	return nil
 }

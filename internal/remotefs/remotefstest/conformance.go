@@ -102,6 +102,30 @@ func RunConformance(t *testing.T, newFS NewFS) {
 			t.Errorf("Rename missing source: err = %v, want ErrNotExist", err)
 		}
 	})
+
+	t.Run("chmod_existing_and_missing", func(t *testing.T) {
+		rfs, base := newFS(t)
+		p := base + "/f"
+		mustOK(t, rfs.WriteFile(ctx, p, []byte("x")))
+		mustOK(t, rfs.Chmod(ctx, p, 0o755))
+		if err := rfs.Chmod(ctx, base+"/nope", 0o755); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("Chmod missing: err = %v, want ErrNotExist", err)
+		}
+	})
+
+	t.Run("symlink_reads_through_to_target", func(t *testing.T) {
+		rfs, base := newFS(t)
+		target, link := base+"/target", base+"/link"
+		mustOK(t, rfs.WriteFile(ctx, target, []byte("payload")))
+		mustOK(t, rfs.Symlink(ctx, target, link))
+		got, err := rfs.ReadFile(ctx, link)
+		if err != nil {
+			t.Fatalf("ReadFile through symlink: %v", err)
+		}
+		if string(got) != "payload" {
+			t.Errorf("through-link content = %q, want payload", got)
+		}
+	})
 }
 
 func mustOK(t *testing.T, err error) {

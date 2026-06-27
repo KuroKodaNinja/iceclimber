@@ -5,7 +5,10 @@
 // so nothing above this layer ever knows which is active.
 package remotefs
 
-import "context"
+import (
+	"context"
+	"os"
+)
 
 // FS is the transport-agnostic filesystem the protocol layer runs on. All paths
 // are absolute (the absolute-path contract, plan §2). Operations on a missing
@@ -24,4 +27,10 @@ type FS interface {
 	// Rename moves oldpath to newpath with POSIX replace semantics (an existing
 	// newpath is atomically replaced).
 	Rename(ctx context.Context, oldpath, newpath string) error
+	// Chmod sets the permission bits on path (needed to make a pushed
+	// interpreter executable).
+	Chmod(ctx context.Context, path string, mode os.FileMode) error
+	// Symlink creates a symbolic link at link pointing to target (PBS uses
+	// symlinks, e.g. bin/python3 -> python3.x).
+	Symlink(ctx context.Context, target, link string) error
 }
