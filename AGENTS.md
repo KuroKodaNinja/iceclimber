@@ -43,6 +43,11 @@ make sandbox-down     # tear it down
 
 ## Status
 
+**🎉 v1 is complete** — all phases below implemented and verified end-to-end
+against a real Alpine/musl sandbox. Remaining work: incremental polish + the v2
+backlog (sub-agent/`web.research`, Tier 2 build, `ExecFS` bulk-transfer, true
+fleet multiplexing — plan §0).
+
 - **Phase 1 — done.** CLI skeleton + `probe` (fingerprint OS/arch/libc/root
   viability), verified end-to-end against Alpine.
 - **Phase 2 — done.** Maildir protocol + dual `RemoteFS` (`internal/remotefs`:
@@ -72,8 +77,8 @@ make sandbox-down     # tear it down
   selection, SSRF-safe dial, allow/deny + pending stores, `pending`/`approve`/
   `deny`, `serve --deny`. Verified on the VM (hold→approve→controller fetch,
   SSRF block, deny).
-- **Phase 7 — next (v1 finale).** `NANA.md` — the sandbox-side skill doc
-  (abstract file/exec actions, counter-based polling, capability self-report,
-  "Popo is down" handling) so a real agent can be Nana turnkey. (Console-script
-  shebang rewriting still outstanding — fold in when pip console scripts first
-  matter.)
+- **Phase 7 — done (v1 finale).** `NANA.md` skill doc (`internal/skill`, embedded,
+  dropped at bootstrap; `skill print`/`skill path`) + `status` (liveness/queue/
+  runtimes/capabilities). Verified on Alpine. (Console-script shebang rewriting
+  remains deferred — likely moot; pip writes correct shebangs at the runtime's
+  final path, and PBS's own scripts are run via `python3 -m`.)

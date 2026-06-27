@@ -2,7 +2,7 @@
 
 Living design doc for `iceclimber`, a Go CLI for operating a Claude agent running in YOLO mode inside a sandbox it can't otherwise provision (Python, packages, web access), over an SSH-only link, with zero assumptions about the sandbox's shell or installed tooling.
 
-Status: architecture and protocol settled through several rounds of review. Several sections are explicitly marked **OPEN** — not yet designed, called out so nothing gets silently assumed later. Scope is split into a tight **v1** and a **v2** backlog (§0); the design thinking is kept in full, but most of it is not v1.
+Status: **v1 implemented and verified end-to-end** against a real Alpine/musl sandbox (all phases in §12 ✅). Scope was split into a tight **v1** and a **v2** backlog (§0); the design thinking is kept in full. Remaining work is incremental polish + the v2 backlog (sub-agent/`web.research`, Tier 2 build, `ExecFS` bulk-transfer, true fleet multiplexing).
 
 ---
 
@@ -234,7 +234,7 @@ result: { "answer": "...", "sources": [{ "url": "...", "note": "..." }], "iterat
 // v1 shape — trimmed to fields something actually consumes (decision #14):
 { "has_exec": true, "has_file_write": true }
 ```
-`has_exec` is the **viability gate**: only Nana knows whether its harness exposes an execution primitive that resolves paths against the tree Popo populates (§2 scoping boundary) — Popo's own SSH exec can't answer that. `has_file_write` is required to participate in the protocol at all. Dropped from v1: `has_network_tools` (Popo drives all fetches, §6) and `shell_hint` (ExecFS is pinned to POSIX sh, §6 — nothing branches on it). Re-add only when a consumer appears.
+`has_exec` is the **viability gate**: only Nana knows whether its harness exposes an execution primitive that resolves paths against the tree Popo populates (§2 scoping boundary) — Popo's own SSH exec can't answer that. `has_file_write` is required to participate in the protocol at all. Dropped from v1: `has_network_tools` (Popo drives all fetches, §6) and `shell_hint` (ExecFS is pinned to POSIX sh, §6 — nothing branches on it). Re-add only when a consumer appears. *Phase 7: `NANA.md` instructs Nana to write this as its first action, and `status` **reads it where present** — Popo never requires it.*
 
 ### 4.7 Liveness — heartbeat by content, not mtime
 
@@ -412,7 +412,7 @@ These are named explicitly so they don't get silently assumed during implementat
 
 **Still open *for v1* (must be designed before/within the build):**
 
-- **`NANA.md` content.** The actual skill document: written in terms of abstract actions (write file at path, read file at path, execute path with args) so it works regardless of whether Nana's harness exposes a shell, a constrained run-command tool, or just file read/write. Needs the polling/backoff schedule (§4.7, counter-based), the absolute-path contract, capability self-report instructions, and what to do if Popo appears to be down.
+- ~~**`NANA.md` content**~~ — **resolved (phase 7):** authored in `internal/skill/NANA.md` (embedded), covering abstract file/exec actions, the maildir request/response flow, counter-based heartbeat liveness (§4.7), the absolute-path contract, all four verbs, and the capability self-report. Dropped at bootstrap; `skill print` surfaces it.
 - ~~**Audit log schema**~~ — **resolved (phase 6a, §6 floor):** controller-side JSONL, `{ts, id, type, url, method, venue, status_code, body_size, body_sha256, outcome}`. Phase 6b extends entries with fetch **rewrites** (original + rewritten URL) and **approval** outcomes (auto-allowed / one-shot / persisted / denied), per §6.1.
 - **Approval persistence format** — the `approvals.json` allow-list shape: pattern syntax (shared with `fetch_rewrites` matching), and whether rules can expire. Small; nail down with the audit schema.
 
@@ -467,6 +467,7 @@ These are named explicitly so they don't get silently assumed during implementat
 | 31 | `approve <id>` grants **host scope** (`https://host/*`); `--remember` for a custom glob; URLs normalized to a path so host rules match bare URLs | One OK unblocks a whole site (practical); normalization avoids a re-submit staying held (bug found in 6b) |
 | 32 | Unlisted URL → **controller venue, gated** (held for approval); `deny` persists a deny rule checked before allow | The approval flow exists for exactly this; deny must stick across re-submits |
 | 33 | Controller SSRF floor blocks **private** too (Popo is outside the corp net), enforced at **dial** time; literal blocked-IP URLs refused up front for both venues | Rebinding-resistant; the floor sits underneath rewrites/allow rules (§6) |
+| 34 | `NANA.md` embedded (`go:embed`) and dropped at bootstrap; `status` reads `capabilities.json` if present | The skill doc ships with the binary (always in sync); the v1 cap-stone surfaces liveness/queue/capabilities |
 
 ---
 
@@ -481,7 +482,9 @@ These are named explicitly so they don't get silently assumed during implementat
 5. ✅ **`pip.install` Tier 1 (relay)** — `internal/pip/relay.go`: controller cross-platform `pip download` (operator's python3) → relay wheels via `RemoteFS` → offline `pip install --no-index --find-links --report` in-sandbox (tier=relay, hashed). `--tier auto|mirror|relay`; config `controller_python` + `pip.controller_index_url`. **Verified on Alpine/musl:** a C-extension (`markupsafe`) downloaded cross-platform on macOS imports and runs on the VM. *(Cross-platform-download risk spiked & resolved; sdist-only → Tier 2, parked v2.)*
 6a. ✅ **`web.fetch` — sandbox-exec venue + SSRF literal-IP floor + audit log** — `internal/webfetch` (curl/busybox-wget over exec, no Python; inline/blob body) + `internal/audit` (controller JSONL). `web fetch` CLI + the `web.fetch` verb. **Verified on Alpine/musl** (busybox wget HTTPS; large body → blob). *No exfil hole — sandbox's own egress only.*
 6b. ✅ **`web.fetch` controller venue + egress gating (§6.1)** — `internal/egress` (rewrites, venue selection, allow/deny + pending stores) + `internal/webfetch` controller backend (`net/http`, SSRF-safe dial blocking private/link-local/metadata) + `pending`/`approve [--remember]`/`deny` + `serve --deny`. Audit gains `rewritten_url`+`decision`. **Verified on the VM:** rewrite re-venue (ungated), hold→approve→controller fetch, SSRF refusal, deny→egress_denied.
-7. `NANA.md`, polish, `sandbox_id` namespacing verification
+7. ✅ **`NANA.md` + `status` (v1 finale)** — `internal/skill` embeds the sandbox-side skill doc (request/response over the maildir, counter-based heartbeat liveness, absolute-path contract, all four verbs, capabilities self-report); `bootstrap` drops it to `skill/NANA.md`; `skill print`/`skill path`; `status` reports liveness + queue + runtimes + the agent's `capabilities.json`. **Verified on Alpine.**
+
+**🎉 v1 is complete** — every phase above is implemented and verified end-to-end against a real Alpine/musl sandbox. Remaining `polish` + `sandbox_id` fleet-namespacing verification is incremental.
 
 **v2 (demand-driven, see §0):** sub-agent router for `web.research` and Tier 2/3 fallbacks; Tier 2 build environment; `ExecFS` bulk-transfer protocol; true fleet multiplexing.
 
