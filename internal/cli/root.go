@@ -37,6 +37,9 @@ func newRootCmd() *cobra.Command {
 		newServeCmd(),
 		newInstallCmd(),
 		newWebCmd(),
+		newPendingCmd(),
+		newApproveCmd(),
+		newDenyCmd(),
 	)
 	root.AddCommand(stubCommands()...)
 	return root

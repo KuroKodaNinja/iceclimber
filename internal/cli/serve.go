@@ -18,6 +18,7 @@ func newServeCmd() *cobra.Command {
 	var once bool
 	var transport string
 	var interval time.Duration
+	var deny []string
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Watch the outbox and service requests (Popo)",
@@ -31,7 +32,7 @@ func newServeCmd() *cobra.Command {
 			if once {
 				ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
 				defer cancel()
-				return withDispatcher(ctx, cfg, transport, func(d *protocol.Dispatcher) error {
+				return withDispatcher(ctx, cfg, transport, deny, func(d *protocol.Dispatcher) error {
 					return d.RunOnce(ctx)
 				})
 			}
@@ -39,7 +40,7 @@ func newServeCmd() *cobra.Command {
 			// Long-lived: stop cleanly on Ctrl-C / SIGTERM.
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return withDispatcher(ctx, cfg, transport, func(d *protocol.Dispatcher) error {
+			return withDispatcher(ctx, cfg, transport, deny, func(d *protocol.Dispatcher) error {
 				fmt.Fprintf(cmd.OutOrStdout(), "serving sandbox %s; Ctrl-C to stop\n", cfg.SandboxID)
 				if err := d.Serve(ctx, interval); err != nil && !errors.Is(err, context.Canceled) {
 					return err
@@ -51,15 +52,21 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&once, "once", false, "run a single dispatch cycle and exit")
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "poll interval for the watch loop")
+	cmd.Flags().StringArrayVar(&deny, "deny", nil, "disable a verb, e.g. --deny web.fetch (repeatable)")
 	return cmd
 }
 
-// withDispatcher opens a session, builds a dispatcher, runs fn, and cleans up.
-func withDispatcher(ctx context.Context, cfg *config.Config, transport string, fn func(*protocol.Dispatcher) error) error {
+// withDispatcher opens a session, builds a dispatcher (minus any denied verbs),
+// runs fn, and cleans up.
+func withDispatcher(ctx context.Context, cfg *config.Config, transport string, deny []string, fn func(*protocol.Dispatcher) error) error {
 	sess, err := openSession(ctx, cfg, transport)
 	if err != nil {
 		return err
 	}
 	defer sess.Close()
-	return fn(protocol.NewDispatcher(sess.fs, sess.tree, buildRegistry(sess)))
+	reg := buildRegistry(sess)
+	for _, v := range deny {
+		delete(reg, v)
+	}
+	return fn(protocol.NewDispatcher(sess.fs, sess.tree, reg))
 }
