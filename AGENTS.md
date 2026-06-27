@@ -39,14 +39,17 @@ make test             # unit suite (go test -race ./...)
 make sandbox-up       # boot the Lima/Alpine functional sandbox
 make test-functional  # black-box E2E against the VM
 make sandbox-down     # tear it down
+make demo             # acceptance demo: real Claude agent in an air-gapped VM (DEMO.md)
 ```
 
 ## Status
 
 **🎉 v1 is complete** — all phases below implemented and verified end-to-end
-against a real Alpine/musl sandbox. Remaining work: incremental polish + the v2
-backlog (sub-agent/`web.research`, Tier 2 build, `ExecFS` bulk-transfer, true
-fleet multiplexing — plan §0).
+against a real Alpine/musl sandbox, and the **acceptance demo** (phase 8,
+[`DEMO.md`](./DEMO.md)) proves the whole premise with a real Claude agent under a
+true air-gap. Remaining work: incremental polish + the v2 backlog (sub-agent/
+`web.research`, Tier 2 build, `ExecFS` bulk-transfer, true fleet multiplexing —
+plan §0).
 
 - **Phase 1 — done.** CLI skeleton + `probe` (fingerprint OS/arch/libc/root
   viability), verified end-to-end against Alpine.
@@ -82,3 +85,11 @@ fleet multiplexing — plan §0).
   runtimes/capabilities). Verified on Alpine. (Console-script shebang rewriting
   remains deferred — likely moot; pip writes correct shebangs at the runtime's
   final path, and PBS's own scripts are run via `python3 -m`.)
+- **Phase 8 — done (acceptance demo).** A real Claude agent in an **air-gapped**
+  Alpine VM proves the premise: `test/lima/demo.yaml` (provisioned Alpine + Claude
+  Code on musl), `demo-firewall.sh` (egress → only Anthropic's ranges), `test/demo/`
+  brief + harness. `make demo` is the headless CI gate (`//go:build demo`,
+  subscription token, `ANTHROPIC_API_KEY` emptied); `make demo-live` is the
+  operator-approved walkthrough. Validated end-to-end: the agent relayed in Python
+  3.12.13 + `rich`, fetched `xkcd` through the gated controller venue, and rendered
+  it. See [`DEMO.md`](./DEMO.md). (glibc/Ubuntu variant parked.)
