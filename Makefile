@@ -9,7 +9,7 @@ SANDBOX     := iceclimber-sandbox
 SANDBOX_TPL := test/lima/sandbox.yaml
 BIN         := iceclimber
 
-.PHONY: build fmt vet test test-functional e2e sandbox-up sandbox-down sandbox-status clean
+.PHONY: build fmt vet test test-functional e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell clean
 
 build:
 	go build -o $(BIN) .
@@ -44,6 +44,14 @@ sandbox-down:
 
 sandbox-status:
 	limactl list $(SANDBOX)
+
+# Write an iceclimber.yaml pointing at the running sandbox (see test/PLAYGROUND.md).
+sandbox-config:
+	@bash test/lima/gen-config.sh $(SANDBOX) iceclimber.yaml
+
+# Open an interactive shell inside the sandbox (Nana's view).
+sandbox-shell:
+	@limactl shell $(SANDBOX)
 
 clean:
 	rm -f $(BIN)
