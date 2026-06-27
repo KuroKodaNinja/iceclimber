@@ -33,6 +33,7 @@ echo ">>> watch Popo's 'serve' in your other terminal service its requests."
 prompt="Read the file TASK.md in your current directory and complete the task it
 describes, exactly. Start by reading the NANA.md path it points you to."
 
+# --max-turns bounds a runaway agent (belt-and-suspenders for CI).
 limactl shell "$DEMO" -- \
 	env CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" ANTHROPIC_API_KEY= \
-	bash -lc "cd '$ROOT/work' && claude -p \"$prompt\" --dangerously-skip-permissions --verbose"
+	bash -lc "cd '$ROOT/work' && claude -p \"$prompt\" --dangerously-skip-permissions --verbose --max-turns 60"

@@ -13,7 +13,7 @@ BIN         := iceclimber
 
 .PHONY: build fmt vet test test-functional e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
 	demo-up demo-down demo-status demo-firewall demo-firewall-down demo-shell \
-	demo-config demo-bootstrap demo-agent demo-verify demo-reset clean
+	demo demo-config demo-bootstrap demo-agent demo-verify demo-reset clean
 
 build:
 	go build -o $(BIN) .
@@ -58,6 +58,13 @@ sandbox-shell:
 	@limactl shell $(SANDBOX)
 
 # --- Acceptance demo: a real Claude agent in an air-gapped sandbox (see DEMO.md) ---
+
+# Fully-automated acceptance demo (the CI gate): boots the VM and runs the
+# //go:build demo test, which drives a real Claude agent through the whole flow
+# and asserts the result. Needs CLAUDE_CODE_OAUTH_TOKEN (subscription, not API);
+# skips cleanly without it. Opt-in via the `demo` tag — never part of `make test`.
+demo: build demo-up
+	go test -tags demo -count=1 -timeout 30m ./test/demo/...
 
 # Boot + provision the demo VM (Alpine + Claude Code). First boot installs node,
 # the agent, and its musl deps while the network is still open.
