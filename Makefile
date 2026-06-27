@@ -7,9 +7,12 @@
 
 SANDBOX     := iceclimber-sandbox
 SANDBOX_TPL := test/lima/sandbox.yaml
+DEMO        := iceclimber-demo
+DEMO_TPL    := test/lima/demo.yaml
 BIN         := iceclimber
 
-.PHONY: build fmt vet test test-functional e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell clean
+.PHONY: build fmt vet test test-functional e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
+	demo-up demo-down demo-status demo-firewall demo-firewall-down demo-shell clean
 
 build:
 	go build -o $(BIN) .
@@ -52,6 +55,37 @@ sandbox-config:
 # Open an interactive shell inside the sandbox (Nana's view).
 sandbox-shell:
 	@limactl shell $(SANDBOX)
+
+# --- Acceptance demo: a real Claude agent in an air-gapped sandbox (see DEMO.md) ---
+
+# Boot + provision the demo VM (Alpine + Claude Code). First boot installs node,
+# the agent, and its musl deps while the network is still open.
+demo-up:
+	@limactl list --quiet 2>/dev/null | grep -qx $(DEMO) \
+		&& echo "demo '$(DEMO)' already exists; starting if stopped" \
+		&& limactl start $(DEMO) --tty=false \
+		|| limactl start --name=$(DEMO) $(DEMO_TPL) --tty=false
+
+demo-down:
+	-limactl stop $(DEMO)
+	-limactl delete $(DEMO)
+
+demo-status:
+	limactl list $(DEMO)
+
+# Air-gap the demo VM down to only the Claude API (DNS + 443 to Anthropic).
+# After this, the agent inside can reach nothing but its own API — it MUST
+# bridge through Popo for Python, packages, and web data.
+demo-firewall:
+	@limactl shell $(DEMO) -- sudo sh -s up < test/lima/demo-firewall.sh
+
+# Restore open egress (reset between runs).
+demo-firewall-down:
+	@limactl shell $(DEMO) -- sudo sh -s down < test/lima/demo-firewall.sh
+
+# Open an interactive shell inside the demo VM (the agent's view).
+demo-shell:
+	@limactl shell $(DEMO)
 
 clean:
 	rm -f $(BIN)

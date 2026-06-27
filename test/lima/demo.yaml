@@ -1,0 +1,71 @@
+# Lima template for the iceclimber **acceptance demo** sandbox.
+#
+# Unlike test/lima/sandbox.yaml (the functional-test box), this VM has a real
+# agent living inside it: Claude Code, on Alpine/musl. The demo proves the core
+# premise — a sandbox that genuinely can't reach the network is bridged by Popo —
+# by air-gapping the VM (see demo-firewall.sh) down to *only* the Claude API, then
+# letting the agent provision Python, packages, and web data through iceclimber.
+#
+# Provisioning below runs at first boot **while the network is still open**; the
+# air-gap firewall is applied later, on demand, by the demo harness. See DEMO.md.
+#
+# Usage (via the Makefile):
+#   make demo-up         # boot + provision this VM
+#   make demo-live       # operator-driven walkthrough
+#   make demo            # fully-automated acceptance run (CI)
+#   make demo-down
+minimumLimaVersion: 2.0.0
+
+base:
+- template:_images/alpine-3.23
+
+# Apple Virtualization.framework. Fall back to "qemu" if vz misbehaves.
+vmType: vz
+
+# Heavier than the functional box: it carries node + Claude Code + a ~210 MB
+# python-build-standalone runtime + wheels.
+cpus: 2
+memory: 4GiB
+disk: 8GiB
+
+containerd:
+  system: false
+  user: false
+
+# No host mounts — keep the guest a real locked-down sandbox (no host FS leaking
+# in), exactly like the functional box.
+mounts: []
+
+# First-boot provisioning, network still open. Installs the agent and its musl
+# prerequisites; the air-gap is applied afterwards by demo-firewall.sh.
+provision:
+- mode: system
+  script: |
+    #!/bin/sh
+    set -eux
+    apk update
+    # Agent prerequisites:
+    #   nodejs/npm        — Claude Code is a Node CLI
+    #   libgcc/libstdc++  — musl needs these for the native bits
+    #   ripgrep           — system rg; we set USE_BUILTIN_RIPGREP=0 (the bundled
+    #                       rg is glibc-built and won't run on musl)
+    #   bash              — the agent's shell tool needs a real bash (Alpine is
+    #                       busybox-only by default)
+    #   curl/ca-certs     — fetch probes + TLS roots
+    #   iptables/ip6tables/sudo — the air-gap firewall (applied later)
+    apk add \
+      nodejs npm libgcc libstdc++ ripgrep bash git curl ca-certificates \
+      iptables ip6tables sudo
+    npm install -g @anthropic-ai/claude-code
+    # Persist the agent env for every login shell.
+    cat > /etc/profile.d/iceclimber-demo.sh <<'EOF'
+    export USE_BUILTIN_RIPGREP=0
+    export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+    EOF
+- mode: system
+  script: |
+    #!/bin/sh
+    # Smoke-check the install so a broken provision fails `make demo-up` loudly.
+    set -eux
+    node --version
+    claude --version

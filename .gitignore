@@ -3,6 +3,7 @@
 
 # Local operator config and caches (may contain host/path details)
 /iceclimber.yaml
+/iceclimber-demo.yaml
 /.iceclimber-cache/
 
 # Go build/test artifacts
