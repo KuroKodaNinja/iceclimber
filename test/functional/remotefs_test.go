@@ -28,6 +28,7 @@ func TestRemoteFS_Conformance(t *testing.T) {
 				if err := fs.Mkdir(context.Background(), base); err != nil {
 					t.Fatalf("create base %s: %v", base, err)
 				}
+				t.Cleanup(func() { _ = fs.RemoveAll(context.Background(), base) })
 				return fs, base
 			})
 		})

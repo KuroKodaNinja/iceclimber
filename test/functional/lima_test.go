@@ -192,3 +192,11 @@ func repoRoot() string {
 	_, file, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(file), "..", "..")
 }
+
+// scheduleRootCleanup removes a test's sandbox root at test end so repeated runs
+// don't accumulate ~210MB python installs and fill the VM disk. Best-effort.
+func scheduleRootCleanup(t *testing.T, root string) {
+	t.Cleanup(func() {
+		_ = exec.Command("limactl", "shell", sandboxName, "--", "rm", "-rf", root).Run()
+	})
+}
