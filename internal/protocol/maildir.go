@@ -29,6 +29,11 @@ func (t Tree) Heartbeat() string { return path.Join(t.protocolDir(), "heartbeat"
 func (t Tree) Blobs() string { return path.Join(t.protocolDir(), "blobs") }
 func (t Tree) State() string { return path.Join(t.Root, "state") }
 
+// Skill holds the dropped NANA.md skill doc; Capabilities is Nana's self-report.
+func (t Tree) Skill() string        { return path.Join(t.Root, "skill") }
+func (t Tree) SkillFile() string    { return path.Join(t.Skill(), "NANA.md") }
+func (t Tree) Capabilities() string { return path.Join(t.protocolDir(), "capabilities.json") }
+
 // Maildir is one tmp/new/cur triple.
 type Maildir struct{ base string }
 
@@ -41,7 +46,7 @@ func EnsureTree(ctx context.Context, fs remotefs.FS, t Tree) error {
 	for _, d := range []string{
 		t.Outbox().Tmp(), t.Outbox().New(), t.Outbox().Cur(),
 		t.Inbox().Tmp(), t.Inbox().New(), t.Inbox().Cur(),
-		t.Blobs(), t.State(),
+		t.Blobs(), t.State(), t.Skill(),
 	} {
 		if err := fs.Mkdir(ctx, d); err != nil {
 			return fmt.Errorf("ensure tree %s: %w", d, err)

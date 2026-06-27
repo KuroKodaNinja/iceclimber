@@ -11,6 +11,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
+	"github.com/KuroKodaNinja/iceclimber/internal/skill"
 	"github.com/spf13/cobra"
 )
 
@@ -42,6 +43,9 @@ func newBootstrapCmd() *cobra.Command {
 			if err := writePipConf(ctx, sess); err != nil {
 				return fmt.Errorf("write pip.conf: %w", err)
 			}
+			if err := sess.fs.WriteFile(ctx, sess.tree.SkillFile(), []byte(skill.NanaMD)); err != nil {
+				return fmt.Errorf("write NANA.md: %w", err)
+			}
 			disp := protocol.NewDispatcher(sess.fs, sess.tree, buildRegistry(sess))
 			if err := disp.WriteHeartbeat(ctx); err != nil {
 				return err
@@ -51,8 +55,10 @@ func newBootstrapCmd() *cobra.Command {
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"bootstrap ok\n  sandbox:    %s\n  root:       %s\n  transport:  %s\n  smoke test: ping/pong round-trip passed\n",
-				cfg.SandboxID, sess.tree.Root, sess.transport)
+				"bootstrap ok\n  sandbox:    %s\n  root:       %s\n  transport:  %s\n  smoke test: ping/pong round-trip passed\n  skill:      wrote %s\n",
+				cfg.SandboxID, sess.tree.Root, sess.transport, sess.tree.SkillFile())
+			fmt.Fprintf(cmd.OutOrStdout(),
+				"  next:       wire NANA.md into your sandbox agent's instructions (manual — `iceclimber skill print`)\n")
 			return nil
 		},
 	}
