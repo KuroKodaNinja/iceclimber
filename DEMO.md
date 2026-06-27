@@ -36,97 +36,76 @@ Two ways to run it:
 
 ## Live walkthrough
 
-### 1. Boot + provision the demo VM
+Boot the VM once (the first boot installs node + Claude Code, so it's slow):
 
 ```sh
-make demo-up          # Alpine + node + Claude Code + musl deps (first boot is slow)
-make demo-bootstrap   # build iceclimber, point a config at the VM, create the tree + NANA.md
+make demo-up
 ```
 
-`demo-bootstrap` prints the tree **root** (e.g. `/home/<you>.guest/iceclimber-demo`)
-and writes `iceclimber-demo.yaml` (gitignored) for the host side.
-
-### 2. Air-gap the sandbox
+Then the whole guided demo is a single command:
 
 ```sh
-make demo-firewall    # egress now: DNS + 443 to Anthropic only — nothing else
+export CLAUDE_CODE_OAUTH_TOKEN=...    # subscription token (see Prerequisites)
+make demo-live
 ```
 
-Prove it really is sealed (these should **fail**, while the agent's API does not):
+`make demo-live` points a config at the VM, creates the tree + `NANA.md`,
+**air-gaps** the sandbox, starts Popo's `serve` in the background, and runs the
+agent in two passes:
+
+1. **Pass 1 (you watch).** The agent reads `NANA.md` and drives the maildir to
+   install Python 3.12 and `rich` — each serviced by Popo, because the agent can
+   reach neither directly. Then it tries to **fetch `https://xkcd.com/info.0.json`**,
+   which goes out through *Popo's* network (the controller venue) and is **gated**.
+   The fetch is held, so the agent prints an `iceclimber approve …` command and
+   stops.
+   > That stop *is the gate working*: the agent cannot reach the network — not even
+   > its requested URL — without your explicit approval. (A one-shot headless
+   > `claude -p` can't block waiting for an out-of-band approval, hence two passes.)
+
+2. **You approve**, in another terminal:
+   ```sh
+   ./iceclimber pending --config iceclimber-demo.yaml          # the held fetch + its id
+   ./iceclimber approve <id> --config iceclimber-demo.yaml     # persists a host allow rule
+   ```
+   then press **Enter** back in the `make demo-live` terminal.
+
+3. **Pass 2.** The fetch is now allowed; the agent fetches, writes
+   `work/comics.py`, runs it, and `demo-live` verifies. A **`DEMO VERIFY: PASS`**
+   line means Python, `rich`, and the data all bridged in through Popo.
+
+On exit it restores egress and stops `serve`.
+
+### Prove the air-gap is real
+
+While the VM is air-gapped, these **fail** — so everything the agent achieves, it
+achieves *only* through Popo:
 
 ```sh
 make demo-shell
-  pip install rich            # -> network failure (no PyPI)
-  curl https://xkcd.com       # -> hangs/timeout (no general web)
+  pip install rich        # -> network failure (no PyPI)
+  curl https://xkcd.com   # -> hangs/timeout (no general web)
   exit
 ```
 
-### 3. Terminal A — Popo (host)
+### Drive it by hand instead
+
+`make demo-live` is a convenience over the individual targets. To step through it:
 
 ```sh
-./iceclimber serve --config iceclimber-demo.yaml
+make demo-bootstrap                                   # config + tree + NANA.md
+make demo-firewall                                    # air-gap
+./iceclimber serve --config iceclimber-demo.yaml      # Terminal A (Popo)
+make demo-agent                                       # Terminal B — provisions, holds at the gate
+./iceclimber approve <id> --config iceclimber-demo.yaml
+make demo-reset && make demo-agent                    # clean pass; completes
+make demo-verify
 ```
 
-Leave it running. This is the only thing the sandbox can reach besides its own API.
+> `demo-reset` is needed because Popo's effectively-once dedup won't re-service a
+> *held* id; a re-submit under a **new id** (as `NANA.md` instructs) would also work.
 
-### 4. Terminal B — launch the agent, and watch the gate (host)
-
-```sh
-make demo-agent       # runs Claude *inside* the VM, on the task in test/demo/TASK.md
-```
-
-Watch both terminals. The agent reads `NANA.md`, then drives the maildir to
-install Python 3.12 and `rich` — each serviced by Popo in Terminal A, because the
-agent can reach neither directly. Then it tries to **fetch
-`https://xkcd.com/info.0.json`**, which goes out through *Popo's* network (the
-controller venue) and is **gated**. The fetch is held (`needs_clarification`), and
-because this is a one-shot headless run, the agent prints the exact
-`iceclimber approve …` command and **stops**.
-
-> That stop *is the gate working*: the agent cannot reach the network — not even
-> its requested URL — without your explicit approval.
-
-### 5. Approve, then complete the run
-
-From **Terminal A**, approve the held fetch:
-
-```sh
-./iceclimber pending --config iceclimber-demo.yaml          # shows the held fetch + its id
-./iceclimber approve <id> --config iceclimber-demo.yaml     # persists a host allow rule
-```
-
-Then re-run the agent. Approvals persist, so this pass sails through the fetch and
-finishes the job:
-
-```sh
-make demo-reset       # clear the maildir for a clean pass (keeps runtimes + the approval)
-make demo-agent       # now allowed: the agent fetches, writes work/comics.py, and runs it
-```
-
-> Why `demo-reset`? A held request's id already has a response, and Popo's
-> effectively-once dedup won't re-service the same id. Clearing the maildir lets
-> the fresh pass start clean. (A continuously-running *interactive* agent would
-> instead re-submit under a **new id**, as `NANA.md` instructs.)
-
-### 6. Verify
-
-```sh
-make demo-verify      # runs the agent's program; checks it renders the fetched comic
-```
-
-A `PASS` line means the program the agent built prints the comic number and title
-it obtained through Popo — Python, `rich`, and the data all bridged in.
-
-> **Prefer a hands-off run?** Pre-approve the host *before* launching, so the
-> single pass completes without stopping at the gate:
-> ```sh
-> ./iceclimber web fetch https://xkcd.com/info.0.json --config iceclimber-demo.yaml   # hold once
-> ./iceclimber approve "$(./iceclimber pending --config iceclimber-demo.yaml | awk 'NR==1{print $1}')" --config iceclimber-demo.yaml
-> make demo-reset && make demo-agent && make demo-verify
-> ```
-> This is exactly what the automated `make demo` does (see below).
-
-### 7. Teardown
+### Teardown
 
 ```sh
 make demo-firewall-down   # restore egress (optional)
