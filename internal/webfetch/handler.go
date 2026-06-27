@@ -42,6 +42,12 @@ func Run(ctx context.Context, d Deps, id string, req Request) (GateOutcome, erro
 	if id == "" {
 		id = protocol.NewID() // CLI path: a stable id for the pending entry/approval
 	}
+	// SSRF floor sits underneath venue selection and gating: a literal
+	// loopback/link-local/metadata address is refused regardless (no rewrite or
+	// allow rule can reach it). DNS-resolving checks apply at controller dial.
+	if err := checkSSRF(req.URL); err != nil {
+		return GateOutcome{}, err
+	}
 	resolved, venue, rewritten, err := d.Policy.Resolve(req.URL)
 	if err != nil {
 		return GateOutcome{}, err
@@ -51,11 +57,17 @@ func Run(ctx context.Context, d Deps, id string, req Request) (GateOutcome, erro
 		rewrittenURL = resolved
 	}
 	method := methodOrGet(req.Method)
+	// §4.4 venue labels: "sandbox-exec" | "controller" (the egress venue is
+	// "sandbox" | "controller").
+	auditVenue := "controller"
+	if venue == egress.VenueSandbox {
+		auditVenue = "sandbox-exec"
+	}
 
 	record := func(decision string, res Result, outcome string) {
 		_ = d.Audit.Append(audit.Entry{
 			ID: id, Type: "web.fetch", URL: req.URL, RewrittenURL: rewrittenURL,
-			Method: method, Venue: venue, Decision: decision,
+			Method: method, Venue: auditVenue, Decision: decision,
 			StatusCode: res.StatusCode, BodySize: res.BodySize, BodySHA256: res.BodySHA256,
 			Outcome: outcome,
 		})
