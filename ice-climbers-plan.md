@@ -272,7 +272,9 @@ Because Popo sits *outside* the corporate network and the sandbox sits *inside* 
 
 Sandbox-side fetches use **curl when present, else busybox `wget`** (which does HTTPS, `--header`, `-O`, and `-S` for the status line) — **not** Python (decision #28; web.fetch must not be tied to the Python runtime). A box with neither curl nor wget is reported clearly.
 
-### 6.1 Egress gating & fetch rewrites (v1)
+### 6.1 Egress gating & fetch rewrites (v1) — *implemented (phase 6b)*
+
+*Realized in `internal/egress` (policy + rule/pending stores) + `internal/webfetch` (controller venue, SSRF-safe dial) + the `pending`/`approve`/`deny` CLI. Plain `approve <id>` grants host scope (`--remember` for a custom glob); unlisted URLs default to controller-gated; `deny` persists a deny rule; the SSRF floor blocks private/link-local/metadata at dial (rebinding-resistant) and refuses literal blocked IPs up front.*
 
 `web.fetch` via the **controller venue** is a deliberate tunnel through the sandbox's egress isolation: it lets an in-sandbox agent reach the public internet — including arbitrary POST bodies — from Popo's network position. That is the *point* (the sandbox can't egress on its own), but it is also a data-exfiltration path that defeats the sandbox's reason to exist, so it is **gated, not free**. The SSRF floor alone (blocking `169.254.169.254` and friends) does not address this — "the agent can `POST` whatever it scraped to an arbitrary public host" is the larger threat, and it is what the gate is for.
 
@@ -462,6 +464,9 @@ These are named explicitly so they don't get silently assumed during implementat
 | 28 | `web.fetch` sandbox venue uses **curl, else busybox `wget`** — never Python | web.fetch is a language-agnostic capability; tying it to the Python runtime would be wrong (Python is just our first language) |
 | 29 | Split phase 6 → **6a** (sandbox venue + audit, no exfil hole) and **6b** (controller venue + SSRF DNS floor + gating + rewrites + approval) | Land the safe, useful mechanism first; the security-critical policy layer is its own focused phase |
 | 30 | Audit log = controller-side append-only JSONL per `sandbox_id`; `{ts,id,type,url,method,venue,status_code,body_size,body_sha256,outcome}` | Popo's copy is authoritative (§3); closes the §10 OPEN item |
+| 31 | `approve <id>` grants **host scope** (`https://host/*`); `--remember` for a custom glob; URLs normalized to a path so host rules match bare URLs | One OK unblocks a whole site (practical); normalization avoids a re-submit staying held (bug found in 6b) |
+| 32 | Unlisted URL → **controller venue, gated** (held for approval); `deny` persists a deny rule checked before allow | The approval flow exists for exactly this; deny must stick across re-submits |
+| 33 | Controller SSRF floor blocks **private** too (Popo is outside the corp net), enforced at **dial** time; literal blocked-IP URLs refused up front for both venues | Rebinding-resistant; the floor sits underneath rewrites/allow rules (§6) |
 
 ---
 
@@ -475,7 +480,7 @@ These are named explicitly so they don't get silently assumed during implementat
 4. ✅ **`pip.install` Tier 0 (internal mirror, remote-exec)** — `internal/pkg` (manager-neutral types) + `internal/pip` (resolve via `--dry-run --report`, then per-package `--no-deps` install; tier=mirror + sha256) + `python.Locate`. `install pip <pkg>… --python <minor>` (sync) and the `pip.install` verb; `bootstrap` writes `pip.conf`. **Verified on Alpine/musl** vs PyPI: unversioned `requests` co-resolves 5 deps, each recorded; unknown package → `resolution_failed`. *(Tier 1 relay = phase 5, reuses the resolve stage.)*
 5. ✅ **`pip.install` Tier 1 (relay)** — `internal/pip/relay.go`: controller cross-platform `pip download` (operator's python3) → relay wheels via `RemoteFS` → offline `pip install --no-index --find-links --report` in-sandbox (tier=relay, hashed). `--tier auto|mirror|relay`; config `controller_python` + `pip.controller_index_url`. **Verified on Alpine/musl:** a C-extension (`markupsafe`) downloaded cross-platform on macOS imports and runs on the VM. *(Cross-platform-download risk spiked & resolved; sdist-only → Tier 2, parked v2.)*
 6a. ✅ **`web.fetch` — sandbox-exec venue + SSRF literal-IP floor + audit log** — `internal/webfetch` (curl/busybox-wget over exec, no Python; inline/blob body) + `internal/audit` (controller JSONL). `web fetch` CLI + the `web.fetch` verb. **Verified on Alpine/musl** (busybox wget HTTPS; large body → blob). *No exfil hole — sandbox's own egress only.*
-6b. `web.fetch` **controller venue** + SSRF DNS floor + **egress gating, fetch rewrites, `pending`/`approve --remember`/`deny` (§6.1, needs_clarification + re-submit)** — the policy layer that opens (gated) controller egress.
+6b. ✅ **`web.fetch` controller venue + egress gating (§6.1)** — `internal/egress` (rewrites, venue selection, allow/deny + pending stores) + `internal/webfetch` controller backend (`net/http`, SSRF-safe dial blocking private/link-local/metadata) + `pending`/`approve [--remember]`/`deny` + `serve --deny`. Audit gains `rewritten_url`+`decision`. **Verified on the VM:** rewrite re-venue (ungated), hold→approve→controller fetch, SSRF refusal, deny→egress_denied.
 7. `NANA.md`, polish, `sandbox_id` namespacing verification
 
 **v2 (demand-driven, see §0):** sub-agent router for `web.research` and Tier 2/3 fallbacks; Tier 2 build environment; `ExecFS` bulk-transfer protocol; true fleet multiplexing.

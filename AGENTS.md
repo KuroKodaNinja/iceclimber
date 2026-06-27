@@ -67,7 +67,13 @@ make sandbox-down     # tear it down
   body) + **SSRF literal-IP floor** + controller-side **audit log**
   (`internal/audit`). `web fetch` CLI + the verb. Verified on Alpine. No exfil
   hole (sandbox's own egress only).
-- **Phase 6b — next.** `web.fetch` **controller venue** + the SSRF DNS floor +
-  egress gating + fetch rewrites + `pending`/`approve`/`deny` (§6.1;
-  needs_clarification + re-submit). (Console-script shebang rewriting still
-  outstanding — fold in when pip console scripts first matter.)
+- **Phase 6b — done.** `web.fetch` **controller venue + egress gating**
+  (`internal/egress` + `internal/webfetch` controller backend): rewrites, venue
+  selection, SSRF-safe dial, allow/deny + pending stores, `pending`/`approve`/
+  `deny`, `serve --deny`. Verified on the VM (hold→approve→controller fetch,
+  SSRF block, deny).
+- **Phase 7 — next (v1 finale).** `NANA.md` — the sandbox-side skill doc
+  (abstract file/exec actions, counter-based polling, capability self-report,
+  "Popo is down" handling) so a real agent can be Nana turnkey. (Console-script
+  shebang rewriting still outstanding — fold in when pip console scripts first
+  matter.)
