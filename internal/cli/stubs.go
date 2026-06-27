@@ -13,10 +13,6 @@ import (
 func stubCommands() []*cobra.Command {
 	return []*cobra.Command{
 		leaf("status", "Heartbeat age, queue depth, cache size, recent requests", "phase: serve"),
-		parent("install", "Install Python or pip packages into the sandbox",
-			leaf("python", "Install a portable Python runtime", "phase: python.install"),
-			leaf("pip", "Install pip packages (tiered resolution)", "phase: pip.install"),
-		),
 		leaf("logs", "Tail the request/response/audit logs", "phase: web.fetch"),
 		leaf("pending", "List controller-venue fetches held for egress approval", "phase: web.fetch (§6.1)"),
 		leaf("approve", "Approve a held request (--remember to persist a rule)", "phase: web.fetch (§6.1)"),

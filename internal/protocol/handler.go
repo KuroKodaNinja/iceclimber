@@ -12,21 +12,16 @@ type Handler func(ctx context.Context, req Request) Response
 // Registry maps request types to handlers.
 type Registry map[string]Handler
 
-// DefaultRegistry returns the handlers built into Popo. version is reported by
-// ping. Phase 2 registers only ping; later phases add python.install etc.
-func DefaultRegistry(version string) Registry {
-	return Registry{
-		"ping": pingHandler(version),
-	}
-}
-
 type pingResult struct {
 	PongAt      time.Time `json:"pong_at"`
 	PopoVersion string    `json:"popo_version"`
 }
 
-func pingHandler(version string) Handler {
+// PingHandler answers ping with pong, reporting version (plan §4.1). The full
+// registry is assembled at the composition root (cli), which owns the deps the
+// heavier handlers need.
+func PingHandler(version string) Handler {
 	return func(_ context.Context, req Request) Response {
-		return ok(req.ID, pingResult{PongAt: time.Now().UTC(), PopoVersion: version})
+		return OK(req.ID, pingResult{PongAt: time.Now().UTC(), PopoVersion: version})
 	}
 }

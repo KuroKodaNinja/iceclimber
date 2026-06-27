@@ -22,7 +22,7 @@ func setup(t *testing.T) (context.Context, remotefs.FS, Tree, *Dispatcher) {
 	if err := EnsureTree(ctx, fs, tree); err != nil {
 		t.Fatalf("EnsureTree: %v", err)
 	}
-	return ctx, fs, tree, NewDispatcher(fs, tree, DefaultRegistry("9.9.9-test"))
+	return ctx, fs, tree, NewDispatcher(fs, tree, Registry{"ping": PingHandler("9.9.9-test")})
 }
 
 func request(id, typ string) []byte {

@@ -1,0 +1,28 @@
+package cli
+
+import (
+	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
+	"github.com/KuroKodaNinja/iceclimber/internal/python"
+)
+
+// newInstaller builds the Python installer from an open session.
+func newInstaller(sess *session) *python.Installer {
+	return python.NewInstaller(python.Config{
+		FS:       sess.fs,
+		Runner:   sess.runner,
+		Root:     sess.tree.Root,
+		OS:       sess.fp.OS,
+		Arch:     sess.fp.Arch,
+		Libc:     sess.fp.Libc.Family,
+		CacheDir: sess.cacheDir,
+	})
+}
+
+// buildRegistry assembles the handler set Popo serves (the composition root —
+// this is where heavier handlers get their dependencies, §9).
+func buildRegistry(sess *session) protocol.Registry {
+	return protocol.Registry{
+		"ping":           protocol.PingHandler(version),
+		"python.install": python.Handler(newInstaller(sess)),
+	}
+}

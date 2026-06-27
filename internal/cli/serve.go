@@ -61,5 +61,5 @@ func withDispatcher(ctx context.Context, cfg *config.Config, transport string, f
 		return err
 	}
 	defer sess.Close()
-	return fn(protocol.NewDispatcher(sess.fs, sess.tree, protocol.DefaultRegistry(version)))
+	return fn(protocol.NewDispatcher(sess.fs, sess.tree, buildRegistry(sess)))
 }

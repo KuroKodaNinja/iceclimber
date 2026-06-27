@@ -12,14 +12,16 @@ import (
 	"github.com/pkg/sftp"
 )
 
-// session bundles an open SSH connection, the chosen transport's FS, and the
-// resolved tree. Shared by bootstrap and serve.
+// session bundles an open SSH connection, the chosen transport's FS, the
+// resolved tree, and the sandbox fingerprint. Shared by bootstrap, serve, install.
 type session struct {
 	runner    *remote.SSHRunner
 	sftp      *sftp.Client // non-nil only for the SFTP transport
 	fs        remotefs.FS
 	tree      protocol.Tree
 	transport string // "sftp" or "exec" (the one actually selected)
+	fp        *probe.Fingerprint
+	cacheDir  string
 }
 
 // Close releases the SFTP client (if any) and the SSH connection.
@@ -46,13 +48,22 @@ func openSession(ctx context.Context, cfg *config.Config, transport string) (*se
 		return nil, fmt.Errorf("connect to sandbox %s: %w", cfg.SandboxID, err)
 	}
 
-	root, err := resolveRoot(ctx, r, cfg)
+	// Always fingerprint: install needs OS/arch/libc for the PBS triple even when
+	// remote_root is configured.
+	fp, err := probe.Run(ctx, r, probe.Options{RemoteRoot: cfg.RemoteRoot})
 	if err != nil {
 		_ = r.Close()
-		return nil, err
+		return nil, fmt.Errorf("probe sandbox %s: %w", cfg.SandboxID, err)
+	}
+	root := cfg.RemoteRoot
+	if root == "" {
+		if root = fp.FirstViableRoot(); root == "" {
+			_ = r.Close()
+			return nil, fmt.Errorf("no writable install root found; set remote_root in the config")
+		}
 	}
 
-	s := &session{runner: r, tree: protocol.Tree{Root: root}}
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"
@@ -74,21 +85,4 @@ func openSession(ctx context.Context, cfg *config.Config, transport string) (*se
 		return nil, fmt.Errorf("unknown transport %q (want auto|sftp|exec)", transport)
 	}
 	return s, nil
-}
-
-// resolveRoot uses the configured remote_root, else probes for the first
-// writable install-root candidate (§7).
-func resolveRoot(ctx context.Context, r remote.Runner, cfg *config.Config) (string, error) {
-	if cfg.RemoteRoot != "" {
-		return cfg.RemoteRoot, nil
-	}
-	fp, err := probe.Run(ctx, r, probe.Options{})
-	if err != nil {
-		return "", fmt.Errorf("probe for install root: %w", err)
-	}
-	root := fp.FirstViableRoot()
-	if root == "" {
-		return "", fmt.Errorf("no writable install root found; set remote_root in the config")
-	}
-	return root, nil
 }

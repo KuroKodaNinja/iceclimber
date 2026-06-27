@@ -35,6 +35,7 @@ func newRootCmd() *cobra.Command {
 		newConfigCmd(),
 		newBootstrapCmd(),
 		newServeCmd(),
+		newInstallCmd(),
 	)
 	root.AddCommand(stubCommands()...)
 	return root

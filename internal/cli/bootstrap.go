@@ -37,7 +37,7 @@ func newBootstrapCmd() *cobra.Command {
 			if err := protocol.EnsureTree(ctx, sess.fs, sess.tree); err != nil {
 				return err
 			}
-			disp := protocol.NewDispatcher(sess.fs, sess.tree, protocol.DefaultRegistry(version))
+			disp := protocol.NewDispatcher(sess.fs, sess.tree, buildRegistry(sess))
 			if err := disp.WriteHeartbeat(ctx); err != nil {
 				return err
 			}

@@ -51,11 +51,12 @@ type Clarification struct {
 	Question string `json:"question"`
 }
 
-// ok builds a successful response with result marshaled into Result.
-func ok(id string, result any) Response {
+// OK builds a successful response with result marshaled into Result. Exported
+// for handlers in other packages (e.g. python.install).
+func OK(id string, result any) Response {
 	raw, err := json.Marshal(result)
 	if err != nil {
-		return errf(id, "internal", "marshal result: %v", err)
+		return Errf(id, "internal", "marshal result: %v", err)
 	}
 	return Response{
 		SchemaVersion: SchemaVersion,
@@ -66,8 +67,8 @@ func ok(id string, result any) Response {
 	}
 }
 
-// errf builds an error response (Popo failed to service the request).
-func errf(id, code, format string, args ...any) Response {
+// Errf builds an error response (Popo failed to service the request).
+func Errf(id, code, format string, args ...any) Response {
 	return Response{
 		SchemaVersion: SchemaVersion,
 		ID:            id,

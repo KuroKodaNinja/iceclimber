@@ -150,11 +150,11 @@ func (d *Dispatcher) serviceCur(ctx context.Context, name string) error {
 func (d *Dispatcher) dispatch(ctx context.Context, name string, data []byte) Response {
 	var req Request
 	if err := json.Unmarshal(data, &req); err != nil {
-		return errf(idFromName(name), "malformed_request", "parse request: %v", err)
+		return Errf(idFromName(name), "malformed_request", "parse request: %v", err)
 	}
 	h, ok := d.registry[req.Type]
 	if !ok {
-		return errf(req.ID, "unknown_type", "no handler for request type %q", req.Type)
+		return Errf(req.ID, "unknown_type", "no handler for request type %q", req.Type)
 	}
 	return h(ctx, req)
 }
