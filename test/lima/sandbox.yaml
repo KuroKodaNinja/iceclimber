@@ -1,0 +1,33 @@
+# Lima template for the iceclimber functional-test sandbox.
+#
+# A minimal Alpine box: musl libc + BusyBox userland. This is intentional — it
+# stresses iceclimber's musl libc detection and its "POSIX sh only, no GNU-only
+# flags" discipline harder than any glibc/coreutils distro would.
+#
+# Usage (via the Makefile):
+#   make sandbox-up      # limactl start --name iceclimber-sandbox test/lima/sandbox.yaml
+#   make test-functional
+#   make sandbox-down
+minimumLimaVersion: 2.0.0
+
+# Alpine disk images (qemu + vz variants; Lima picks the one matching vmType/arch).
+base:
+- template:_images/alpine-3.23
+
+# Apple Virtualization.framework — fast, no QEMU dependency on Apple Silicon.
+# Fall back to "qemu" (requires the qemu package) if vz misbehaves.
+vmType: vz
+
+cpus: 1
+memory: 1GiB
+disk: 5GiB
+
+# iceclimber installs nothing of its own into the guest at provision time; the
+# built-in containerd installer isn't supported on Alpine anyway.
+containerd:
+  system: false
+  user: false
+
+# No host mounts. The sandbox needs none, and omitting them keeps boot fast and
+# the guest closer to a real locked-down sandbox (no host filesystem leaking in).
+mounts: []
