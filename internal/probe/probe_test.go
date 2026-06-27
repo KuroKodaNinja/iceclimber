@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 
@@ -105,21 +106,6 @@ func TestParseKV(t *testing.T) {
 	}
 }
 
-func TestShellQuote(t *testing.T) {
-	tests := []struct {
-		in   string
-		want string
-	}{
-		{"/home/agent/.iceclimber", `'/home/agent/.iceclimber'`},
-		{"/has 'quote'", `'/has '\''quote'\'''`},
-	}
-	for _, tt := range tests {
-		if got := shellQuote(tt.in); got != tt.want {
-			t.Errorf("shellQuote(%q) = %q, want %q", tt.in, got, tt.want)
-		}
-	}
-}
-
 // fakeRunner routes commands to canned outputs by matching on their content,
 // mocking at the remote.Runner boundary.
 type fakeRunner struct {
@@ -128,13 +114,13 @@ type fakeRunner struct {
 	tree     bool
 }
 
-func (f *fakeRunner) Run(_ context.Context, cmd string) (remote.Result, error) {
+func (f *fakeRunner) Run(_ context.Context, cmd string, _ io.Reader) (remote.Result, error) {
 	switch {
 	case strings.Contains(cmd, "uname -s"):
 		return remote.Result{Stdout: []byte(f.system)}, nil
 	case strings.Contains(cmd, ".iceclimber-writetest"):
 		for path, ok := range f.writable {
-			if strings.Contains(cmd, shellQuote(path)) {
+			if strings.Contains(cmd, remote.ShellQuote(path)) {
 				write := "fail"
 				if ok {
 					write = "ok"

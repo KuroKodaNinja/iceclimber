@@ -3,7 +3,10 @@
 // the boundary that probe (and later the dispatcher) are tested against.
 package remote
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 // Result is the outcome of a single remote command. ExitCode carries the
 // command's own status; a non-zero ExitCode is NOT an error — probe relies on
@@ -18,8 +21,10 @@ type Result struct {
 // Runner executes commands on the sandbox host. It is intentionally tiny so it
 // can be faked at the boundary in tests.
 type Runner interface {
-	// Run executes cmd via a fresh non-interactive shell session.
-	Run(ctx context.Context, cmd string) (Result, error)
+	// Run executes cmd via a fresh non-interactive shell session. If stdin is
+	// non-nil it is streamed to the command's standard input (used by ExecFS to
+	// pipe file bytes into `cat > path` without base64).
+	Run(ctx context.Context, cmd string, stdin io.Reader) (Result, error)
 	// Close releases the underlying connection.
 	Close() error
 }

@@ -71,7 +71,7 @@ echo "GLIBC=$(getconf GNU_LIBC_VERSION 2>/dev/null)"`
 
 // Run fingerprints the host.
 func Run(ctx context.Context, r remote.Runner, opts Options) (*Fingerprint, error) {
-	res, err := r.Run(ctx, systemScript)
+	res, err := r.Run(ctx, systemScript, nil)
 	if err != nil {
 		return nil, fmt.Errorf("probe system info: %w", err)
 	}
@@ -171,7 +171,7 @@ func parseGlibcVersion(glibc, ldd string) string {
 
 func probeRoot(ctx context.Context, r remote.Runner, root string) (RootInfo, error) {
 	info := RootInfo{Path: root}
-	q := shellQuote(root)
+	q := remote.ShellQuote(root)
 	script := `r=` + q + `
 mkdir -p "$r" 2>/dev/null || { echo "MKDIR=fail"; exit 0; }
 echo "MKDIR=ok"
@@ -179,7 +179,7 @@ echo "DF=$(df -Pk "$r" 2>/dev/null | tail -n1)"
 t="$r/.iceclimber-writetest"
 if printf %s ok > "$t" 2>/dev/null && [ "$(cat "$t" 2>/dev/null)" = ok ]; then echo "WRITE=ok"; else echo "WRITE=fail"; fi
 rm -f "$t" 2>/dev/null`
-	res, err := r.Run(ctx, script)
+	res, err := r.Run(ctx, script, nil)
 	if err != nil {
 		return info, err
 	}
@@ -191,9 +191,9 @@ rm -f "$t" 2>/dev/null`
 }
 
 func detectExistingTree(ctx context.Context, r remote.Runner, root string) (bool, error) {
-	q := shellQuote(root)
+	q := remote.ShellQuote(root)
 	script := `if [ -e ` + q + `/protocol ] || [ -e ` + q + `/state/manifest.json ]; then echo "EXISTS=yes"; else echo "EXISTS=no"; fi`
-	res, err := r.Run(ctx, script)
+	res, err := r.Run(ctx, script, nil)
 	if err != nil {
 		return false, err
 	}
@@ -241,12 +241,6 @@ func parseKV(out string) map[string]string {
 		m[line[:i]] = strings.TrimSpace(line[i+1:])
 	}
 	return m
-}
-
-// shellQuote single-quotes s for safe interpolation into a POSIX sh command.
-// Install roots are operator-controlled, but quoting them is cheap insurance.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func containsAny(s string, subs ...string) bool {

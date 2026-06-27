@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -66,8 +68,9 @@ func Dial(ctx context.Context, cfg DialConfig) (*SSHRunner, error) {
 }
 
 // Run executes cmd in a fresh non-interactive session. No pty is requested — a
-// clean byte stream is required for the raw transfers added later (§6).
-func (s *SSHRunner) Run(ctx context.Context, cmd string) (Result, error) {
+// clean byte stream is required for the raw transfers ExecFS relies on (§6).
+// When stdin is non-nil it is streamed to the command's standard input.
+func (s *SSHRunner) Run(ctx context.Context, cmd string, stdin io.Reader) (Result, error) {
 	session, err := s.client.NewSession()
 	if err != nil {
 		return Result{}, fmt.Errorf("open session: %w", err)
@@ -77,6 +80,9 @@ func (s *SSHRunner) Run(ctx context.Context, cmd string) (Result, error) {
 	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout
 	session.Stderr = &stderr
+	if stdin != nil {
+		session.Stdin = stdin
+	}
 
 	done := make(chan error, 1)
 	go func() { done <- session.Run(cmd) }()
@@ -102,6 +108,13 @@ func (s *SSHRunner) Run(ctx context.Context, cmd string) (Result, error) {
 // Close closes the underlying SSH connection.
 func (s *SSHRunner) Close() error {
 	return s.client.Close()
+}
+
+// NewSFTP opens an SFTP client over the same SSH connection. The caller owns the
+// returned client and must Close it. Fails when the server's SFTP subsystem is
+// unavailable — the signal to fall back to ExecFS (§6).
+func (s *SSHRunner) NewSFTP() (*sftp.Client, error) {
+	return sftp.NewClient(s.client)
 }
 
 func authMethods(identityFile string) ([]ssh.AuthMethod, error) {
