@@ -108,6 +108,12 @@ ssh:
   known_hosts: %s
 remote_root: %s
 audit_log: %s
+network:
+  allowed_domains:
+    - pattern: "example.com"
+      reachable_from: sandbox
+    - pattern: "www.rfc-editor.org"
+      reachable_from: sandbox
 `, sandboxName, sb.Host, sb.Port, sb.User, sb.IdentityFile, sb.KnownHosts, root, auditLog)
 	p := filepath.Join(t.TempDir(), "iceclimber.yaml")
 	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
