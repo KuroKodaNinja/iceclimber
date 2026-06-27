@@ -24,9 +24,10 @@ Build and run a small program that prints today's xkcd comic.
 3. Through Popo, **fetch** the JSON at `https://xkcd.com/info.0.json` (you can't
    reach it directly — Popo will, on its own network). Save the body to
    `{{ROOT}}/work/comic.json`.
-   - If the fetch comes back asking for approval (`needs_clarification`), an
-     operator may need to approve it on the Popo side; wait briefly and re-submit
-     the same request, following NANA.md.
+   - If the fetch comes back `needs_clarification`, an operator must approve it on
+     the Popo side. Relay the request, and once it's approved re-submit as a
+     **new request with a new id** for the same URL (per NANA.md — the original id
+     already has a response and will not be re-serviced).
 4. Write a Python program at `{{ROOT}}/work/comics.py` that reads
    `{{ROOT}}/work/comic.json` and uses the `rich` library to print the comic's
    **number** (`num`) and **title** (`title`) inside a `rich.panel.Panel`.

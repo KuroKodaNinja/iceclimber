@@ -13,10 +13,14 @@ set -euo pipefail
 
 DEMO="${1:-iceclimber-demo}"
 ROOT="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"
-PY="$ROOT/runtimes/python/3.12/bin/python3"
 WORK="$ROOT/work"
 
 fail() { echo "DEMO VERIFY: FAIL — $1" >&2; exit 1; }
+
+# Discover the installed interpreter — the runtime dir is named for the resolved
+# version + platform (e.g. 3.12.13-aarch64-musl), not the requested "3.12".
+PY="$(limactl shell "$DEMO" -- sh -lc "ls $ROOT/runtimes/python/*/bin/python3 2>/dev/null | head -1")"
+[ -n "$PY" ] || fail "no installed Python under $ROOT/runtimes/python (did python.install run?)"
 
 # 1. The fetched payload.
 json="$(limactl shell "$DEMO" -- cat "$WORK/comic.json" 2>/dev/null)" \

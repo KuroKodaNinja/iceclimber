@@ -13,7 +13,7 @@ BIN         := iceclimber
 
 .PHONY: build fmt vet test test-functional e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
 	demo-up demo-down demo-status demo-firewall demo-firewall-down demo-shell \
-	demo-config demo-bootstrap demo-agent demo-verify clean
+	demo-config demo-bootstrap demo-agent demo-verify demo-reset clean
 
 build:
 	go build -o $(BIN) .
@@ -106,6 +106,18 @@ demo-agent:
 # Check the agent's program renders the data it fetched through Popo.
 demo-verify:
 	@bash test/lima/demo-verify.sh $(DEMO)
+
+# Clear the protocol maildir + work dir for a fresh agent pass. Keeps the
+# installed runtimes (so re-runs are fast) and any egress approvals. Use this
+# between a headless run that was held at the gate and the approved re-run —
+# the maildir dedup won't re-service an id that already has a response.
+demo-reset:
+	@root=$$(limactl shell $(DEMO) -- sh -lc 'echo $$HOME/iceclimber-demo'); \
+	 limactl shell $(DEMO) -- sh -c "rm -f \
+	   $$root/protocol/outbox/new/* $$root/protocol/outbox/cur/* $$root/protocol/outbox/tmp/* \
+	   $$root/protocol/inbox/new/*  $$root/protocol/inbox/cur/*  $$root/protocol/inbox/tmp/* \
+	   $$root/work/*"; \
+	 echo "demo: maildir + work cleared (runtimes + approvals kept)"
 
 clean:
 	rm -f $(BIN)

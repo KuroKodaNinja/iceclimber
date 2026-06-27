@@ -69,30 +69,44 @@ make demo-shell
 
 Leave it running. This is the only thing the sandbox can reach besides its own API.
 
-### 4. Terminal B — launch the agent (host)
+### 4. Terminal B — launch the agent, and watch the gate (host)
 
 ```sh
 make demo-agent       # runs Claude *inside* the VM, on the task in test/demo/TASK.md
 ```
 
-Watch both terminals. The agent reads `NANA.md`, then drives the maildir to:
-install Python 3.12, install `rich`, and **fetch `https://xkcd.com/info.0.json`**
-— each one serviced by Popo in Terminal A, because the agent can reach none of
-them directly.
+Watch both terminals. The agent reads `NANA.md`, then drives the maildir to
+install Python 3.12 and `rich` — each serviced by Popo in Terminal A, because the
+agent can reach neither directly. Then it tries to **fetch
+`https://xkcd.com/info.0.json`**, which goes out through *Popo's* network (the
+controller venue) and is **gated**. The fetch is held (`needs_clarification`), and
+because this is a one-shot headless run, the agent prints the exact
+`iceclimber approve …` command and **stops**.
 
-### 5. Approve the agent's egress (the interesting moment)
+> That stop *is the gate working*: the agent cannot reach the network — not even
+> its requested URL — without your explicit approval.
 
-The xkcd fetch goes out through **Popo's** network (the controller venue), which
-is **gated**. You'll see the agent's request held (`needs_clarification`).
-Approve it from **Terminal A**:
+### 5. Approve, then complete the run
+
+From **Terminal A**, approve the held fetch:
 
 ```sh
 ./iceclimber pending --config iceclimber-demo.yaml          # shows the held fetch + its id
-./iceclimber approve <id> --config iceclimber-demo.yaml     # release it
+./iceclimber approve <id> --config iceclimber-demo.yaml     # persists a host allow rule
 ```
 
-The agent re-submits and the fetch returns. (Approve promptly — the agent retries
-with backoff.) Use `approve <id> --remember` to persist the allow rule.
+Then re-run the agent. Approvals persist, so this pass sails through the fetch and
+finishes the job:
+
+```sh
+make demo-reset       # clear the maildir for a clean pass (keeps runtimes + the approval)
+make demo-agent       # now allowed: the agent fetches, writes work/comics.py, and runs it
+```
+
+> Why `demo-reset`? A held request's id already has a response, and Popo's
+> effectively-once dedup won't re-service the same id. Clearing the maildir lets
+> the fresh pass start clean. (A continuously-running *interactive* agent would
+> instead re-submit under a **new id**, as `NANA.md` instructs.)
 
 ### 6. Verify
 
@@ -102,6 +116,15 @@ make demo-verify      # runs the agent's program; checks it renders the fetched 
 
 A `PASS` line means the program the agent built prints the comic number and title
 it obtained through Popo — Python, `rich`, and the data all bridged in.
+
+> **Prefer a hands-off run?** Pre-approve the host *before* launching, so the
+> single pass completes without stopping at the gate:
+> ```sh
+> ./iceclimber web fetch https://xkcd.com/info.0.json --config iceclimber-demo.yaml   # hold once
+> ./iceclimber approve "$(./iceclimber pending --config iceclimber-demo.yaml | awk 'NR==1{print $1}')" --config iceclimber-demo.yaml
+> make demo-reset && make demo-agent && make demo-verify
+> ```
+> This is exactly what the automated `make demo` does (see below).
 
 ### 7. Teardown
 

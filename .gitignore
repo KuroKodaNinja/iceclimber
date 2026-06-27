@@ -6,6 +6,9 @@
 /iceclimber-demo.yaml
 /.iceclimber-cache/
 
+# Demo subscription token (never commit; sourced at agent launch)
+/.demo-token.env
+
 # Go build/test artifacts
 *.test
 *.out
