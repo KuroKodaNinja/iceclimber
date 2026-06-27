@@ -33,4 +33,7 @@ type FS interface {
 	// Symlink creates a symbolic link at link pointing to target (PBS uses
 	// symlinks, e.g. bin/python3 -> python3.x).
 	Symlink(ctx context.Context, target, link string) error
+	// RemoveAll removes path and any children. It is idempotent: removing a
+	// path that is already absent is not an error (like os.RemoveAll / rm -rf).
+	RemoveAll(ctx context.Context, path string) error
 }

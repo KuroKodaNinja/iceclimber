@@ -324,7 +324,7 @@ Two implementations, chosen at session open based on whether the SFTP subsystem 
 
 A single conformance suite (`remotefstest.RunConformance`) runs against both — locally (host shell + in-process `net.Pipe` SFTP) **and** against the real Alpine VM over both SSH channels — asserting identical behavior (write/read roundtrip incl. NUL bytes, empty-directory handling, missing-path `ErrNotExist`, rename replace+source-gone). Nothing above this layer (probe, bootstrap, the dispatcher) ever knows which implementation is active.
 
-**`ExecFS` command palette (pinned, not allowed to grow ad hoc):** `sh`, `mkdir -p`, `cat`, `mv`, `rm`, `ls -1`, `wc -c`, `chmod` (octal), `ln -s`, shell redirection, `&&`. No GNU-specific flags, no `stat` (flags differ across GNU/BSD/busybox). `chmod`/`ln -s` were added in phase 3 for the executable bit + symlinks a relocatable interpreter needs (decision #19). A sandbox lacking even this set is out of scope — stated explicitly rather than discovered later.
+**`ExecFS` command palette (pinned, not allowed to grow ad hoc):** `sh`, `mkdir -p`, `cat`, `mv`, `rm -f`/`rm -rf`, `ls -1`, `wc -c`, `chmod` (octal), `ln -s`, shell redirection, `&&`. No GNU-specific flags, no `stat` (flags differ across GNU/BSD/busybox). `chmod`/`ln -s` were added in phase 3 for the executable bit + symlinks a relocatable interpreter needs (decision #19); `RemoveAll` (`rm -rf`) added in phase 5 (decision #27). A sandbox lacking even this set is out of scope — stated explicitly rather than discovered later.
 
 **Raw streaming over base64.** A non-pty exec channel is a clean byte stream — `cat > path` with content piped directly into the channel's stdin avoids ~33% base64 overhead. Never request a pty (ptys are what mangle bytes). Base64 kept in reserve only as a defensive fallback if some sandbox proves to mangle raw streams.
 
@@ -413,6 +413,8 @@ These are named explicitly so they don't get silently assumed during implementat
 
 - ~~`pending`/`approve`/`deny` trigger~~ — **resolved (§6.1):** approval gates **controller-venue egress** that survives rewriting, not "unlisted domains." `approve --remember` persists a rule.
 
+**Future refinement — generalized platform/target descriptor.** Tier-1 wheel tags (§5) currently derive a *generous* musllinux/manylinux superset from `arch`+libc-*family*. A language-agnostic improvement: capture `Platform{os, arch, libc{family, version}}` in the probe fingerprint (the gap today is the libc **version**) and have each package manager derive its own identifiers from it (pip tags, cargo `<arch>-unknown-linux-<musl|gnu>`, Go `GOOS/GOARCH`, npm `os/cpu/libc`) — optionally overridden by querying the sandbox's own toolchain (`pip debug`, `rustc --print cfg`) when present. The generous superset is correct meanwhile; build this with the second package manager (where the abstraction earns its keep).
+
 **Parked for v2 (§0) — preserved, not designed now:**
 
 - **Sub-agent loop** (`web.research`, Tier 2/3 fallbacks) — native Go against the Messages API with `web_search`; iteration/stopping criteria, prompt construction, partial-progress reporting all undesigned. See §4.5.
@@ -451,6 +453,7 @@ These are named explicitly so they don't get silently assumed during implementat
 | 24 | Tier 1 = controller cross-platform `pip download` → relay wheels via `RemoteFS` → offline `--no-index --find-links` install; tier=relay, sha256 from the wheels | The sandbox needs nothing; Popo's network does the fetch; the resolve→retrieve shape carries over (retrieval moves to the controller) |
 | 25 | Tier selection explicit: `--tier auto\|mirror\|relay` (auto = mirror if `index_url` set, else relay); no auto-fallback yet | Predictable for phase 5; Tier0→Tier1 auto-fallback is a later refinement |
 | 26 | Tier 1 requires `python3`+pip on the **controller** (operator's machine), validated with a clear error | The controller is operator-controlled (unlike the sandbox); a self-contained controller-PBS is deferred |
+| 27 | `RemoteFS` gains `RemoveAll` (recursive, idempotent — `rm -rf` / sftp recursive); Tier 1 uses it to clean its transient relayed-wheel dir | A generic delete primitive the contract was missing; closes the wheel-litter gap |
 
 ---
 

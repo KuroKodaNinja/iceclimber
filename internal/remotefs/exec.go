@@ -76,6 +76,12 @@ func (e *ExecFS) Symlink(ctx context.Context, target, link string) error {
 	return e.check("symlink", link, res, err)
 }
 
+func (e *ExecFS) RemoveAll(ctx context.Context, path string) error {
+	// rm -rf is idempotent: exit 0 even when the path is absent.
+	res, err := e.r.Run(ctx, "rm -rf "+remote.ShellQuote(path), nil)
+	return e.check("remove", path, res, err)
+}
+
 func (e *ExecFS) check(op, path string, res remote.Result, err error) error {
 	if err != nil {
 		return fmt.Errorf("execfs %s %s: %w", op, path, err)

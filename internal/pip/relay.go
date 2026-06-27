@@ -56,6 +56,7 @@ func (m *Manager) RelayInstall(ctx context.Context, specs []pkg.Spec, minor stri
 	if err := m.cfg.FS.Mkdir(ctx, sandboxDir); err != nil {
 		return pkg.Outcome{}, fmt.Errorf("create sandbox wheel dir: %w", err)
 	}
+	defer func() { _ = m.cfg.FS.RemoveAll(ctx, sandboxDir) }() // relayed wheels are transient
 	hashes := map[string]string{}
 	for _, w := range wheels {
 		data, err := os.ReadFile(w)

@@ -2,9 +2,12 @@ package remotefs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"sort"
 
 	"github.com/pkg/sftp"
@@ -107,6 +110,44 @@ func (s *SFTPFS) Symlink(ctx context.Context, target, link string) error {
 	}
 	if err := s.c.Symlink(target, link); err != nil {
 		return fmt.Errorf("sftpfs symlink %s: %w", link, err)
+	}
+	return nil
+}
+
+func (s *SFTPFS) RemoveAll(ctx context.Context, p string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.removeAll(p)
+}
+
+// removeAll deletes p recursively, idempotent on a missing path. (Lstat so a
+// symlink is removed as a link, not followed.)
+func (s *SFTPFS) removeAll(p string) error {
+	fi, err := s.c.Lstat(p)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("sftpfs remove %s: %w", p, err)
+	}
+	if !fi.IsDir() {
+		if err := s.c.Remove(p); err != nil {
+			return fmt.Errorf("sftpfs remove %s: %w", p, err)
+		}
+		return nil
+	}
+	entries, err := s.c.ReadDir(p)
+	if err != nil {
+		return fmt.Errorf("sftpfs remove %s: %w", p, err)
+	}
+	for _, e := range entries {
+		if err := s.removeAll(path.Join(p, e.Name())); err != nil {
+			return err
+		}
+	}
+	if err := s.c.RemoveDirectory(p); err != nil {
+		return fmt.Errorf("sftpfs rmdir %s: %w", p, err)
 	}
 	return nil
 }

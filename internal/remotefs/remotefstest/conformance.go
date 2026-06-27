@@ -126,6 +126,29 @@ func RunConformance(t *testing.T, newFS NewFS) {
 			t.Errorf("through-link content = %q, want payload", got)
 		}
 	})
+
+	t.Run("removeall_file_dir_and_missing", func(t *testing.T) {
+		rfs, base := newFS(t)
+		// A file.
+		f := base + "/f"
+		mustOK(t, rfs.WriteFile(ctx, f, []byte("x")))
+		mustOK(t, rfs.RemoveAll(ctx, f))
+		if _, err := rfs.ReadFile(ctx, f); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("file present after RemoveAll: %v", err)
+		}
+		// A directory with contents (recursive).
+		d := base + "/d"
+		mustOK(t, rfs.Mkdir(ctx, d))
+		mustOK(t, rfs.WriteFile(ctx, d+"/inner", []byte("y")))
+		mustOK(t, rfs.RemoveAll(ctx, d))
+		if _, err := rfs.List(ctx, d); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("dir present after RemoveAll: %v", err)
+		}
+		// Missing path is idempotent — no error.
+		if err := rfs.RemoveAll(ctx, base+"/nope"); err != nil {
+			t.Errorf("RemoveAll of a missing path = %v, want nil", err)
+		}
+	})
 }
 
 func mustOK(t *testing.T, err error) {
