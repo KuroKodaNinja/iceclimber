@@ -300,23 +300,27 @@ This is the concrete trigger §10 flagged as missing: **approval gates controlle
 
 **Per-verb kill switch (coarse control).** `serve --deny web.fetch` disables the verb entirely. The verb allowlist Popo serves *is* the security boundary: any file in `outbox/new` is treated as fully operator-authorized (file presence is the only authentication — acceptable for a single-operator laptop tool, stated explicitly so it isn't assumed otherwise). The SSRF floor sits underneath everything and no rewrite or allow rule can reach a link-local/metadata target.
 
-### Transport abstraction: `RemoteFS`
+### Transport abstraction: `RemoteFS` — *implemented (phase 2)*
 
 ```go
-type RemoteFS interface {
-    WriteAtomic(dir, filename string, data io.Reader) error // tmp-write + rename, one call
-    List(dir string) ([]string, error)
-    ReadFile(path string) ([]byte, error)
-    Mkdir(path string) error
+// internal/remotefs — all paths absolute; missing path -> errors.Is(fs.ErrNotExist)
+type FS interface {
+    Mkdir(ctx, path string) error            // mkdir -p / MkdirAll
+    WriteFile(ctx, path string, data []byte) error
+    ReadFile(ctx, path string) ([]byte, error)
+    List(ctx, dir string) ([]string, error)   // sorted basenames; empty dir -> ([],nil)
+    Rename(ctx, old, new string) error          // POSIX replace semantics
 }
 ```
 
-Two implementations, chosen once during bootstrap Phase 0 based on whether the SFTP subsystem is actually available (it's sometimes disabled even when exec works):
+*Refined from the original `WriteAtomic(dir,filename,io.Reader)` sketch (decision #16):* the FS exposes primitive `WriteFile` + `Rename`, and the **maildir layer composes atomic delivery** (write to `tmp/`, rename into `new/`) so readers of `new/` never see a partial file. `data` is `[]byte` for now; a streaming `io.Reader` variant arrives with blobs (phase 3+).
 
-- **`SFTPFS`** — the fast path.
+Two implementations, chosen at session open based on whether the SFTP subsystem is actually available (it's sometimes disabled even when exec works); `--transport auto|sftp|exec` overrides (the override exists so the functional suite can exercise ExecFS even where SFTP works):
+
+- **`SFTPFS`** — the fast path (`pkg/sftp`; `PosixRename` for atomic replace).
 - **`ExecFS`** — built from day one (decided in review, not deferred), for sandboxes with the SFTP subsystem disabled.
 
-A single conformance test suite runs against both implementations and asserts identical behavior (atomicity, empty-directory handling, missing-path errors) — that's what proves the abstraction is real rather than leaky. Nothing above this layer (probe, bootstrap, the dispatcher) ever knows which implementation is active.
+A single conformance suite (`remotefstest.RunConformance`) runs against both — locally (host shell + in-process `net.Pipe` SFTP) **and** against the real Alpine VM over both SSH channels — asserting identical behavior (write/read roundtrip incl. NUL bytes, empty-directory handling, missing-path `ErrNotExist`, rename replace+source-gone). Nothing above this layer (probe, bootstrap, the dispatcher) ever knows which implementation is active.
 
 **`ExecFS` command palette (pinned, not allowed to grow ad hoc):** `sh`, `mkdir -p`, `cat`, `mv`, `rm`, `ls -1`, `wc -c`, shell redirection, `&&`. No GNU-specific flags, no `stat` (flags differ across GNU/BSD/busybox). A sandbox lacking even this set is out of scope — stated explicitly rather than discovered later.
 
@@ -434,6 +438,8 @@ These are named explicitly so they don't get silently assumed during implementat
 | 13 | At-least-once delivery, deduped by `id` to effectively-once; `cur/` swept on `serve` start; non-idempotent (`web.fetch` non-GET) recovered requests fail rather than auto-retry | Transport can drop/double-deliver; replaying a POST is unsafe |
 | 14 | `capabilities.json` trimmed to `has_exec` + `has_file_write` | Drop fields nothing consumes (`has_network_tools`, `shell_hint`); re-add when a consumer exists (§4.6) |
 | 15 | Stack: Go 1.26, cobra CLI, SSH host-key verification via known_hosts (no `InsecureIgnoreHostKey`) | Idiomatic Go CLI; secure-by-default transport (washu security floor) |
+| 16 | `RemoteFS` is `WriteFile`+`Rename` primitives; atomic delivery composed in the maildir layer (not a `WriteAtomic` FS method) | Keeps `new/` partial-free via `tmp/`→`new/` rename; simpler FS contract proven identical across both transports |
+| 17 | Transport auto-selected (SFTP, else Exec) with `--transport` override | Auto for real use; override lets the conformance/E2E suite exercise ExecFS even where SFTP works |
 
 ---
 
@@ -442,7 +448,7 @@ These are named explicitly so they don't get silently assumed during implementat
 **v1:**
 
 1. ✅ **CLI skeleton + probe (fingerprint only, no installs)** — cobra surface (all §9 verbs present; unbuilt ones stub with their phase label), `config`/`init` real, `remote.Runner` SSH boundary (known_hosts-verified, configurable path), `probe` fingerprints OS/arch/libc(multi-signal confidence)/root-viability(real write tests)/existing-tree. Unit-tested at the Runner boundary **and verified end-to-end against a real Alpine (musl/BusyBox) sandbox** (see Testing strategy below) — probe's POSIX-sh commands and musl detection are proven on real BusyBox.
-2. Maildir protocol end-to-end with `ping`/`pong`, `RemoteFS` with both implementations + conformance tests; delivery semantics (`id` dedup, `cur/` recovery sweep, §4)
+2. ✅ **Maildir protocol end-to-end with `ping`/`pong`, `RemoteFS` (both implementations) + conformance tests; delivery semantics** — `internal/remotefs` (SFTPFS + ExecFS, conformance at both layers), `internal/protocol` (envelope, `tmp/new/cur` maildir with atomic Deliver/PickUp, ULID names, Dispatcher with `id` dedup + `cur/` recovery sweep + counter heartbeat), real `serve --once`/`serve` and minimal `bootstrap` (tree + heartbeat + §7 smoke test). **Verified E2E on Alpine over both transports** — stdin-over-exec and BusyBox `mv` proven on real hardware. *(Deferred to later phases: `.popo.lock` contention, blob streaming, full re-bootstrap UX.)*
 3. `python.install` via python-build-standalone, absolute-path contract (SFTP required for the push, §6); shebang handling (§5)
 4. `pip.install` Tier 0 (internal mirror, remote-exec) — the common case
 5. `pip.install` Tier 1 (relay) for the offline/non-mirrored case — spike cross-platform wheel download first (§5)

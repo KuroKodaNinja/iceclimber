@@ -45,5 +45,9 @@ make sandbox-down     # tear it down
 
 - **Phase 1 — done.** CLI skeleton + `probe` (fingerprint OS/arch/libc/root
   viability), verified end-to-end against Alpine.
-- **Phase 2 — next.** Maildir protocol + dual `RemoteFS` (SFTP/Exec) +
-  conformance suite + a `ping`/`pong` functional test.
+- **Phase 2 — done.** Maildir protocol + dual `RemoteFS` (`internal/remotefs`:
+  SFTP/Exec, conformance at both layers) + `internal/protocol` (envelope,
+  dispatcher with id-dedup/recovery/heartbeat, `ping`/`pong`), real `serve` and
+  minimal `bootstrap`. Verified E2E on Alpine over both transports.
+- **Phase 3 — next.** `python.install` via python-build-standalone (absolute-path
+  contract; watch the console-script shebang gotcha, plan §5).
