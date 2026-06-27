@@ -13,7 +13,9 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 const sandboxName = "iceclimber-sandbox"
@@ -27,7 +29,7 @@ type sandboxConn struct {
 	Port         int
 	User         string
 	IdentityFile string
-	KnownHosts   string // temp file populated by ssh-keyscan
+	KnownHosts   string // temp file populated once by ssh-keyscan
 }
 
 type limaJSON struct {
@@ -36,23 +38,43 @@ type limaJSON struct {
 	SSHLocalPort int    `json:"sshLocalPort"`
 }
 
+// The sandbox is discovered (and its host key scanned) exactly once per run: the
+// VM's key is stable for its lifetime, and re-scanning on every test caused
+// ssh-keyscan to fail intermittently under the suite's connection churn.
+var (
+	sandboxOnce sync.Once
+	sandboxInfo sandboxConn
+	sandboxSkip string
+	sandboxErr  error
+)
+
 // requireSandbox returns connection details for the running Lima sandbox, or
-// skips the test with an actionable message when it isn't available. This is
-// what keeps the functional suite reuse-friendly: boot the VM once, run often.
+// skips the test with an actionable message when it isn't available.
 func requireSandbox(t *testing.T) sandboxConn {
 	t.Helper()
+	sandboxOnce.Do(func() { sandboxInfo, sandboxSkip, sandboxErr = discoverSandbox() })
+	if sandboxErr != nil {
+		t.Fatalf("sandbox setup: %v", sandboxErr)
+	}
+	if sandboxSkip != "" {
+		t.Skip(sandboxSkip)
+	}
+	return sandboxInfo
+}
+
+func discoverSandbox() (sandboxConn, string, error) {
 	if _, err := exec.LookPath("limactl"); err != nil {
-		t.Skip("limactl not found; install Lima and run `make sandbox-up`")
+		return sandboxConn{}, "limactl not found; install Lima and run `make sandbox-up`", nil
 	}
 	inst, err := limaInstance(sandboxName)
 	if err != nil {
-		t.Skipf("sandbox %q not found (%v); run `make sandbox-up`", sandboxName, err)
+		return sandboxConn{}, fmt.Sprintf("sandbox %q not found (%v); run `make sandbox-up`", sandboxName, err), nil
 	}
 	if inst.Status != "Running" {
-		t.Skipf("sandbox %q is %q, not Running; run `make sandbox-up`", sandboxName, inst.Status)
+		return sandboxConn{}, fmt.Sprintf("sandbox %q is %q, not Running; run `make sandbox-up`", sandboxName, inst.Status), nil
 	}
 	if inst.SSHLocalPort == 0 {
-		t.Skipf("sandbox %q has no ssh port yet; is it still booting?", sandboxName)
+		return sandboxConn{}, fmt.Sprintf("sandbox %q has no ssh port yet; is it still booting?", sandboxName), nil
 	}
 
 	host := sshConfigField(inst.Dir, "Hostname")
@@ -71,13 +93,11 @@ func requireSandbox(t *testing.T) sandboxConn {
 		identity = filepath.Join(home, ".lima", "_config", "user")
 	}
 
-	return sandboxConn{
-		Host:         host,
-		Port:         inst.SSHLocalPort,
-		User:         usr,
-		IdentityFile: identity,
-		KnownHosts:   keyscan(t, host, inst.SSHLocalPort),
+	known, err := keyscanToFile(host, inst.SSHLocalPort)
+	if err != nil {
+		return sandboxConn{}, "", err
 	}
+	return sandboxConn{Host: host, Port: inst.SSHLocalPort, User: usr, IdentityFile: identity, KnownHosts: known}, "", nil
 }
 
 func limaInstance(name string) (limaJSON, error) {
@@ -95,7 +115,7 @@ func limaInstance(name string) (limaJSON, error) {
 }
 
 // sshConfigField reads a single value from the instance's generated ssh.config
-// (the first matching directive wins, matching ssh's own precedence).
+// (first matching directive wins, matching ssh's own precedence).
 func sshConfigField(dir, key string) string {
 	data, err := os.ReadFile(filepath.Join(dir, "ssh.config"))
 	if err != nil {
@@ -110,24 +130,31 @@ func sshConfigField(dir, key string) string {
 	return ""
 }
 
-// keyscan records the VM's current host key into a temp known_hosts file. Lima
-// regenerates host keys per VM, so we scan fresh each run rather than cache.
-func keyscan(t *testing.T, host string, port int) string {
-	t.Helper()
-	var out bytes.Buffer
-	cmd := exec.Command("ssh-keyscan", "-p", strconv.Itoa(port), host)
-	cmd.Stdout = &out // keys to stdout; progress noise goes to stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("ssh-keyscan %s:%d: %v", host, port, err)
+// keyscanToFile records the VM's host key into a temp known_hosts file, with a
+// few retries (ssh-keyscan can transiently fail under load). Called once per run.
+func keyscanToFile(host string, port int) (string, error) {
+	f, err := os.CreateTemp("", "iceclimber-known_hosts-*")
+	if err != nil {
+		return "", err
 	}
-	if out.Len() == 0 {
-		t.Fatalf("ssh-keyscan returned no host keys for %s:%d", host, port)
+	defer f.Close()
+
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		var out bytes.Buffer
+		cmd := exec.Command("ssh-keyscan", "-T", "10", "-p", strconv.Itoa(port), host)
+		cmd.Stdout = &out // keys to stdout; progress noise goes to stderr
+		err := cmd.Run()
+		if err == nil && out.Len() > 0 {
+			if _, werr := f.Write(out.Bytes()); werr != nil {
+				return "", werr
+			}
+			return f.Name(), nil
+		}
+		lastErr = fmt.Errorf("ssh-keyscan %s:%d: %v", host, port, err)
+		time.Sleep(500 * time.Millisecond)
 	}
-	path := filepath.Join(t.TempDir(), "known_hosts")
-	if err := os.WriteFile(path, out.Bytes(), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return path
+	return "", lastErr
 }
 
 // writeConfig writes a real iceclimber.yaml pointing at the sandbox.
