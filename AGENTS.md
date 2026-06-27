@@ -62,6 +62,12 @@ make sandbox-down     # tear it down
   controller cross-platform `pip download` → relay wheels via `RemoteFS` →
   offline install in-sandbox (tier=relay). `--tier auto|mirror|relay`. Verified on
   Alpine/musl with a C-extension wheel.
-- **Phase 6 — next.** `web.fetch` with venue routing + the SSRF floor + egress
-  gating/fetch-rewrites (§6.1) + the audit log. (Console-script shebang rewriting
-  is still outstanding — fold in when pip console scripts first matter.)
+- **Phase 6a — done.** `web.fetch` over the **sandbox-exec venue**
+  (`internal/webfetch`: curl/busybox-wget over exec, **no Python**; inline/blob
+  body) + **SSRF literal-IP floor** + controller-side **audit log**
+  (`internal/audit`). `web fetch` CLI + the verb. Verified on Alpine. No exfil
+  hole (sandbox's own egress only).
+- **Phase 6b — next.** `web.fetch` **controller venue** + the SSRF DNS floor +
+  egress gating + fetch rewrites + `pending`/`approve`/`deny` (§6.1;
+  needs_clarification + re-submit). (Console-script shebang rewriting still
+  outstanding — fold in when pip console scripts first matter.)

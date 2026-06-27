@@ -213,7 +213,12 @@ result: {
   "body_blob": "blobs/<sha256>"     // present otherwise
 }
 ```
-See §6 for venue selection logic.
+See §6 for venue selection logic. **Phase 6a (implemented):** the **sandbox-exec
+venue** — Popo runs curl, or busybox `wget`, *inside* the sandbox over the exec
+channel (no Python; web.fetch is language-agnostic). Body returns inline
+(utf8/base64) under 16 KB, else as `blobs/<sha256>`. The **controller venue** and
+its policy layer (SSRF DNS floor, egress gating, fetch rewrites, pending/approve/
+deny) are **phase 6b**.
 
 ### 4.5 `web.research` (sub-agent path) — `v2:` parked (§0)
 
@@ -265,7 +270,7 @@ Because Popo sits *outside* the corporate network and the sandbox sits *inside* 
 - **Controller-side**: Popo fetches from its own network. Right for general internet / public resources.
 - **Sandbox-side (remote-exec)**: Popo uses its existing SSH exec access to issue the fetch *from inside the sandbox's network position*, then relays the result back through the inbox file. Required for anything only reachable from where the sandbox sits (the internal mirror, internal docs, etc.) — and Popo can do this without Nana's own harness having any network tool, since Popo is driving the SSH exec channel directly.
 
-Once Python is installed, its stdlib doubles as the zero-dependency HTTP client for sandbox-side fetches — no dependency on `curl`/`wget` being present remotely.
+Sandbox-side fetches use **curl when present, else busybox `wget`** (which does HTTPS, `--header`, `-O`, and `-S` for the status line) — **not** Python (decision #28; web.fetch must not be tied to the Python runtime). A box with neither curl nor wget is reported clearly.
 
 ### 6.1 Egress gating & fetch rewrites (v1)
 
@@ -335,7 +340,7 @@ A single conformance suite (`remotefstest.RunConformance`) runs against both —
 ### Security floor (not configurable)
 
 - Hard block on link-local/metadata-range addresses and obvious internal-pivot targets, regardless of `unlisted_domain_policy`.
-- Every `web.fetch`/`web.research` call gets an append-only audit entry: URL, venue, status/size, timestamp. Bodies are hashed rather than stored in full where large/sensitive. **OPEN** — exact JSONL schema and retention policy.
+- Every `web.fetch`/`web.research` call gets an append-only audit entry: URL, venue, status/size, timestamp. Bodies are hashed rather than stored in full. *Resolved (phase 6a, decision #30):* **controller-side** JSONL (Popo's copy is authoritative, §3), one file per `sandbox_id`, schema `{ts, id, type, url, method, venue, status_code, body_size, body_sha256, outcome}`. Retention is unbounded for now (append-only); rotation is future work.
 
 ---
 
@@ -406,7 +411,7 @@ These are named explicitly so they don't get silently assumed during implementat
 **Still open *for v1* (must be designed before/within the build):**
 
 - **`NANA.md` content.** The actual skill document: written in terms of abstract actions (write file at path, read file at path, execute path with args) so it works regardless of whether Nana's harness exposes a shell, a constrained run-command tool, or just file read/write. Needs the polling/backoff schedule (§4.7, counter-based), the absolute-path contract, capability self-report instructions, and what to do if Popo appears to be down.
-- **Audit log schema** — exact JSONL shape, retention, what's hashed vs. stored in full. Must now also record fetch **rewrites** (original + rewritten URL) and **approval** outcomes (auto-allowed by rule / one-shot / persisted / denied), per §6.1.
+- ~~**Audit log schema**~~ — **resolved (phase 6a, §6 floor):** controller-side JSONL, `{ts, id, type, url, method, venue, status_code, body_size, body_sha256, outcome}`. Phase 6b extends entries with fetch **rewrites** (original + rewritten URL) and **approval** outcomes (auto-allowed / one-shot / persisted / denied), per §6.1.
 - **Approval persistence format** — the `approvals.json` allow-list shape: pattern syntax (shared with `fetch_rewrites` matching), and whether rules can expire. Small; nail down with the audit schema.
 
 **Resolved since last revision:**
@@ -454,6 +459,9 @@ These are named explicitly so they don't get silently assumed during implementat
 | 25 | Tier selection explicit: `--tier auto\|mirror\|relay` (auto = mirror if `index_url` set, else relay); no auto-fallback yet | Predictable for phase 5; Tier0→Tier1 auto-fallback is a later refinement |
 | 26 | Tier 1 requires `python3`+pip on the **controller** (operator's machine), validated with a clear error | The controller is operator-controlled (unlike the sandbox); a self-contained controller-PBS is deferred |
 | 27 | `RemoteFS` gains `RemoveAll` (recursive, idempotent — `rm -rf` / sftp recursive); Tier 1 uses it to clean its transient relayed-wheel dir | A generic delete primitive the contract was missing; closes the wheel-litter gap |
+| 28 | `web.fetch` sandbox venue uses **curl, else busybox `wget`** — never Python | web.fetch is a language-agnostic capability; tying it to the Python runtime would be wrong (Python is just our first language) |
+| 29 | Split phase 6 → **6a** (sandbox venue + audit, no exfil hole) and **6b** (controller venue + SSRF DNS floor + gating + rewrites + approval) | Land the safe, useful mechanism first; the security-critical policy layer is its own focused phase |
+| 30 | Audit log = controller-side append-only JSONL per `sandbox_id`; `{ts,id,type,url,method,venue,status_code,body_size,body_sha256,outcome}` | Popo's copy is authoritative (§3); closes the §10 OPEN item |
 
 ---
 
@@ -466,7 +474,8 @@ These are named explicitly so they don't get silently assumed during implementat
 3. ✅ **`python.install` via python-build-standalone** — `internal/python` resolves an exact PBS build (`latest-release.json` + `SHA256SUMS`, sha-verified, pinned), extracts with the Go stdlib, and pushes the tree over `RemoteFS` (either transport; `Chmod`+`Symlink` added) then runs `bin/python3` to verify. `install python <minor>` (sync) + the `python.install` verb. **Verified on Alpine/musl** (3.12.13 in ~6s over SFTP, idempotent). *(Shebang rewriting deferred to phase 4; optimized ExecFS bulk push stays v2.)*
 4. ✅ **`pip.install` Tier 0 (internal mirror, remote-exec)** — `internal/pkg` (manager-neutral types) + `internal/pip` (resolve via `--dry-run --report`, then per-package `--no-deps` install; tier=mirror + sha256) + `python.Locate`. `install pip <pkg>… --python <minor>` (sync) and the `pip.install` verb; `bootstrap` writes `pip.conf`. **Verified on Alpine/musl** vs PyPI: unversioned `requests` co-resolves 5 deps, each recorded; unknown package → `resolution_failed`. *(Tier 1 relay = phase 5, reuses the resolve stage.)*
 5. ✅ **`pip.install` Tier 1 (relay)** — `internal/pip/relay.go`: controller cross-platform `pip download` (operator's python3) → relay wheels via `RemoteFS` → offline `pip install --no-index --find-links --report` in-sandbox (tier=relay, hashed). `--tier auto|mirror|relay`; config `controller_python` + `pip.controller_index_url`. **Verified on Alpine/musl:** a C-extension (`markupsafe`) downloaded cross-platform on macOS imports and runs on the VM. *(Cross-platform-download risk spiked & resolved; sdist-only → Tier 2, parked v2.)*
-6. `web.fetch` with venue routing + SSRF floor + **egress gating, fetch rewrites, `pending`/`approve --remember`/`deny` (§6.1)** + audit log
+6a. ✅ **`web.fetch` — sandbox-exec venue + SSRF literal-IP floor + audit log** — `internal/webfetch` (curl/busybox-wget over exec, no Python; inline/blob body) + `internal/audit` (controller JSONL). `web fetch` CLI + the `web.fetch` verb. **Verified on Alpine/musl** (busybox wget HTTPS; large body → blob). *No exfil hole — sandbox's own egress only.*
+6b. `web.fetch` **controller venue** + SSRF DNS floor + **egress gating, fetch rewrites, `pending`/`approve --remember`/`deny` (§6.1, needs_clarification + re-submit)** — the policy layer that opens (gated) controller egress.
 7. `NANA.md`, polish, `sandbox_id` namespacing verification
 
 **v2 (demand-driven, see §0):** sub-agent router for `web.research` and Tier 2/3 fallbacks; Tier 2 build environment; `ExecFS` bulk-transfer protocol; true fleet multiplexing.
