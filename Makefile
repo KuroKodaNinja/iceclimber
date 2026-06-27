@@ -12,7 +12,8 @@ DEMO_TPL    := test/lima/demo.yaml
 BIN         := iceclimber
 
 .PHONY: build fmt vet test test-functional e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
-	demo-up demo-down demo-status demo-firewall demo-firewall-down demo-shell clean
+	demo-up demo-down demo-status demo-firewall demo-firewall-down demo-shell \
+	demo-config demo-bootstrap demo-agent demo-verify clean
 
 build:
 	go build -o $(BIN) .
@@ -86,6 +87,25 @@ demo-firewall-down:
 # Open an interactive shell inside the demo VM (the agent's view).
 demo-shell:
 	@limactl shell $(DEMO)
+
+# Write iceclimber-demo.yaml pointing at the demo VM, with remote_root pinned to
+# a predictable tree ($HOME/iceclimber-demo) so the agent brief can name paths.
+demo-config:
+	@root=$$(limactl shell $(DEMO) -- sh -lc 'echo $$HOME/iceclimber-demo'); \
+	 bash test/lima/gen-config.sh $(DEMO) iceclimber-demo.yaml $$root
+
+# Create the protocol tree + drop NANA.md in the demo VM.
+demo-bootstrap: build demo-config
+	./$(BIN) bootstrap --config iceclimber-demo.yaml
+
+# Launch the agent in the (air-gapped) demo VM. Needs CLAUDE_CODE_OAUTH_TOKEN
+# (subscription) and Popo serving in another terminal. See DEMO.md.
+demo-agent:
+	@bash test/lima/demo-agent.sh $(DEMO)
+
+# Check the agent's program renders the data it fetched through Popo.
+demo-verify:
+	@bash test/lima/demo-verify.sh $(DEMO)
 
 clean:
 	rm -f $(BIN)

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Generate an iceclimber.yaml pointing at the running Lima sandbox VM.
-# Usage: test/lima/gen-config.sh [instance-name] [output-path]
-# Invoked by `make sandbox-config`.
+# Usage: test/lima/gen-config.sh [instance-name] [output-path] [remote-root]
+# Invoked by `make sandbox-config` (2 args) and `make demo-config` (3 args).
 set -euo pipefail
 
 SBX="${1:-iceclimber-sandbox}"
 OUT="${2:-iceclimber.yaml}"
+ROOT="${3:-}"   # optional: pin remote_root so the tree path is predictable
 CFG="$HOME/.lima/$SBX/ssh.config"
 
 if [ ! -f "$CFG" ]; then
@@ -31,6 +32,9 @@ ssh:
   identity_file: $IDENT
   known_hosts: $KH
 EOF
+if [ -n "$ROOT" ]; then
+	echo "remote_root: $ROOT" >> "$OUT"
+fi
 
-echo "wrote $OUT  (sandbox $SBX, $USER_@127.0.0.1:$PORT)"
+echo "wrote $OUT  (sandbox $SBX, $USER_@127.0.0.1:$PORT${ROOT:+, root $ROOT})"
 echo "next:  ./iceclimber bootstrap   then   ./iceclimber serve"
