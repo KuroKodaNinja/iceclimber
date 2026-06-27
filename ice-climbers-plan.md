@@ -181,11 +181,12 @@ params: {}
 result: { "pong_at": "...", "popo_version": "0.1.0" }
 ```
 
-### 4.2 `python.install`
+### 4.2 `python.install` — *implemented (phase 3)*
 ```jsonc
 params: { "version": "3.12" }   // minor version; Popo pins the exact patch
-result: { "version": "3.12.6", "path": "/abs/.../bin/python3", "already_installed": false }
+result: { "version": "3.12.13", "path": "/abs/.../bin/python3", "already_installed": false }
 ```
+Popo resolves the exact patch from PBS's `latest-release.json` (tag + `asset_url_prefix`) and the release `SHA256SUMS` — picks the highest-patch `install_only` asset for the sandbox's `<arch>-unknown-linux-<gnu|musl>` triple, verifies its SHA256, and records the pinned version. The tree is extracted with the Go stdlib (no remote `tar`) and pushed over `RemoteFS` (either transport); `bin/python3` is then run over the exec channel to prove it executes (§2 boundary). Verified on Alpine/musl.
 
 ### 4.3 `pip.install` (batched)
 ```jsonc
@@ -248,7 +249,7 @@ Ordered by how much machinery each needs — always try the cheapest first:
 - **Tier 2 — build-on-controller fallback.** `v2:` parked (§0). Compiled extension, no matching wheel anywhere. Popo builds it in a container/VM matching the probed fingerprint, then drops into Tier 1's transfer mechanics. **OPEN** — exact container strategy. *v1 behavior: fail loudly ("no wheel anywhere; add it to your mirror"), don't build.*
 - **Tier 3 — sub-agent.** `v2:` parked (§0) — see §4.5. Genuinely ambiguous resolution, or recovery from a Tier 0–2 failure.
 
-Python itself is always relay-based (Tier 1-style transfer) — nothing exists in the sandbox yet that could pull it from anywhere, mirror or not. **v1 risk:** python-build-standalone is relocatable, but `pip`-installed console scripts bake an absolute shebang pointing at the install path. The absolute-path contract (§2) covers direct `bin/python3` invocation; any installed package's CLI entry point still needs shebang rewriting or `python3 -m <module>` invocation. Flag for phase 3.
+Python itself is always relay-based (Tier 1-style transfer) — nothing exists in the sandbox yet that could pull it from anywhere, mirror or not. *Implemented in phase 3.* **Shebang note (decision #20):** PBS's `bin/python3` is relocatable and runs by absolute path with no shebang reliance, so phase 3 needs no rewriting. `pip`-installed console scripts *do* bake an absolute shebang at the install path — that bites in **phase 4** (pip), where entry points get shebang rewriting or `python3 -m` invocation. Deferred there, not here.
 
 **Determinism note:** regardless of tier, the resolved package hash is always recorded in the response (§4.3) — "company-approved" doesn't mean unverified.
 
@@ -322,7 +323,7 @@ Two implementations, chosen at session open based on whether the SFTP subsystem 
 
 A single conformance suite (`remotefstest.RunConformance`) runs against both — locally (host shell + in-process `net.Pipe` SFTP) **and** against the real Alpine VM over both SSH channels — asserting identical behavior (write/read roundtrip incl. NUL bytes, empty-directory handling, missing-path `ErrNotExist`, rename replace+source-gone). Nothing above this layer (probe, bootstrap, the dispatcher) ever knows which implementation is active.
 
-**`ExecFS` command palette (pinned, not allowed to grow ad hoc):** `sh`, `mkdir -p`, `cat`, `mv`, `rm`, `ls -1`, `wc -c`, shell redirection, `&&`. No GNU-specific flags, no `stat` (flags differ across GNU/BSD/busybox). A sandbox lacking even this set is out of scope — stated explicitly rather than discovered later.
+**`ExecFS` command palette (pinned, not allowed to grow ad hoc):** `sh`, `mkdir -p`, `cat`, `mv`, `rm`, `ls -1`, `wc -c`, `chmod` (octal), `ln -s`, shell redirection, `&&`. No GNU-specific flags, no `stat` (flags differ across GNU/BSD/busybox). `chmod`/`ln -s` were added in phase 3 for the executable bit + symlinks a relocatable interpreter needs (decision #19). A sandbox lacking even this set is out of scope — stated explicitly rather than discovered later.
 
 **Raw streaming over base64.** A non-pty exec channel is a clean byte stream — `cat > path` with content piped directly into the channel's stdin avoids ~33% base64 overhead. Never request a pty (ptys are what mangle bytes). Base64 kept in reserve only as a defensive fallback if some sandbox proves to mangle raw streams.
 
@@ -440,6 +441,9 @@ These are named explicitly so they don't get silently assumed during implementat
 | 15 | Stack: Go 1.26, cobra CLI, SSH host-key verification via known_hosts (no `InsecureIgnoreHostKey`) | Idiomatic Go CLI; secure-by-default transport (washu security floor) |
 | 16 | `RemoteFS` is `WriteFile`+`Rename` primitives; atomic delivery composed in the maildir layer (not a `WriteAtomic` FS method) | Keeps `new/` partial-free via `tmp/`→`new/` rename; simpler FS contract proven identical across both transports |
 | 17 | Transport auto-selected (SFTP, else Exec) with `--transport` override | Auto for real use; override lets the conformance/E2E suite exercise ExecFS even where SFTP works |
+| 18 | `python.install` resolves via PBS `latest-release.json` + `SHA256SUMS`, sha-verified, recording the exact pinned patch | Low-maintenance vs an in-code version table; still deterministic per install (§4.2) |
+| 19 | `RemoteFS` gains `Chmod` + `Symlink`; ExecFS palette += `chmod`, `ln -s` | A relocatable interpreter needs an executable bit and symlinks (`bin/python3`→`python3.x`) |
+| 20 | python.install push is transport-agnostic (SFTP or ExecFS); shebang rewriting deferred to phase 4 | The abstraction already gives a uniform push; `bin/python3` runs by absolute path, so shebangs only bite once pip installs console scripts |
 
 ---
 
@@ -449,7 +453,7 @@ These are named explicitly so they don't get silently assumed during implementat
 
 1. ✅ **CLI skeleton + probe (fingerprint only, no installs)** — cobra surface (all §9 verbs present; unbuilt ones stub with their phase label), `config`/`init` real, `remote.Runner` SSH boundary (known_hosts-verified, configurable path), `probe` fingerprints OS/arch/libc(multi-signal confidence)/root-viability(real write tests)/existing-tree. Unit-tested at the Runner boundary **and verified end-to-end against a real Alpine (musl/BusyBox) sandbox** (see Testing strategy below) — probe's POSIX-sh commands and musl detection are proven on real BusyBox.
 2. ✅ **Maildir protocol end-to-end with `ping`/`pong`, `RemoteFS` (both implementations) + conformance tests; delivery semantics** — `internal/remotefs` (SFTPFS + ExecFS, conformance at both layers), `internal/protocol` (envelope, `tmp/new/cur` maildir with atomic Deliver/PickUp, ULID names, Dispatcher with `id` dedup + `cur/` recovery sweep + counter heartbeat), real `serve --once`/`serve` and minimal `bootstrap` (tree + heartbeat + §7 smoke test). **Verified E2E on Alpine over both transports** — stdin-over-exec and BusyBox `mv` proven on real hardware. *(Deferred to later phases: `.popo.lock` contention, blob streaming, full re-bootstrap UX.)*
-3. `python.install` via python-build-standalone, absolute-path contract (SFTP required for the push, §6); shebang handling (§5)
+3. ✅ **`python.install` via python-build-standalone** — `internal/python` resolves an exact PBS build (`latest-release.json` + `SHA256SUMS`, sha-verified, pinned), extracts with the Go stdlib, and pushes the tree over `RemoteFS` (either transport; `Chmod`+`Symlink` added) then runs `bin/python3` to verify. `install python <minor>` (sync) + the `python.install` verb. **Verified on Alpine/musl** (3.12.13 in ~6s over SFTP, idempotent). *(Shebang rewriting deferred to phase 4; optimized ExecFS bulk push stays v2.)*
 4. `pip.install` Tier 0 (internal mirror, remote-exec) — the common case
 5. `pip.install` Tier 1 (relay) for the offline/non-mirrored case — spike cross-platform wheel download first (§5)
 6. `web.fetch` with venue routing + SSRF floor + **egress gating, fetch rewrites, `pending`/`approve --remember`/`deny` (§6.1)** + audit log

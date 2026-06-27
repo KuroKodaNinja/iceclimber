@@ -49,5 +49,9 @@ make sandbox-down     # tear it down
   SFTP/Exec, conformance at both layers) + `internal/protocol` (envelope,
   dispatcher with id-dedup/recovery/heartbeat, `ping`/`pong`), real `serve` and
   minimal `bootstrap`. Verified E2E on Alpine over both transports.
-- **Phase 3 — next.** `python.install` via python-build-standalone (absolute-path
-  contract; watch the console-script shebang gotcha, plan §5).
+- **Phase 3 — done.** `python.install` via python-build-standalone
+  (`internal/python`): resolve+sha-verify, stdlib extract, transport-agnostic
+  push (`RemoteFS` gained `Chmod`/`Symlink`), exec-verify. `install python
+  <minor>` + the verb. Verified on Alpine/musl.
+- **Phase 4 — next.** `pip.install` Tier 0 (internal mirror, remote-exec) — the
+  common case. Console-script shebang rewriting lands here (plan §5).
