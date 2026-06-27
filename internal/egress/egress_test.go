@@ -94,6 +94,23 @@ func TestStorePendingRoundTrip(t *testing.T) {
 	}
 }
 
+// A host-level approval (https://host/*) must match a bare URL with no path
+// (https://host) after normalization — the bug found in 6b functional testing.
+func TestBareHostURLMatchesHostRule(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(filepath.Join(dir, "a.json"), filepath.Join(dir, "p.json"))
+	mustNil(t, store.AddAllow(HostGlob("https://example.com"))) // -> https://example.com/*
+	p := NewPolicy(nil, nil, "gate", store)
+
+	resolved, venue, _, err := p.Resolve("https://example.com")
+	if err != nil || venue != VenueController {
+		t.Fatalf("resolve = %q %q %v", resolved, venue, err)
+	}
+	if d := p.Decide(resolved); d != Allow {
+		t.Errorf("bare-host URL not allowed by host rule: %v (resolved %q)", d, resolved)
+	}
+}
+
 func TestHostGlob(t *testing.T) {
 	if g := HostGlob("https://docs.python.org/3/library/"); g != "https://docs.python.org/*" {
 		t.Errorf("HostGlob = %q", g)

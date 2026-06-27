@@ -61,6 +61,7 @@ func (p *Policy) Store() *Store { return p.store }
 // Resolve applies fetch rewrites then venue selection. It returns the
 // (possibly rewritten) URL, the venue, and whether a rewrite fired.
 func (p *Policy) Resolve(raw string) (url, venue string, rewritten bool, err error) {
+	raw = normalizeURL(raw)
 	for _, rw := range p.rewrites {
 		if nu, ok := applyRewrite(rw, raw); ok {
 			return nu, normVenue(rw.Venue), true, nil

@@ -56,6 +56,20 @@ func globMatch(pattern, s string) bool {
 	return true
 }
 
+// normalizeURL ensures the URL has a path so a host rule like
+// "https://host/*" matches a bare "https://host" (which has no path). Safe
+// against "https://host.evil.com" because the rule's prefix includes the slash.
+func normalizeURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	if u.Path == "" {
+		u.Path = "/"
+	}
+	return u.String()
+}
+
 func hostOf(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
