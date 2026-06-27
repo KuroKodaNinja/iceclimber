@@ -41,6 +41,7 @@ func newRootCmd() *cobra.Command {
 		newApproveCmd(),
 		newDenyCmd(),
 		newSkillCmd(),
+		newStatusCmd(),
 	)
 	root.AddCommand(stubCommands()...)
 	return root
