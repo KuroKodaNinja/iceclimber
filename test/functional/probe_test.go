@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/probe"
+	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 )
 
 func TestMain(m *testing.M) {
@@ -45,7 +46,9 @@ func buildBinary() (string, func(), error) {
 // fingerprints a real Alpine (musl/BusyBox) box correctly.
 func TestProbe_AlpineSandbox(t *testing.T) {
 	sb := requireSandbox(t)
-	cfg := writeConfig(t, sb)
+	// Point the existing-tree check at a guaranteed-fresh root so the false-case
+	// assertion is deterministic regardless of what else has bootstrapped the box.
+	cfg := writeConfigRoot(t, sb, "/tmp/iceclimber-probe-"+protocol.NewID())
 
 	out := runIceclimber(t, "probe", "--json", "--config", cfg)
 
