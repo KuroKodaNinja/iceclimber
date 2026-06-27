@@ -1,0 +1,13 @@
+# Compiled binary
+/iceclimber
+
+# Local operator config and caches (may contain host/path details)
+/iceclimber.yaml
+/.iceclimber-cache/
+
+# Go build/test artifacts
+*.test
+*.out
+
+# Local symlink to the global washu guidance kit (machine-specific)
+/.agents
