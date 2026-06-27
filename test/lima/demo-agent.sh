@@ -14,8 +14,12 @@ set -euo pipefail
 
 DEMO="${1:-iceclimber-demo}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(cd "$HERE/../.." && pwd)"
 
-: "${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN — run 'claude setup-token' on the host (subscription, NOT an API key)}"
+# Local convenience: load the subscription token from a gitignored file if the
+# operator stashed it there and it isn't already in the environment.
+[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "$REPO/.demo-token.env" ] && . "$REPO/.demo-token.env"
+: "${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or stash it in .demo-token.env — subscription, NOT an API key}"
 
 ROOT="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"
 

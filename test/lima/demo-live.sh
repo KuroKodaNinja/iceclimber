@@ -20,7 +20,10 @@ cd "$REPO"
 BIN="$REPO/iceclimber"
 CFG="$REPO/iceclimber-demo.yaml"
 [ -x "$BIN" ] || { echo "build the binary first: make build" >&2; exit 1; }
-: "${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN — run 'claude setup-token' (subscription, not API)}"
+# Local convenience: load the subscription token from a gitignored file if the
+# operator stashed it there and it isn't already in the environment.
+[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "$REPO/.demo-token.env" ] && . "$REPO/.demo-token.env"
+: "${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or stash it in .demo-token.env — subscription, not API}"
 
 # 1. Stage the tree + a fresh, ungated egress gate (so you witness the hold).
 root="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"
