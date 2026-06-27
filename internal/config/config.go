@@ -26,6 +26,32 @@ type Config struct {
 	// AuditLog is the controller-side web.fetch audit JSONL path. Empty means
 	// the default ~/.iceclimber/audit/<sandbox_id>.jsonl.
 	AuditLog string `yaml:"audit_log"`
+	// Network governs web.fetch venue routing + egress gating (§6.1).
+	Network Network `yaml:"network"`
+	// Rewrites redirect/re-venue fetch URLs before gating (§6.1).
+	Rewrites []Rewrite `yaml:"fetch_rewrites"`
+	// ApprovalsFile is the operator-owned allow/deny rule file (never Nana-writable).
+	// Empty means ~/.iceclimber/<sandbox_id>/approvals.json; pending lives alongside.
+	ApprovalsFile string `yaml:"approvals_file"`
+}
+
+// Network routes web.fetch venues and governs unlisted URLs (§3, §6.1).
+type Network struct {
+	AllowedDomains       []AllowedDomain `yaml:"allowed_domains"`
+	UnlistedDomainPolicy string          `yaml:"unlisted_domain_policy"` // "gate" (default) | "deny"
+}
+
+// AllowedDomain maps a host pattern to the venue that can reach it.
+type AllowedDomain struct {
+	Pattern       string `yaml:"pattern"`
+	ReachableFrom string `yaml:"reachable_from"` // "sandbox" | "controller"
+}
+
+// Rewrite redirects a matching URL and adopts a venue (§6.1).
+type Rewrite struct {
+	Match     string `yaml:"match"`
+	RewriteTo string `yaml:"rewrite_to"`
+	Venue     string `yaml:"venue"` // "sandbox" | "controller"
 }
 
 // Pip configures package install (§5). IndexURL is the Tier-0 mirror
