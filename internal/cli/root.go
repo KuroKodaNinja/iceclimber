@@ -33,6 +33,8 @@ func newRootCmd() *cobra.Command {
 		newInitCmd(),
 		newProbeCmd(),
 		newConfigCmd(),
+		newBootstrapCmd(),
+		newServeCmd(),
 	)
 	root.AddCommand(stubCommands()...)
 	return root

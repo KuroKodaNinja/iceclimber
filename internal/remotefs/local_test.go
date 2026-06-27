@@ -1,48 +1,17 @@
 package remotefs_test
 
 import (
-	"bytes"
-	"context"
-	"errors"
-	"io"
 	"net"
-	"os/exec"
 	"testing"
 
-	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs/remotefstest"
 	"github.com/pkg/sftp"
 )
 
-// localRunner runs ExecFS's commands through the host's own /bin/sh. On macOS
-// that's a BSD userland — a second POSIX target alongside the VM's BusyBox, so
-// the local suite already guards against GNU-isms.
-type localRunner struct{}
-
-func (localRunner) Run(ctx context.Context, cmd string, stdin io.Reader) (remote.Result, error) {
-	c := exec.CommandContext(ctx, "sh", "-c", cmd)
-	if stdin != nil {
-		c.Stdin = stdin
-	}
-	var out, errb bytes.Buffer
-	c.Stdout = &out
-	c.Stderr = &errb
-	err := c.Run()
-	res := remote.Result{Stdout: out.Bytes(), Stderr: errb.Bytes()}
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		res.ExitCode = ee.ExitCode()
-		return res, nil
-	}
-	return res, err
-}
-
-func (localRunner) Close() error { return nil }
-
 func TestExecFS_Local(t *testing.T) {
 	remotefstest.RunConformance(t, func(t *testing.T) (remotefs.FS, string) {
-		return remotefs.NewExecFS(localRunner{}), t.TempDir()
+		return remotefs.NewExecFS(remotefstest.LocalRunner{}), t.TempDir()
 	})
 }
 

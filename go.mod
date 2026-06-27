@@ -3,6 +3,7 @@ module github.com/KuroKodaNinja/iceclimber
 go 1.26.3
 
 require (
+	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pkg/sftp v1.13.10
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.53.0

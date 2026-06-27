@@ -12,8 +12,6 @@ import (
 // real implementations phase by phase.
 func stubCommands() []*cobra.Command {
 	return []*cobra.Command{
-		leaf("bootstrap", "Full idempotent setup of the sandbox tree", "phase: bootstrap"),
-		leaf("serve", "Long-lived watch loop + sub-agent fallback", "phase: serve"),
 		leaf("status", "Heartbeat age, queue depth, cache size, recent requests", "phase: serve"),
 		parent("install", "Install Python or pip packages into the sandbox",
 			leaf("python", "Install a portable Python runtime", "phase: python.install"),
