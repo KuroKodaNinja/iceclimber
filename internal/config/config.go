@@ -23,6 +23,9 @@ type Config struct {
 	// ControllerPython is the operator's python on the controller, used for
 	// Tier-1 cross-platform wheel downloads. Defaults to "python3" at use.
 	ControllerPython string `yaml:"controller_python"`
+	// AuditLog is the controller-side web.fetch audit JSONL path. Empty means
+	// the default ~/.iceclimber/audit/<sandbox_id>.jsonl.
+	AuditLog string `yaml:"audit_log"`
 }
 
 // Pip configures package install (§5). IndexURL is the Tier-0 mirror

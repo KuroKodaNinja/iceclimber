@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/probe"
@@ -24,6 +26,7 @@ type session struct {
 	cacheDir         string
 	pip              config.Pip
 	controllerPython string
+	auditPath        string
 }
 
 // Close releases the SFTP client (if any) and the SSH connection.
@@ -65,7 +68,7 @@ func openSession(ctx context.Context, cfg *config.Config, transport string) (*se
 		}
 	}
 
-	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, controllerPython: cfg.ControllerPython}
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, controllerPython: cfg.ControllerPython, auditPath: auditPath(cfg)}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"
@@ -87,4 +90,17 @@ func openSession(ctx context.Context, cfg *config.Config, transport string) (*se
 		return nil, fmt.Errorf("unknown transport %q (want auto|sftp|exec)", transport)
 	}
 	return s, nil
+}
+
+// auditPath returns the configured web.fetch audit log path, or the default
+// ~/.iceclimber/audit/<sandbox_id>.jsonl.
+func auditPath(cfg *config.Config) string {
+	if cfg.AuditLog != "" {
+		return cfg.AuditLog
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".iceclimber", "audit", cfg.SandboxID+".jsonl")
 }
