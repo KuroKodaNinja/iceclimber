@@ -15,14 +15,15 @@ import (
 // session bundles an open SSH connection, the chosen transport's FS, the
 // resolved tree, and the sandbox fingerprint. Shared by bootstrap, serve, install.
 type session struct {
-	runner    *remote.SSHRunner
-	sftp      *sftp.Client // non-nil only for the SFTP transport
-	fs        remotefs.FS
-	tree      protocol.Tree
-	transport string // "sftp" or "exec" (the one actually selected)
-	fp        *probe.Fingerprint
-	cacheDir  string
-	pip       config.Pip
+	runner           *remote.SSHRunner
+	sftp             *sftp.Client // non-nil only for the SFTP transport
+	fs               remotefs.FS
+	tree             protocol.Tree
+	transport        string // "sftp" or "exec" (the one actually selected)
+	fp               *probe.Fingerprint
+	cacheDir         string
+	pip              config.Pip
+	controllerPython string
 }
 
 // Close releases the SFTP client (if any) and the SSH connection.
@@ -64,7 +65,7 @@ func openSession(ctx context.Context, cfg *config.Config, transport string) (*se
 		}
 	}
 
-	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip}
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, controllerPython: cfg.ControllerPython}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"

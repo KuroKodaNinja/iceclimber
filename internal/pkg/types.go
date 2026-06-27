@@ -31,6 +31,7 @@ type Plan struct {
 // Resolution tiers (plan §5): how a package was obtained.
 const (
 	TierMirror = "mirror" // Tier 0: installed directly from the internal mirror
+	TierRelay  = "relay"  // Tier 1: fetched by Popo and relayed in for offline install
 )
 
 // Installed records one successfully installed package.

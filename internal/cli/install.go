@@ -59,10 +59,10 @@ func newInstallPythonCmd() *cobra.Command {
 }
 
 func newInstallPipCmd() *cobra.Command {
-	var transport, pyVersion string
+	var transport, pyVersion, tier string
 	cmd := &cobra.Command{
 		Use:   "pip <pkg>[==version]...",
-		Short: "Install pip packages into an installed runtime (Tier 0: mirror)",
+		Short: "Install pip packages into an installed runtime (Tier 0 mirror / Tier 1 relay)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(cfgFile, sandboxID)
@@ -78,7 +78,7 @@ func newInstallPipCmd() *cobra.Command {
 			}
 			defer sess.Close()
 
-			out, err := pip.Run(ctx, pipDeps(sess), pyVersion, parseSpecs(args))
+			out, err := pip.Run(ctx, pipDeps(sess), pyVersion, parseSpecs(args), tier)
 			if err != nil {
 				return err
 			}
@@ -88,6 +88,7 @@ func newInstallPipCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVar(&pyVersion, "python", "", "target python minor version, e.g. 3.12 (required)")
+	cmd.Flags().StringVar(&tier, "tier", "auto", "resolution tier: auto|mirror|relay")
 	_ = cmd.MarkFlagRequired("python")
 	return cmd
 }

@@ -13,41 +13,67 @@ import (
 )
 
 // Deps are what a pip.install needs from the session: where to run, the
-// sandbox fingerprint (to locate the runtime), and the mirror config.
+// sandbox fingerprint (to locate the runtime + pick wheel tags), and config.
 type Deps struct {
-	FS            remotefs.FS
-	Runner        remote.Runner
-	Root          string
-	Arch          string
-	Libc          string
-	IndexURL      string
-	ExtraIndexURL string
-	TrustedHost   string
+	FS                 remotefs.FS
+	Runner             remote.Runner
+	Root               string
+	Arch               string
+	Libc               string
+	IndexURL           string
+	ExtraIndexURL      string
+	TrustedHost        string
+	ControllerPython   string
+	ControllerIndexURL string
 }
 
-// Run locates the target runtime, resolves the specs, and installs them. A
-// non-nil error means resolution (or locating the runtime) failed — the whole
-// request fails. A nil error with per-package failures in the Outcome is the
-// partial-success case (plan §4.3). Shared by the CLI and the protocol handler.
-func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec) (pkg.Outcome, error) {
+// Run locates the target runtime and installs the specs via the selected tier
+// (plan §5). A non-nil error means resolution/download (or locating the runtime)
+// failed — the whole request fails. A nil error with per-package failures in the
+// Outcome is the partial-success case (plan §4.3). Shared by CLI and handler.
+func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, tier string) (pkg.Outcome, error) {
 	bin, err := python.Locate(ctx, d.FS, d.Root, pythonVersion, d.Arch, d.Libc)
 	if err != nil {
 		return pkg.Outcome{}, err
 	}
 	m := New(Config{
-		Runner:        d.Runner,
-		FS:            d.FS,
-		PythonBin:     bin,
-		StateDir:      path.Join(d.Root, "state"),
-		IndexURL:      d.IndexURL,
-		ExtraIndexURL: d.ExtraIndexURL,
-		TrustedHost:   d.TrustedHost,
+		Runner:             d.Runner,
+		FS:                 d.FS,
+		PythonBin:          bin,
+		Root:               d.Root,
+		StateDir:           path.Join(d.Root, "state"),
+		IndexURL:           d.IndexURL,
+		ExtraIndexURL:      d.ExtraIndexURL,
+		TrustedHost:        d.TrustedHost,
+		Arch:               d.Arch,
+		Libc:               d.Libc,
+		ControllerPython:   d.ControllerPython,
+		ControllerIndexURL: d.ControllerIndexURL,
 	})
+	if resolveTier(tier, d.IndexURL) == pkg.TierRelay {
+		return m.RelayInstall(ctx, specs, pythonVersion)
+	}
 	plan, err := m.Resolve(ctx, specs)
 	if err != nil {
 		return pkg.Outcome{}, err
 	}
 	return m.Install(ctx, plan)
+}
+
+// resolveTier maps the requested tier to a concrete one. "auto" picks relay when
+// no mirror is configured, else mirror. "mirror"/"relay" force the choice.
+func resolveTier(tier, indexURL string) string {
+	switch tier {
+	case pkg.TierRelay:
+		return pkg.TierRelay
+	case pkg.TierMirror:
+		return pkg.TierMirror
+	default: // "auto" or ""
+		if indexURL == "" {
+			return pkg.TierRelay
+		}
+		return pkg.TierMirror
+	}
 }
 
 type installParams struct {
@@ -75,7 +101,7 @@ func Handler(d Deps) protocol.Handler {
 		for i, pp := range p.Packages {
 			specs[i] = pkg.Spec{Name: pp.Name, Version: pp.Version}
 		}
-		out, err := Run(ctx, d, p.PythonVersion, specs)
+		out, err := Run(ctx, d, p.PythonVersion, specs, "auto")
 		if err != nil {
 			return protocol.Errf(req.ID, "resolution_failed", "%v", err)
 		}

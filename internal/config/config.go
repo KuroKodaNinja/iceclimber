@@ -20,14 +20,19 @@ type Config struct {
 	RemoteRoot string `yaml:"remote_root"` // optional; chosen during bootstrap if empty
 	CacheDir   string `yaml:"cache_dir"`
 	Pip        Pip    `yaml:"pip"`
+	// ControllerPython is the operator's python on the controller, used for
+	// Tier-1 cross-platform wheel downloads. Defaults to "python3" at use.
+	ControllerPython string `yaml:"controller_python"`
 }
 
-// Pip configures the Tier-0 package mirror for pip.install (§5). IndexURL empty
-// means Tier 0 is unavailable.
+// Pip configures package install (§5). IndexURL is the Tier-0 mirror
+// (sandbox-reachable); ControllerIndexURL is the Tier-1 source Popo downloads
+// from (defaults to PyPI at use).
 type Pip struct {
-	IndexURL      string `yaml:"index_url"`
-	ExtraIndexURL string `yaml:"extra_index_url"`
-	TrustedHost   string `yaml:"trusted_host"`
+	IndexURL           string `yaml:"index_url"`
+	ExtraIndexURL      string `yaml:"extra_index_url"`
+	TrustedHost        string `yaml:"trusted_host"`
+	ControllerIndexURL string `yaml:"controller_index_url"`
 }
 
 // SSH holds the controller's connection details for the sandbox host.

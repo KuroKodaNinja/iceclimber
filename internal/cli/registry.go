@@ -22,14 +22,16 @@ func newInstaller(sess *session) *python.Installer {
 // pipDeps builds the pip.install dependency bundle from an open session.
 func pipDeps(sess *session) pip.Deps {
 	return pip.Deps{
-		FS:            sess.fs,
-		Runner:        sess.runner,
-		Root:          sess.tree.Root,
-		Arch:          sess.fp.Arch,
-		Libc:          sess.fp.Libc.Family,
-		IndexURL:      sess.pip.IndexURL,
-		ExtraIndexURL: sess.pip.ExtraIndexURL,
-		TrustedHost:   sess.pip.TrustedHost,
+		FS:                 sess.fs,
+		Runner:             sess.runner,
+		Root:               sess.tree.Root,
+		Arch:               sess.fp.Arch,
+		Libc:               sess.fp.Libc.Family,
+		IndexURL:           sess.pip.IndexURL,
+		ExtraIndexURL:      sess.pip.ExtraIndexURL,
+		TrustedHost:        sess.pip.TrustedHost,
+		ControllerPython:   sess.controllerPython,
+		ControllerIndexURL: sess.pip.ControllerIndexURL,
 	}
 }
 

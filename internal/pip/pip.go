@@ -16,16 +16,22 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 )
 
-// Config holds the pip manager's dependencies. pip runs in the sandbox via
-// Runner; FS reads the resolution report back.
+// Config holds the pip manager's dependencies. Tier 0 runs pip in the sandbox
+// via Runner; Tier 1 (relay) additionally runs the controller's python locally.
 type Config struct {
 	Runner        remote.Runner
 	FS            remotefs.FS
-	PythonBin     string // absolute path to the runtime's bin/python3
+	PythonBin     string // absolute path to the sandbox runtime's bin/python3
+	Root          string // sandbox install root (for blobs/wheels)
 	StateDir      string // sandbox dir for the report file
-	IndexURL      string
+	IndexURL      string // Tier 0 mirror (sandbox-reachable)
 	ExtraIndexURL string
 	TrustedHost   string
+	// Tier 1 (relay) only:
+	Arch               string // sandbox fingerprint, for the wheel platform tags
+	Libc               string
+	ControllerPython   string // operator's python on the controller (default python3)
+	ControllerIndexURL string // Popo-reachable index to download from (default PyPI)
 }
 
 // Manager installs pip packages into one runtime.
