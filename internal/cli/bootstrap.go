@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
@@ -37,6 +39,9 @@ func newBootstrapCmd() *cobra.Command {
 			if err := protocol.EnsureTree(ctx, sess.fs, sess.tree); err != nil {
 				return err
 			}
+			if err := writePipConf(ctx, sess); err != nil {
+				return fmt.Errorf("write pip.conf: %w", err)
+			}
 			disp := protocol.NewDispatcher(sess.fs, sess.tree, buildRegistry(sess))
 			if err := disp.WriteHeartbeat(ctx); err != nil {
 				return err
@@ -54,6 +59,25 @@ func newBootstrapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().BoolVar(&force, "force", false, "re-run bootstrap (tree creation is idempotent)")
 	return cmd
+}
+
+// writePipConf records the mirror in state/pip.conf so the agent's ad-hoc pip
+// (via PIP_CONFIG_FILE) hits the same mirror Popo's commands use (§6.1, §3).
+// No-op when no mirror is configured.
+func writePipConf(ctx context.Context, sess *session) error {
+	if sess.pip.IndexURL == "" {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("[global]\n")
+	fmt.Fprintf(&b, "index-url = %s\n", sess.pip.IndexURL)
+	if sess.pip.ExtraIndexURL != "" {
+		fmt.Fprintf(&b, "extra-index-url = %s\n", sess.pip.ExtraIndexURL)
+	}
+	if sess.pip.TrustedHost != "" {
+		fmt.Fprintf(&b, "[install]\ntrusted-host = %s\n", sess.pip.TrustedHost)
+	}
+	return sess.fs.WriteFile(ctx, path.Join(sess.tree.Root, "state", "pip.conf"), []byte(b.String()))
 }
 
 // smokeTest writes a synthetic ping into the outbox, runs one dispatch cycle, and

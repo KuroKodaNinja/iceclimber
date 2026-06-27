@@ -22,6 +22,7 @@ type session struct {
 	transport string // "sftp" or "exec" (the one actually selected)
 	fp        *probe.Fingerprint
 	cacheDir  string
+	pip       config.Pip
 }
 
 // Close releases the SFTP client (if any) and the SSH connection.
@@ -63,7 +64,7 @@ func openSession(ctx context.Context, cfg *config.Config, transport string) (*se
 		}
 	}
 
-	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir}
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"
