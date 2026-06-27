@@ -43,6 +43,7 @@ func webfetchDeps(sess *session) webfetch.Deps {
 		Runner: sess.runner,
 		FS:     sess.fs,
 		Root:   sess.tree.Root,
+		Policy: sess.policy,
 		Audit:  audit.New(sess.auditPath),
 	}
 }

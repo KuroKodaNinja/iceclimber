@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/egress"
 	"github.com/KuroKodaNinja/iceclimber/internal/probe"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
@@ -27,6 +28,7 @@ type session struct {
 	pip              config.Pip
 	controllerPython string
 	auditPath        string
+	policy           *egress.Policy
 }
 
 // Close releases the SFTP client (if any) and the SSH connection.
@@ -68,7 +70,7 @@ func openSession(ctx context.Context, cfg *config.Config, transport string) (*se
 		}
 	}
 
-	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, controllerPython: cfg.ControllerPython, auditPath: auditPath(cfg)}
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, controllerPython: cfg.ControllerPython, auditPath: auditPath(cfg), policy: buildPolicy(cfg)}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"
@@ -90,6 +92,33 @@ func openSession(ctx context.Context, cfg *config.Config, transport string) (*se
 		return nil, fmt.Errorf("unknown transport %q (want auto|sftp|exec)", transport)
 	}
 	return s, nil
+}
+
+// egressStore opens the operator-owned approvals/pending stores for a config.
+// Used by both the session (gating) and the approve/deny/pending CLI (no SSH).
+func egressStore(cfg *config.Config) *egress.Store {
+	base := cfg.ApprovalsFile
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		base = filepath.Join(home, ".iceclimber", cfg.SandboxID, "approvals.json")
+	}
+	return egress.NewStore(base, filepath.Join(filepath.Dir(base), "pending.json"))
+}
+
+// buildPolicy assembles the egress policy from config.
+func buildPolicy(cfg *config.Config) *egress.Policy {
+	allowed := make([]egress.AllowedDomain, len(cfg.Network.AllowedDomains))
+	for i, a := range cfg.Network.AllowedDomains {
+		allowed[i] = egress.AllowedDomain{Pattern: a.Pattern, ReachableFrom: a.ReachableFrom}
+	}
+	rewrites := make([]egress.Rewrite, len(cfg.Rewrites))
+	for i, r := range cfg.Rewrites {
+		rewrites[i] = egress.Rewrite{Match: r.Match, RewriteTo: r.RewriteTo, Venue: r.Venue}
+	}
+	return egress.NewPolicy(allowed, rewrites, cfg.Network.UnlistedDomainPolicy, egressStore(cfg))
 }
 
 // auditPath returns the configured web.fetch audit log path, or the default

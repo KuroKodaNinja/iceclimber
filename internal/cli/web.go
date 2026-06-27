@@ -45,12 +45,20 @@ func newWebFetchCmd() *cobra.Command {
 			if data != "" {
 				req.Body = &data
 			}
-			res, err := webfetch.Run(ctx, webfetchDeps(sess), "", req)
+			out, err := webfetch.Run(ctx, webfetchDeps(sess), "", req)
 			if err != nil {
 				return err
 			}
 
 			w := cmd.OutOrStdout()
+			switch out.Status {
+			case "needs_clarification":
+				fmt.Fprintln(w, out.Question)
+				return nil
+			case "denied":
+				return fmt.Errorf("egress denied for %s", out.URL)
+			}
+			res := out.Result
 			fmt.Fprintf(w, "%d  (venue %s)\n", res.StatusCode, res.Venue)
 			switch {
 			case res.BodyBlob != "":

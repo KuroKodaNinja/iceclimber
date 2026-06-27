@@ -12,16 +12,18 @@ import (
 
 // Entry is one audit record. Bodies are referenced by hash + size, not stored.
 type Entry struct {
-	TS         string `json:"ts"`
-	ID         string `json:"id,omitempty"`
-	Type       string `json:"type"`
-	URL        string `json:"url"`
-	Method     string `json:"method"`
-	Venue      string `json:"venue"`
-	StatusCode int    `json:"status_code"`
-	BodySize   int    `json:"body_size"`
-	BodySHA256 string `json:"body_sha256,omitempty"`
-	Outcome    string `json:"outcome"` // "ok" | "error"
+	TS           string `json:"ts"`
+	ID           string `json:"id,omitempty"`
+	Type         string `json:"type"`
+	URL          string `json:"url"`
+	Method       string `json:"method"`
+	RewrittenURL string `json:"rewritten_url,omitempty"`
+	Venue        string `json:"venue"`
+	Decision     string `json:"decision,omitempty"` // allow | held | denied (controller venue)
+	StatusCode   int    `json:"status_code"`
+	BodySize     int    `json:"body_size"`
+	BodySHA256   string `json:"body_sha256,omitempty"`
+	Outcome      string `json:"outcome"` // "ok" | "error"
 }
 
 // Logger appends entries to a JSONL file. A zero-value path disables logging.

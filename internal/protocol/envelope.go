@@ -67,6 +67,18 @@ func OK(id string, result any) Response {
 	}
 }
 
+// NeedsClarification builds a held response that asks the operator/Nana a
+// question (e.g. controller-venue egress awaiting approval, §6.1).
+func NeedsClarification(id, question string) Response {
+	return Response{
+		SchemaVersion: SchemaVersion,
+		ID:            id,
+		Status:        StatusNeedsClarification,
+		CompletedAt:   time.Now().UTC(),
+		Clarification: &Clarification{Question: question},
+	}
+}
+
 // Errf builds an error response (Popo failed to service the request).
 func Errf(id, code, format string, args ...any) Response {
 	return Response{
