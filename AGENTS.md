@@ -53,5 +53,11 @@ make sandbox-down     # tear it down
   (`internal/python`): resolve+sha-verify, stdlib extract, transport-agnostic
   push (`RemoteFS` gained `Chmod`/`Symlink`), exec-verify. `install python
   <minor>` + the verb. Verified on Alpine/musl.
-- **Phase 4 — next.** `pip.install` Tier 0 (internal mirror, remote-exec) — the
-  common case. Console-script shebang rewriting lands here (plan §5).
+- **Phase 4 — done.** `pip.install` Tier 0 (`internal/pkg` + `internal/pip`):
+  **resolve (co-resolved, native) → retrieve (per-package)**, tier=mirror + sha256;
+  `install pip … --python <minor>` + the verb; `bootstrap` writes `pip.conf`.
+  Verified on Alpine/musl vs PyPI. Package management is **multi-language by
+  design** (per-manager verbs + neutral types) — see memory.
+- **Phase 5 — next.** `pip.install` Tier 1 (Popo-side fetch + relay) for the
+  offline/non-mirrored case — reuses the resolve stage. Console-script shebang
+  rewriting also lands around here (plan §5).

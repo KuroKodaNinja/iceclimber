@@ -188,18 +188,19 @@ result: { "version": "3.12.13", "path": "/abs/.../bin/python3", "already_install
 ```
 Popo resolves the exact patch from PBS's `latest-release.json` (tag + `asset_url_prefix`) and the release `SHA256SUMS` — picks the highest-patch `install_only` asset for the sandbox's `<arch>-unknown-linux-<gnu|musl>` triple, verifies its SHA256, and records the pinned version. The tree is extracted with the Go stdlib (no remote `tar`) and pushed over `RemoteFS` (either transport); `bin/python3` is then run over the exec channel to prove it executes (§2 boundary). Verified on Alpine/musl.
 
-### 4.3 `pip.install` (batched)
+### 4.3 `pip.install` (batched) — *Tier 0 implemented (phase 4)*
 ```jsonc
 params: {
   "python_version": "3.12",
-  "packages": [{ "name": "requests", "version": "2.32.3" }]
+  "packages": [{ "name": "requests", "version": "2.32.3" },  // pinned
+               { "name": "rich" }]                            // unversioned -> native default
 }
 result: {
   "installed": [{ "name": "requests", "version": "2.32.3", "tier": "mirror", "sha256": "..." }],
-  "failed": [{ "name": "foo", "version": "1.0", "error": "no_matching_wheel" }]
+  "failed": [{ "name": "foo", "version": "1.0", "error": "..." }]
 }
 ```
-`tier` ∈ `mirror | relay | built | subagent` — the audit trail for "was this deterministic" (§5). Versions are always pinned; no floating "latest", even when the mirror would resolve it for us.
+`tier` ∈ `mirror | relay | built | subagent` — the audit trail (§5). **Resolve → retrieve (decision #21):** Popo first co-resolves the whole request against the index (`pip install --dry-run --report`) — native fidelity, exactly as installing a repo's requirements; an unsatisfiable graph fails the request (`resolution_failed`). It then installs each resolved package independently (`--no-deps`) so individual pull failures are per-package. **Versions need not be pinned in the *request*** (unversioned resolves by the manager's default) — but the *resolution* is always recorded with exact versions + sha256, so determinism lives at the resolved layer. (Supersedes the old "always pinned request" stance.)
 
 ### 4.4 `web.fetch`
 ```jsonc
@@ -244,7 +245,7 @@ Skill-documented polling schedule: 2s / 5s / 10s / 30s backoff; if `seq` has not
 
 Ordered by how much machinery each needs — always try the cheapest first:
 
-- **Tier 0 — internal mirror, direct remote-exec.** Primary path. `pip.conf` (written at bootstrap) points `index-url` at the configured `role: package_mirror` endpoint. Popo remote-execs `pip install` *inside* the sandbox, using the sandbox's own already-approved egress. No wheel transfer, no relay.
+- **Tier 0 — internal mirror, direct remote-exec.** *Implemented (phase 4).* Primary path. Popo remote-execs pip *inside* the sandbox against the mirror, using the sandbox's own already-approved egress — resolve (`--dry-run --report`) then per-package `--no-deps` install. No wheel transfer, no relay. Popo's commands pass `--index-url` **explicitly** (robust under non-interactive exec, decision #23); `bootstrap` *also* writes `state/pip.conf` so the agent's ad-hoc pip hits the same mirror. *(Tested against real PyPI as a stand-in mirror; the egress restriction itself is not yet modeled.)*
 - **Tier 1 — Popo-side fetch + relay.** For packages the mirror doesn't carry. Popo resolves/downloads wheels on its own network (matching the probed platform fingerprint), transfers via the blob store, then remote-execs `pip install --no-index --find-links=...`. **v1 risk:** Popo must reproduce a *foreign* machine's full wheel-compatibility tag set (manylinux version, CPython ABI tag) via `pip download --platform/--abi/--python-version/--only-binary`; this is finicky and won't resolve pure-Python deps identically to an on-box install. Spike this before committing to the relay design.
 - **Tier 2 — build-on-controller fallback.** `v2:` parked (§0). Compiled extension, no matching wheel anywhere. Popo builds it in a container/VM matching the probed fingerprint, then drops into Tier 1's transfer mechanics. **OPEN** — exact container strategy. *v1 behavior: fail loudly ("no wheel anywhere; add it to your mirror"), don't build.*
 - **Tier 3 — sub-agent.** `v2:` parked (§0) — see §4.5. Genuinely ambiguous resolution, or recovery from a Tier 0–2 failure.
@@ -444,6 +445,9 @@ These are named explicitly so they don't get silently assumed during implementat
 | 18 | `python.install` resolves via PBS `latest-release.json` + `SHA256SUMS`, sha-verified, recording the exact pinned patch | Low-maintenance vs an in-code version table; still deterministic per install (§4.2) |
 | 19 | `RemoteFS` gains `Chmod` + `Symlink`; ExecFS palette += `chmod`, `ln -s` | A relocatable interpreter needs an executable bit and symlinks (`bin/python3`→`python3.x`) |
 | 20 | python.install push is transport-agnostic (SFTP or ExecFS); shebang rewriting deferred to phase 4 | The abstraction already gives a uniform push; `bin/python3` runs by absolute path, so shebangs only bite once pip installs console scripts |
+| 21 | `pip.install` = **resolve (co-resolved, native) → retrieve (per-package)**; requests may be unversioned but the resolution is recorded with exact versions + sha256 | Native resolution fidelity *and* per-package pull attribution; determinism at the resolved layer (supersedes "always-pinned request") |
+| 22 | Per-manager verbs (`pip.install`, later `npm.install`…) over manager-neutral types in `internal/pkg`; build one manager at a time | Multi-language by shape without speculative framework (washu simplicity) |
+| 23 | Tier 0 points pip via explicit `--index-url` flags; `bootstrap` also writes `state/pip.conf` | Flags are robust under non-interactive exec (§2); pip.conf lets the agent's ad-hoc pip reach the mirror too |
 
 ---
 
@@ -454,7 +458,7 @@ These are named explicitly so they don't get silently assumed during implementat
 1. ✅ **CLI skeleton + probe (fingerprint only, no installs)** — cobra surface (all §9 verbs present; unbuilt ones stub with their phase label), `config`/`init` real, `remote.Runner` SSH boundary (known_hosts-verified, configurable path), `probe` fingerprints OS/arch/libc(multi-signal confidence)/root-viability(real write tests)/existing-tree. Unit-tested at the Runner boundary **and verified end-to-end against a real Alpine (musl/BusyBox) sandbox** (see Testing strategy below) — probe's POSIX-sh commands and musl detection are proven on real BusyBox.
 2. ✅ **Maildir protocol end-to-end with `ping`/`pong`, `RemoteFS` (both implementations) + conformance tests; delivery semantics** — `internal/remotefs` (SFTPFS + ExecFS, conformance at both layers), `internal/protocol` (envelope, `tmp/new/cur` maildir with atomic Deliver/PickUp, ULID names, Dispatcher with `id` dedup + `cur/` recovery sweep + counter heartbeat), real `serve --once`/`serve` and minimal `bootstrap` (tree + heartbeat + §7 smoke test). **Verified E2E on Alpine over both transports** — stdin-over-exec and BusyBox `mv` proven on real hardware. *(Deferred to later phases: `.popo.lock` contention, blob streaming, full re-bootstrap UX.)*
 3. ✅ **`python.install` via python-build-standalone** — `internal/python` resolves an exact PBS build (`latest-release.json` + `SHA256SUMS`, sha-verified, pinned), extracts with the Go stdlib, and pushes the tree over `RemoteFS` (either transport; `Chmod`+`Symlink` added) then runs `bin/python3` to verify. `install python <minor>` (sync) + the `python.install` verb. **Verified on Alpine/musl** (3.12.13 in ~6s over SFTP, idempotent). *(Shebang rewriting deferred to phase 4; optimized ExecFS bulk push stays v2.)*
-4. `pip.install` Tier 0 (internal mirror, remote-exec) — the common case
+4. ✅ **`pip.install` Tier 0 (internal mirror, remote-exec)** — `internal/pkg` (manager-neutral types) + `internal/pip` (resolve via `--dry-run --report`, then per-package `--no-deps` install; tier=mirror + sha256) + `python.Locate`. `install pip <pkg>… --python <minor>` (sync) and the `pip.install` verb; `bootstrap` writes `pip.conf`. **Verified on Alpine/musl** vs PyPI: unversioned `requests` co-resolves 5 deps, each recorded; unknown package → `resolution_failed`. *(Tier 1 relay = phase 5, reuses the resolve stage.)*
 5. `pip.install` Tier 1 (relay) for the offline/non-mirrored case — spike cross-platform wheel download first (§5)
 6. `web.fetch` with venue routing + SSRF floor + **egress gating, fetch rewrites, `pending`/`approve --remember`/`deny` (§6.1)** + audit log
 7. `NANA.md`, polish, `sandbox_id` namespacing verification
