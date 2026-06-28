@@ -43,6 +43,7 @@ func newRootCmd() *cobra.Command {
 		newSkillCmd(),
 		newStatusCmd(),
 		newLogsCmd(),
+		newTuiCmd(),
 	)
 	root.AddCommand(stubCommands()...)
 	return root
