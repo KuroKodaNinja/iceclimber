@@ -42,6 +42,7 @@ func newRootCmd() *cobra.Command {
 		newDenyCmd(),
 		newSkillCmd(),
 		newStatusCmd(),
+		newLogsCmd(),
 	)
 	root.AddCommand(stubCommands()...)
 	return root

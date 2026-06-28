@@ -12,7 +12,6 @@ import (
 // real implementations phase by phase.
 func stubCommands() []*cobra.Command {
 	return []*cobra.Command{
-		leaf("logs", "Tail the request/response/audit logs", "phase: web.fetch"),
 		parent("cache", "Manage the local wheel/runtime cache",
 			leaf("list", "List cached artifacts", "phase: pip.install"),
 			leaf("prune", "Remove stale cache entries", "phase: pip.install"),
