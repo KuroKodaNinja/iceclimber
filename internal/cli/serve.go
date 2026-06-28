@@ -25,6 +25,7 @@ func newServeCmd() *cobra.Command {
 	var interval time.Duration
 	var deny []string
 	var yes bool
+	var supervise bool
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Watch the outbox and service requests (Popo)",
@@ -39,14 +40,15 @@ func newServeCmd() *cobra.Command {
 			if once {
 				ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
 				defer cancel()
-				return withDispatcher(ctx, cfg, transport, deny, out, false, func(d *protocol.Dispatcher) error {
+				// A one-shot cycle is unattended unless --supervise is explicit.
+				return withDispatcher(ctx, cfg, transport, deny, out, supervise && !yes, func(d *protocol.Dispatcher) error {
 					return d.RunOnce(ctx)
 				})
 			}
 
-			// Supervised iff attached to a terminal (and not --yes): prompt before
-			// each operation. Piped/backgrounded/CI serve runs unattended.
-			supervised := !yes && isTerminal(os.Stdin)
+			// Supervised iff attached to a terminal or forced with --supervise (and
+			// not --yes): prompt before each operation. Otherwise runs unattended.
+			supervised := !yes && (supervise || isTerminal(os.Stdin))
 
 			// Long-lived: stop cleanly on Ctrl-C / SIGTERM.
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -68,6 +70,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "poll interval for the watch loop")
 	cmd.Flags().StringArrayVar(&deny, "deny", nil, "disable a verb, e.g. --deny web.fetch (repeatable)")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "auto-approve every operation (skip the interactive prompt)")
+	cmd.Flags().BoolVar(&supervise, "supervise", false, "force the approval prompt even without a terminal (reads stdin; scriptable)")
 	return cmd
 }
 
