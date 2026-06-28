@@ -14,7 +14,7 @@ BIN         := iceclimber
 
 .PHONY: build fmt vet test test-functional scenario e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
 	demo-up demo-down demo-status demo-firewall demo-firewall-down demo-shell \
-	demo demo-live demo-config demo-bootstrap demo-agent demo-verify demo-reset demo-logs demo-tui clean
+	demo demo-live demo-console demo-config demo-bootstrap demo-agent demo-verify demo-reset demo-logs demo-tui clean
 
 build:
 	go build -o $(BIN) .
@@ -137,6 +137,12 @@ demo-logs: build
 # The graphical version of demo-logs: a live [POPO]/[NANA] dashboard.
 demo-tui: build
 	@./$(BIN) tui --config $(DEMO_CFG) --agent-log $$HOME/.iceclimber/$(DEMO)/agent.log
+
+# The full operator console for the demo VM: bare iceclimber serves the sandbox and
+# handles approvals inline. Run `make demo-agent` in another terminal and approve
+# the modals here. (Needs the gate air-gapped/cleared like make demo-live.)
+demo-console: build
+	@./$(BIN) --config $(DEMO_CFG) --agent-log $$HOME/.iceclimber/$(DEMO)/agent.log
 
 # Clear the protocol maildir + work dir for a fresh agent pass. Keeps the
 # installed runtimes (so re-runs are fast) and any egress approvals. Use this

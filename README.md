@@ -79,10 +79,15 @@ Fingerprints the sandbox (OS/arch/libc), picks a writable install root, creates 
 protocol tree, runs a `ping`/`pong` smoke test, and drops `NANA.md`. Then wire that
 skill doc into your agent's instructions (see the Nana side).
 
-### 3. Serve
+### 3. Serve — the console, or headless
+
+Bare **`iceclimber`** launches the interactive **console**: it serves the sandbox,
+streams live activity, and surfaces every approval as a modal you answer in-place —
+a split-pane `[POPO]`/`[NANA]` cockpit.
 
 ```sh
-./iceclimber serve              # watch loop: heartbeat + service requests
+./iceclimber                    # the console (serve + watch + approve)
+./iceclimber serve              # headless watch loop (CI/unattended)
 ```
 
 On a terminal `serve` runs **supervised** — it prompts you to approve each

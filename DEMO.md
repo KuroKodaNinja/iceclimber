@@ -54,6 +54,13 @@ The live demo uses **two terminals** (a third is optional). `serve` runs
 **supervised** in the foreground and pauses for you to approve each operation
 inline — Claude-Code style.
 
+> **Prefer the graphical console?** After the VM is up and air-gapped (`make
+> demo-up` then `make demo-firewall`), run **`make demo-console`** in Terminal A
+> instead of `make demo-live`. Bare `iceclimber` serves the sandbox in a live
+> split-pane cockpit and surfaces each approval as a modal you answer in-place
+> (`y`/`a`/`n`/`d`) — same gating, richer view. Then run `make demo-agent` in
+> Terminal B as below. (`make demo-live` stays the scripted/verified path.)
+
 **Terminal A — set up + serve (supervised):**
 
 ```sh

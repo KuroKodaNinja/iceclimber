@@ -46,11 +46,16 @@ make demo             # acceptance demo: real Claude agent in an air-gapped VM (
 Per-language application scenarios (build + run a real program in the sandbox) live
 in [`test/scenarios/`](test/scenarios/), each self-contained with its own README.
 
-Watch a run unfold with `iceclimber logs -f` (Popo's `[POPO]` activity; add
-`--agent-log <file>` for the sandbox `[NANA]` side) — or `iceclimber tui` for a
-live split-pane dashboard over the same activity JSONL. `make demo-logs` /
-`make demo-tui` wire both for the demo VM. `serve` prints the same per-request feed
-on its stdout.
+Bare **`iceclimber`** launches the **operator console**: it serves the sandbox,
+streams live `[POPO]`/`[NANA]` activity, and surfaces each approval as an inline
+modal — the TUI-first cockpit (`make demo-console` wires it for the demo VM).
+Subcommands stay for scripting/CI; `iceclimber serve` is the headless path.
+
+Watch a *headless* run unfold with `iceclimber logs -f` (Popo's `[POPO]` activity;
+add `--agent-log <file>` for the sandbox `[NANA]` side) — or `iceclimber tui` for a
+live split-pane dashboard over the same activity JSONL (the **attach** view, vs the
+console's **embed** view). `make demo-logs` / `make demo-tui` wire both for the demo
+VM. `serve` prints the same per-request feed on its stdout.
 
 On a terminal, `serve` runs **supervised**: it prompts (Claude-Code-style, with
 context) before each install/fetch and you approve inline — `y`/`a`/`n`/`d`.
