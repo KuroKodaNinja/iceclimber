@@ -28,6 +28,11 @@ no `InsecureIgnoreHostKey`).
 - **Test as we build.** Every phase gets a real functional/E2E test, not just
   unit tests. The harness drives the *real binary* against a Lima/Alpine sandbox
   (`test/functional/`, `//go:build functional`). See [`test/README.md`](./test/README.md).
+- **TUI flows are tested as a rule.** Every console flow — every key, modal, form
+  field, and state transition — has a flow test driving the *real* Bubble Tea
+  runtime via `teatest` (`internal/tui/flows_test.go`), the interactive analogue of
+  the CLI's stdin/stdout tests. New TUI behaviour ⇒ a new flow test. The console's
+  executor also has a live-VM functional test (`make tui-functional`).
 - **Commits.** Conventional Commits, atomic and self-contained — each commit
   builds and passes tests on its own. See `.agents/git/commits`.
 
@@ -38,6 +43,7 @@ make build            # build ./iceclimber
 make test             # unit suite (go test -race ./...)
 make sandbox-up       # boot the Lima/Alpine functional sandbox
 make test-functional  # black-box E2E against the VM
+make tui-functional   # console executor (install/bootstrap) against the VM
 make scenario         # full-stack "build a real app" tests per language (test/scenarios/)
 make sandbox-down     # tear it down
 make demo             # acceptance demo: real Claude agent in an air-gapped VM (DEMO.md)
