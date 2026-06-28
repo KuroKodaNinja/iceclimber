@@ -3,7 +3,6 @@ package npm
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"path"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/node"
@@ -54,14 +53,28 @@ func Run(ctx context.Context, d Deps, nodeVersion string, specs []pkg.Spec, tier
 		ControllerRegistry: d.ControllerRegistry,
 	})
 
+	result := func(o pkg.Outcome) Result {
+		return Result{Installed: o.Installed, Failed: o.Failed, NodePath: m.cfg.NodePath}
+	}
 	if resolveTier(tier, d.RegistryURL) == pkg.TierRelay {
-		return Result{}, fmt.Errorf("npm Tier 1 relay is not yet available; configure npm.registry_url (a sandbox-reachable registry) for Tier 0")
+		out, err := m.RelayInstall(ctx, specs)
+		if err != nil {
+			return Result{}, err
+		}
+		return result(out), nil
 	}
 	out, err := m.Install(ctx, specs)
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Installed: out.Installed, Failed: out.Failed, NodePath: m.cfg.NodePath}, nil
+	// Tier 0→1 auto-fallback (mirror pip #25): if auto-mirror installed nothing
+	// (registry unreachable, or none of the packages are there), try the relay.
+	if (tier == "" || tier == "auto") && len(out.Installed) == 0 && len(out.Failed) > 0 {
+		if relayOut, relayErr := m.RelayInstall(ctx, specs); relayErr == nil {
+			return result(relayOut), nil
+		}
+	}
+	return result(out), nil
 }
 
 // resolveTier maps the requested tier to a concrete one. "auto" picks relay when

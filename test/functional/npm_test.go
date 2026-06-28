@@ -5,6 +5,7 @@ package functional
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,6 +38,33 @@ func TestNpmInstallTier0(t *testing.T) {
 	res := limaSh(t, cmd)
 	if !strings.Contains(res, "    x") { // left-pad('x',5) computes 4 spaces + x
 		t.Errorf("require('left-pad') output = %q, want it to contain %q", res, "    x")
+	}
+}
+
+// TestNpmInstallTier1Relay forces the relay: the controller's npm installs into a
+// staging prefix and Popo relays the node_modules tree in — the sandbox runs no
+// npm and needs no registry. Then the package require()s via NODE_PATH.
+func TestNpmInstallTier1Relay(t *testing.T) {
+	if _, err := exec.LookPath("npm"); err != nil {
+		t.Skip("Tier 1 relay needs npm on the controller (this host)")
+	}
+	sb := requireSandbox(t)
+	root := "/tmp/iceclimber-npm1-" + protocol.NewID()
+	cfg := writeConfigRoot(t, sb, root) // no registry_url
+
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
+	runIceclimber(t, "install", "node", "24", "--config", cfg, "--transport", "sftp")
+
+	out := string(runIceclimber(t, "install", "npm", "left-pad", "--node", "24", "--tier", "relay", "--config", cfg, "--transport", "sftp"))
+	if !strings.Contains(out, "installed left-pad") || !strings.Contains(out, "(relay)") {
+		t.Fatalf("npm relay install output:\n%s", out)
+	}
+	nodePath := grepNodePath(t, out)
+
+	nodeBin := strings.TrimSuffix(nodePath, "/lib/node_modules") + "/bin/node"
+	cmd := fmt.Sprintf("NODE_PATH=%s %s -e %s", remoteQuote(nodePath), remoteQuote(nodeBin), remoteQuote(`console.log(require('left-pad')('y', 4))`))
+	if res := limaSh(t, cmd); !strings.Contains(res, "   y") { // left-pad('y',4) → 3 spaces + y
+		t.Errorf("relay require('left-pad') = %q, want it to contain %q", res, "   y")
 	}
 }
 
