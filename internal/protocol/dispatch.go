@@ -20,6 +20,7 @@ type Dispatcher struct {
 	registry Registry
 	seq      int64
 	observe  func(ServiceEvent)
+	gate     func(context.Context, Request) error
 }
 
 // ServiceEvent reports one serviced request to an optional observer. It carries
@@ -41,6 +42,12 @@ func NewDispatcher(fs remotefs.FS, tree Tree, reg Registry) *Dispatcher {
 // response is delivered). Used by `serve` to feed the activity log. Optional —
 // a nil observer is silent.
 func (d *Dispatcher) Observe(fn func(ServiceEvent)) { d.observe = fn }
+
+// SetGate registers a pre-execution gate consulted just before a request's
+// handler runs. A non-nil error short-circuits the request to an
+// "operator_denied" response (the handler never runs). Used by interactive
+// `serve` to prompt the operator. Optional — a nil gate runs everything.
+func (d *Dispatcher) SetGate(fn func(context.Context, Request) error) { d.gate = fn }
 
 // RunOnce performs a single dispatch cycle: recover any in-flight requests left
 // in cur/ by a previous crash, then drain new/ oldest-first. Used by
@@ -177,6 +184,11 @@ func (d *Dispatcher) dispatch(ctx context.Context, name string, data []byte) Res
 	h, ok := d.registry[req.Type]
 	if !ok {
 		return Errf(req.ID, "unknown_type", "no handler for request type %q", req.Type)
+	}
+	if d.gate != nil {
+		if err := d.gate(ctx, req); err != nil {
+			return Errf(req.ID, "operator_denied", "%v", err)
+		}
 	}
 	return h(ctx, req)
 }

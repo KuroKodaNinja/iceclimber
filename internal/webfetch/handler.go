@@ -15,13 +15,44 @@ import (
 )
 
 // Deps are what a web.fetch needs: where to run, the egress policy, and the
-// audit log.
+// audit log. Approver (optional) turns a held controller-venue fetch into an
+// inline operator prompt instead of the async pending flow.
 type Deps struct {
-	Runner remote.Runner
-	FS     remotefs.FS
-	Root   string
-	Policy *egress.Policy
-	Audit  *audit.Logger
+	Runner    remote.Runner
+	FS        remotefs.FS
+	Root      string
+	Policy    *egress.Policy
+	Audit     *audit.Logger
+	SandboxID string
+	Approver  Approver
+}
+
+// ApprovalChoice is the operator's decision on a held controller-venue fetch.
+type ApprovalChoice int
+
+const (
+	ApproveOnce ApprovalChoice = iota
+	ApproveRemember
+	DenyOnce
+	DenyRemember
+)
+
+// ApprovalPrompt is the context shown to the operator for a held fetch — enough
+// to make an informed call (which network it leaves, why it's held).
+type ApprovalPrompt struct {
+	SandboxID string
+	RequestID string
+	Method    string
+	URL       string // resolved (post-rewrite)
+	Original  string // original URL if rewritten, else ""
+	Host      string
+	Reason    string
+}
+
+// Approver decides a held controller-venue fetch interactively. A nil
+// Deps.Approver falls back to the async pending/needs_clarification flow.
+type Approver interface {
+	ApproveFetch(ctx context.Context, p ApprovalPrompt) ApprovalChoice
 }
 
 // GateOutcome is the venue/gate result, neutral between the protocol handler and
@@ -85,20 +116,9 @@ func Run(ctx context.Context, d Deps, id string, req Request) (GateOutcome, erro
 		return GateOutcome{Status: "ok", Result: res, Venue: venue, URL: resolved}, nil
 	}
 
-	// Controller venue → gate.
-	switch d.Policy.Decide(resolved) {
-	case egress.Deny:
-		record("denied", Result{}, "error")
-		return GateOutcome{Status: "denied", Venue: venue, URL: resolved}, nil
-
-	case egress.Hold:
-		host := hostOnly(resolved)
-		_ = d.Policy.Store().AddPending(egress.PendingEntry{ID: id, URL: resolved, Host: host})
-		record("held", Result{}, "ok")
-		q := fmt.Sprintf("controller-venue fetch to %s requires approval; run: iceclimber approve %s", host, id)
-		return GateOutcome{Status: "needs_clarification", Venue: venue, URL: resolved, Question: q, PendingID: id}, nil
-
-	default: // Allow
+	// Controller venue → gate. doFetch/denied are shared by the rule-based and
+	// interactively-approved paths.
+	doFetch := func() (GateOutcome, error) {
 		res, err := controllerFetch(ctx, d.FS, d.Root, method, req, resolved)
 		if err != nil {
 			record("allow", Result{}, "error")
@@ -106,6 +126,45 @@ func Run(ctx context.Context, d Deps, id string, req Request) (GateOutcome, erro
 		}
 		record("allow", res, "ok")
 		return GateOutcome{Status: "ok", Result: res, Venue: venue, URL: resolved}, nil
+	}
+	denied := func() (GateOutcome, error) {
+		record("denied", Result{}, "error")
+		return GateOutcome{Status: "denied", Venue: venue, URL: resolved}, nil
+	}
+
+	switch d.Policy.Decide(resolved) {
+	case egress.Deny:
+		return denied()
+
+	case egress.Hold:
+		host := hostOnly(resolved)
+		// Interactive: prompt the operator now and proceed in the same pass.
+		if d.Approver != nil {
+			switch d.Approver.ApproveFetch(ctx, ApprovalPrompt{
+				SandboxID: d.SandboxID, RequestID: id, Method: method,
+				URL: resolved, Original: rewrittenURL, Host: host,
+				Reason: "host is not in the allow-list",
+			}) {
+			case ApproveRemember:
+				_ = d.Policy.Store().AddAllow(egress.HostGlob(resolved))
+				return doFetch()
+			case ApproveOnce:
+				return doFetch()
+			case DenyRemember:
+				_ = d.Policy.Store().AddDeny(egress.HostGlob(resolved))
+				return denied()
+			default: // DenyOnce
+				return denied()
+			}
+		}
+		// Non-interactive: async approval via the pending queue.
+		_ = d.Policy.Store().AddPending(egress.PendingEntry{ID: id, URL: resolved, Host: host})
+		record("held", Result{}, "ok")
+		q := fmt.Sprintf("controller-venue fetch to %s requires approval; run: iceclimber approve %s", host, id)
+		return GateOutcome{Status: "needs_clarification", Venue: venue, URL: resolved, Question: q, PendingID: id}, nil
+
+	default: // Allow
+		return doFetch()
 	}
 }
 
