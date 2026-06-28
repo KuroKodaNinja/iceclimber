@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/egress"
 	"github.com/spf13/cobra"
@@ -61,6 +62,9 @@ func newApproveCmd() *cobra.Command {
 			if err := store.AddAllow(rule); err != nil {
 				return err
 			}
+			_ = activity.New(activityPath(cfg)).Append(activity.Event{
+				Kind: activity.KindApproved, ID: entry.ID, Type: "web.fetch", Detail: entry.URL,
+			})
 			fmt.Fprintf(cmd.OutOrStdout(), "approved %s\n  allow rule: %s\n  re-submit the fetch to proceed.\n", entry.URL, rule)
 			return nil
 		},
@@ -92,6 +96,9 @@ func newDenyCmd() *cobra.Command {
 			if err := store.AddDeny(rule); err != nil {
 				return err
 			}
+			_ = activity.New(activityPath(cfg)).Append(activity.Event{
+				Kind: activity.KindDenied, ID: entry.ID, Type: "web.fetch", Detail: entry.URL,
+			})
 			fmt.Fprintf(cmd.OutOrStdout(), "denied %s\n  deny rule: %s\n  reason: %s\n", entry.URL, rule, reason)
 			return nil
 		},
