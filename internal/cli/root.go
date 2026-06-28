@@ -4,6 +4,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/spf13/cobra"
@@ -35,6 +36,14 @@ func newRootCmd() *cobra.Command {
 					"no usable config (%v)\nPoint at a sandbox first: `iceclimber init` then edit %s, or pass --config.\n",
 					err, cfgFile)
 				return err
+			}
+			// The console is interactive — only launch it on a real terminal.
+			// Headless (CI, pipes, no TTY) falls back to the unattended serve loop,
+			// so command-line operation keeps working with the TUI present.
+			if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+				fmt.Fprintln(cmd.ErrOrStderr(),
+					"iceclimber: no terminal detected — running headless serve (use subcommands for other actions)")
+				return runHeadless(cmd.Context(), cfg, consoleTransport, cmd.OutOrStdout())
 			}
 			return runConsole(cmd.Context(), cfg, consoleTransport, consoleAgentLog)
 		},

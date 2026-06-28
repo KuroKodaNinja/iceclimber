@@ -63,7 +63,9 @@ echoed into `[NANA]` (the sandbox's voice: `python -V`/`node --version`, a packa
 presence check, the bootstrap ping/pong) — so `[POPO]` shows what the controller did
 and `[NANA]` shows the sandbox confirming it. The TUI-first cockpit (`make
 demo-console` wires it for the demo VM). Subcommands stay for scripting/CI;
-`iceclimber serve` is the headless path.
+`iceclimber serve` is the headless path — and bare `iceclimber` with **no terminal**
+(CI, pipes) auto-falls back to that unattended serve loop, so command-line operation
+keeps working with the TUI present.
 
 Watch a *headless* run unfold with `iceclimber logs -f` (Popo's `[POPO]` activity;
 add `--agent-log <file>` for the sandbox `[NANA]` side) — or `iceclimber tui` for a

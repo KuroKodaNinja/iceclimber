@@ -122,22 +122,26 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		if err != nil {
 			return opResult{typ: "python.install", err: err, echoes: echoes}
 		}
-		out, err := pip.Run(o.ctx, pipDeps(o.sess), ver, parseSpecs(specs), "auto")
+		pkgs := parseSpecs(specs)
+		out, err := pip.Run(o.ctx, pipDeps(o.sess), ver, pkgs, "auto")
 		if err != nil {
 			return opResult{typ: "pip.install", err: err, echoes: echoes}
 		}
-		echoes = append(echoes, o.verifyPyPkgs(ver, out.Installed)...)
+		// Verify what was *requested* (not just what was newly installed) so an
+		// already-present package is still confirmed.
+		echoes = append(echoes, o.verifyPyPkgs(ver, specNames(pkgs))...)
 		return opResult{typ: "pip.install", detail: pkgSummary(out.Installed, out.Failed), echoes: echoes}
 	case "javascript":
 		echoes, err := o.ensureNode(ver)
 		if err != nil {
 			return opResult{typ: "node.install", err: err, echoes: echoes}
 		}
-		out, err := npm.Run(o.ctx, npmDeps(o.sess), ver, parseNpmSpecs(specs), "auto")
+		pkgs := parseNpmSpecs(specs)
+		out, err := npm.Run(o.ctx, npmDeps(o.sess), ver, pkgs, "auto")
 		if err != nil {
 			return opResult{typ: "npm.install", err: err, echoes: echoes}
 		}
-		echoes = append(echoes, o.verifyNodePkgs(ver, out.Installed)...)
+		echoes = append(echoes, o.verifyNodePkgs(ver, specNames(pkgs))...)
 		return opResult{typ: "npm.install", detail: pkgSummary(out.Installed, out.Failed), echoes: echoes}
 	}
 	return opResult{typ: "install", err: fmt.Errorf("unknown language %q", r.Lang)}
@@ -185,42 +189,74 @@ func (o *consoleOps) verifyRuntime(bin, flag string) echo {
 	return echo{banner, true}
 }
 
-// verifyPyPkgs confirms each installed package is present in the sandbox runtime
-// via `pip show` (the dist name, so no import-name guessing).
-func (o *consoleOps) verifyPyPkgs(ver string, installed []pkg.Installed) []echo {
+// specNames extracts the package names from parsed specs (for verification by name).
+func specNames(specs []pkg.Spec) []string {
+	names := make([]string, 0, len(specs))
+	for _, s := range specs {
+		names = append(names, s.Name)
+	}
+	return names
+}
+
+// verifyPyPkgs confirms each requested package is present in the sandbox runtime via
+// `pip show` (the dist name, so no import-name guessing), reading the version the
+// sandbox actually has.
+func (o *consoleOps) verifyPyPkgs(ver string, names []string) []echo {
 	bin, err := python.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
 	if err != nil {
 		return []echo{{"python " + ver + " runtime not found to verify packages", false}}
 	}
-	echoes := make([]echo, 0, len(installed))
-	for _, p := range installed {
-		res, err := o.sess.runner.Run(o.ctx, remote.ShellQuote(bin)+" -m pip show "+remote.ShellQuote(p.Name), nil)
+	echoes := make([]echo, 0, len(names))
+	for _, name := range names {
+		res, err := o.sess.runner.Run(o.ctx, remote.ShellQuote(bin)+" -m pip show "+remote.ShellQuote(name), nil)
 		if err != nil || res.ExitCode != 0 {
-			echoes = append(echoes, echo{p.Name + " not present", false})
+			echoes = append(echoes, echo{name + " not present", false})
 			continue
 		}
-		echoes = append(echoes, echo{p.Name + " " + p.Version + " present", true})
+		echoes = append(echoes, echo{present(name, fieldValue(res.Stdout, "Version:")), true})
 	}
 	return echoes
 }
 
-// verifyNodePkgs confirms each installed package's node_modules dir exists in the
+// verifyNodePkgs confirms each requested package's node_modules dir exists in the
 // sandbox runtime (the dir name is the package name, so no require-name guessing).
-func (o *consoleOps) verifyNodePkgs(ver string, installed []pkg.Installed) []echo {
+func (o *consoleOps) verifyNodePkgs(ver string, names []string) []echo {
 	bin, err := node.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
 	if err != nil {
 		return []echo{{"node " + ver + " runtime not found to verify packages", false}}
 	}
 	modules := path.Join(path.Dir(path.Dir(bin)), "lib", "node_modules")
-	echoes := make([]echo, 0, len(installed))
-	for _, p := range installed {
-		if _, err := o.sess.fs.ReadFile(o.ctx, path.Join(modules, p.Name, "package.json")); err != nil {
-			echoes = append(echoes, echo{p.Name + " not present in node_modules", false})
+	echoes := make([]echo, 0, len(names))
+	for _, name := range names {
+		data, err := o.sess.fs.ReadFile(o.ctx, path.Join(modules, name, "package.json"))
+		if err != nil {
+			echoes = append(echoes, echo{name + " not present in node_modules", false})
 			continue
 		}
-		echoes = append(echoes, echo{p.Name + " " + p.Version + " present", true})
+		echoes = append(echoes, echo{present(name, fieldValue(data, "\"version\"")), true})
 	}
 	return echoes
+}
+
+// present formats a "<name> <version> present" echo (version optional).
+func present(name, version string) string {
+	if version == "" {
+		return name + " present"
+	}
+	return name + " " + version + " present"
+}
+
+// fieldValue pulls a value off the first line that has the given prefix, trimming
+// surrounding quotes/colons/commas — handles both `pip show` (Version: x) and
+// package.json (`"version": "x"`).
+func fieldValue(data []byte, prefix string) string {
+	for _, ln := range strings.Split(string(data), "\n") {
+		ln = strings.TrimSpace(ln)
+		if rest, ok := strings.CutPrefix(ln, prefix); ok {
+			return strings.Trim(strings.TrimSpace(rest), "\":, ")
+		}
+	}
+	return ""
 }
 
 // firstLine returns the first non-blank line of s, trimmed.
@@ -293,6 +329,9 @@ func pkgSummary(installed []pkg.Installed, failed []pkg.Failure) string {
 		parts = append(parts, p.Name+" "+p.Version)
 	}
 	s := fmt.Sprintf("%d installed", len(installed))
+	if len(installed) == 0 && len(failed) == 0 {
+		s = "already satisfied"
+	}
 	if len(parts) > 0 {
 		s += ": " + strings.Join(parts, ", ")
 	}

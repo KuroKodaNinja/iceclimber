@@ -12,16 +12,21 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/exp/teatest"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/python"
+	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/tui"
 )
 
@@ -141,5 +146,63 @@ func TestConsoleOps_BootstrapFlow(t *testing.T) {
 	}
 	if !nanaConfirms(evs, "pong") {
 		t.Errorf("Nana should echo the sandbox pong; events=%+v", evs)
+	}
+}
+
+// waitOut blocks until all substrings have rendered in the program output.
+func waitOut(t *testing.T, tm *teatest.TestModel, subs ...string) {
+	t.Helper()
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		for _, s := range subs {
+			if !bytes.Contains(b, []byte(s)) {
+				return false
+			}
+		}
+		return true
+	}, teatest.WithDuration(2*time.Minute), teatest.WithCheckInterval(50*time.Millisecond))
+}
+
+// TestConsoleTUI_FullInstall is the full-stack TUI test (the analogue of the
+// app-building suites): it runs the REAL console program (teatest) wired to a live
+// sandbox, drives the install form by keystroke, and asserts that the package
+// actually lands in the sandbox AND that Nana's confirmation renders in [NANA].
+func TestConsoleTUI_FullInstall(t *testing.T) {
+	sess := consoleSession(t)
+	defer sess.Close()
+	if err := provision(context.Background(), sess); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+
+	events := make(chan tea.Msg, 128)
+	act := activity.New(filepath.Join(t.TempDir(), "activity.jsonl"))
+	ops := &consoleOps{ctx: context.Background(), sess: sess, act: act, events: events}
+	model := tui.NewConsole(sess.sandboxID, events, "", ops)
+	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(120, 40))
+
+	// Drive the install form: i → Python (default) → packages "six" → version blank → submit.
+	waitOut(t, tm, "i install")
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	waitOut(t, tm, "language")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // accept Python, advance to packages
+	waitOut(t, tm, "requests / figlet")
+	tm.Type("six")
+	waitOut(t, tm, "six")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // advance to version
+	waitOut(t, tm, "3.12 / 24")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // submit ⇒ real install runs in the sandbox
+
+	// The sandbox echo renders in [NANA] once the real install completes (up to 2m).
+	waitOut(t, tm, "✓ six", "present")
+	tm.Quit()
+	tm.WaitFinished(t, teatest.WithFinalTimeout(10*time.Second))
+
+	// Independently confirm the package really is installed in the sandbox.
+	bin, err := python.Locate(context.Background(), sess.fs, sess.tree.Root, "3.12", sess.fp.Arch, sess.fp.Libc.Family)
+	if err != nil {
+		t.Fatalf("python runtime not located after TUI install: %v", err)
+	}
+	res, err := sess.runner.Run(context.Background(), remote.ShellQuote(bin)+" -m pip show six", nil)
+	if err != nil || res.ExitCode != 0 {
+		t.Fatalf("six not actually installed in the sandbox after the TUI flow (exit %d, err %v)", res.ExitCode, err)
 	}
 }

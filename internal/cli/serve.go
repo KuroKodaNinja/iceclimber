@@ -80,6 +80,21 @@ func isTerminal(f *os.File) bool {
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
+// runHeadless is the command-line fallback for bare `iceclimber` when there is no
+// terminal for the console TUI: the same unattended serve loop `iceclimber serve`
+// runs. Keeps the headless mode fully functional with a TUI present.
+func runHeadless(ctx context.Context, cfg *config.Config, transport string, out io.Writer) error {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return withDispatcher(ctx, cfg, transport, nil, out, false, func(d *protocol.Dispatcher) error {
+		fmt.Fprintf(out, "serving sandbox %s (headless); Ctrl-C to stop\n", cfg.SandboxID)
+		if err := d.Serve(ctx, 2*time.Second); err != nil && !errors.Is(err, context.Canceled) {
+			return err
+		}
+		return nil
+	})
+}
+
 // withDispatcher opens a session, builds a dispatcher (minus any denied verbs),
 // wires the activity observer (durable JSONL + a live stdout feed) and — when
 // supervised — the interactive approver (gate + inline egress approval), runs fn,

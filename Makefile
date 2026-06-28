@@ -39,7 +39,7 @@ test-functional: build
 # test-functional. Drives the same path the console's forms feed and asserts the
 # sandbox-side echo. Writes a config first; skips cleanly if the VM is unreachable.
 tui-functional: build sandbox-up sandbox-config
-	go test -tags functional -count=1 -timeout 15m -run TestConsoleOps ./internal/cli/...
+	go test -tags functional -count=1 -timeout 20m -run TestConsole ./internal/cli/...
 
 # Self-contained, full-stack "build a real application" scenarios (one per
 # language) under test/scenarios/. Gated by the `scenario` build tag; needs the
