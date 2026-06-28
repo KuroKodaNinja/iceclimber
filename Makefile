@@ -12,7 +12,7 @@ DEMO_TPL    := test/lima/demo.yaml
 DEMO_CFG    := .demo/config.yaml
 BIN         := iceclimber
 
-.PHONY: build fmt vet test test-functional scenario e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
+.PHONY: build fmt vet test test-functional tui-functional scenario e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
 	demo-up demo-down demo-status demo-firewall demo-firewall-down demo-shell \
 	demo demo-live demo-console demo-config demo-bootstrap demo-agent demo-verify demo-reset demo-logs demo-tui clean
 
@@ -33,6 +33,13 @@ test:
 # sandbox to be running (see sandbox-up); tests skip with a clear message if not.
 test-functional: build
 	go test -tags functional -count=1 ./test/functional/...
+
+# Functional validation of the console's operator-action executor (consoleOps:
+# RunInstall/RunBootstrap) against the sandbox — the TUI analogue of
+# test-functional. Drives the same path the console's forms feed and asserts the
+# sandbox-side echo. Writes a config first; skips cleanly if the VM is unreachable.
+tui-functional: build sandbox-up sandbox-config
+	go test -tags functional -count=1 -timeout 15m -run TestConsoleOps ./internal/cli/...
 
 # Self-contained, full-stack "build a real application" scenarios (one per
 # language) under test/scenarios/. Gated by the `scenario` build tag; needs the

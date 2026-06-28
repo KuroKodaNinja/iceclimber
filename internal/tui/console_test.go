@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -166,12 +167,12 @@ func TestConsole_SubmitInstallRunsOp(t *testing.T) {
 	ops := &fakeOps{}
 	c := NewConsole("sbx", make(chan tea.Msg), "", ops)
 	c.formKind = "install"
-	c.fLang, c.fAction, c.fVersion, c.fPkgs = "javascript", "packages", "24", "figlet"
+	c.st = &formState{lang: "javascript", version: "24", pkgs: "figlet"}
 
 	updated, cmd := c.submitForm("install")
 	c2 := updated.(Console)
-	if c2.running != "JavaScript packages" {
-		t.Fatalf("running = %q, want JavaScript packages", c2.running)
+	if c2.running != "JavaScript install" {
+		t.Fatalf("running = %q, want JavaScript install", c2.running)
 	}
 	if cmd == nil {
 		t.Fatal("submit should return the op command")
@@ -179,7 +180,7 @@ func TestConsole_SubmitInstallRunsOp(t *testing.T) {
 	if _, ok := cmd().(OpResultMsg); !ok {
 		t.Error("op command should resolve to OpResultMsg")
 	}
-	if ops.install == nil || ops.install.Lang != "javascript" || ops.install.Action != "packages" ||
+	if ops.install == nil || ops.install.Lang != "javascript" ||
 		ops.install.Version != "24" || ops.install.Pkgs != "figlet" {
 		t.Errorf("RunInstall got %+v", ops.install)
 	}
@@ -191,11 +192,124 @@ func TestConsole_SubmitInstallRunsOp(t *testing.T) {
 	}
 }
 
+// runCmd executes a tea.Cmd but gives up after a short delay, so timer-based cmds
+// (huh's cursor blink) and blocking cmds (the console's waitEvent) are skipped while
+// instantaneous navigation messages (huh's nextField/nextGroup) still flow.
+func runCmd(cmd tea.Cmd) tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	ch := make(chan tea.Msg, 1)
+	go func() { ch <- cmd() }()
+	select {
+	case m := <-ch:
+		return m
+	case <-time.After(25 * time.Millisecond):
+		return nil
+	}
+}
+
+// driveKeys feeds key messages through the console and pumps the resulting cmds
+// (breadth-first over batches) so huh's field/group transitions actually happen —
+// approximating the Bubble Tea runtime closely enough to drive the real form.
+func driveKeys(c Console, keys ...tea.Msg) Console {
+	m := tea.Model(c)
+	pump := func(cmd tea.Cmd) {
+		queue := []tea.Cmd{cmd}
+		for i := 0; i < 300 && len(queue) > 0; i++ {
+			msg := runCmd(queue[0])
+			queue = queue[1:]
+			switch mm := msg.(type) {
+			case nil:
+			case tea.BatchMsg:
+				queue = append(queue, mm...)
+			default:
+				var nc tea.Cmd
+				m, nc = m.Update(msg)
+				queue = append(queue, nc)
+			}
+		}
+	}
+	for _, k := range keys {
+		var cmd tea.Cmd
+		m, cmd = m.Update(k)
+		pump(cmd)
+	}
+	return m.(Console)
+}
+
+func key(s string) tea.Msg       { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+func typeRunes(s string) tea.Msg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+
+var (
+	enterKey = tea.KeyMsg{Type: tea.KeyEnter}
+	downKey  = tea.KeyMsg{Type: tea.KeyDown}
+)
+
+// TestConsole_InstallFlow_Python drives the actual form: open, type packages,
+// leave version blank, submit — asserting the request reaches the OpRunner.
+func TestConsole_InstallFlow_Python(t *testing.T) {
+	ops := &fakeOps{}
+	c := NewConsole("sbx", make(chan tea.Msg), "", ops)
+	// i → [language: Python default] enter → [packages] type → enter → [version] enter.
+	c = driveKeys(c, key("i"), enterKey, typeRunes("requests"), enterKey, enterKey)
+	if ops.install == nil {
+		t.Fatal("install flow did not reach the OpRunner")
+	}
+	if ops.install.Lang != "python" || ops.install.Pkgs != "requests" || ops.install.Version != "" {
+		t.Errorf("python flow request = %+v, want {python requests <blank>}", ops.install)
+	}
+}
+
+// TestConsole_InstallFlow_JavaScript is the regression for the value-copy binding
+// bug: selecting JavaScript must actually reach the request (it previously stayed
+// Python because the form wrote to a stale Console copy).
+func TestConsole_InstallFlow_JavaScript(t *testing.T) {
+	ops := &fakeOps{}
+	c := NewConsole("sbx", make(chan tea.Msg), "", ops)
+	// i → [language] down→JavaScript, enter → [packages] type → enter → [version] type → enter.
+	c = driveKeys(c, key("i"), downKey, enterKey, typeRunes("figlet"), enterKey, typeRunes("24"), enterKey)
+	if ops.install == nil {
+		t.Fatal("javascript flow did not reach the OpRunner")
+	}
+	if ops.install.Lang != "javascript" {
+		t.Errorf("selecting JavaScript must reach the request; got Lang=%q (binding bug?)", ops.install.Lang)
+	}
+	if ops.install.Pkgs != "figlet" || ops.install.Version != "24" {
+		t.Errorf("javascript flow request = %+v, want {javascript figlet 24}", ops.install)
+	}
+}
+
+// TestConsole_InstallFlow_RequiresPackages: submitting with no packages must not
+// fire an install (the field is required).
+func TestConsole_InstallFlow_RequiresPackages(t *testing.T) {
+	ops := &fakeOps{}
+	c := NewConsole("sbx", make(chan tea.Msg), "", ops)
+	c = driveKeys(c, key("i"), enterKey, enterKey, enterKey, enterKey)
+	if ops.install != nil {
+		t.Errorf("blank packages must not install; got %+v", ops.install)
+	}
+	if c.form == nil {
+		t.Error("the form should stay open on a validation error")
+	}
+}
+
+// TestConsole_BootstrapFlow drives the confirm form and asserts RunBootstrap fires.
+func TestConsole_BootstrapFlow(t *testing.T) {
+	ops := &fakeOps{}
+	c := NewConsole("sbx", make(chan tea.Msg), "", ops)
+	// b → confirm defaults to "no"; left/"yes" then enter.
+	c = driveKeys(c, key("b"), key("y"), enterKey)
+	if !ops.bootstrap {
+		t.Error("confirming bootstrap should call RunBootstrap")
+	}
+}
+
 func TestConsole_BootstrapDeclinedRunsNothing(t *testing.T) {
 	ops := &fakeOps{}
 	c := NewConsole("sbx", make(chan tea.Msg), "", ops)
 	c.formKind = "bootstrap"
-	c.fConfirm = false
+	c.st = &formState{confirm: false}
 
 	updated, cmd := c.submitForm("bootstrap")
 	if updated.(Console).running != "" || cmd != nil {

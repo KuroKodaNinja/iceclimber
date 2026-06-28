@@ -46,14 +46,13 @@ type ApprovalRequest struct {
 
 // InstallRequest is an operator-initiated install (not an agent maildir request),
 // filled from the console's install form and handed to the OpRunner. The operator
-// picks a language (Python / JavaScript) and whether to install its runtime or
-// packages; the underlying package manager (pip / npm) and resolution tier are
-// derived by the cli layer, not chosen here.
+// picks a language (Python / JavaScript) and the packages to install; the cli layer
+// ensures the runtime exists (installing it at Version, or the recommended default
+// when blank) and derives the package manager (pip / npm) and resolution tier.
 type InstallRequest struct {
 	Lang    string // "python" | "javascript"
-	Action  string // "runtime" | "packages"
-	Version string // runtime version to install or target (blank = recommended default)
-	Pkgs    string // space/comma-separated specs (Action == "packages")
+	Version string // runtime version to ensure/target (blank = recommended default)
+	Pkgs    string // space/comma-separated package specs
 }
 
 // OpResultMsg signals an operator-initiated action finished; it clears the running
@@ -93,9 +92,18 @@ type Console struct {
 	width     int
 	height    int
 
-	// form-bound values
-	fLang, fAction, fVersion, fPkgs string
-	fConfirm                        bool
+	// form-bound values. Held behind a pointer so the huh form and every
+	// (value-copied) Console share one struct — binding to &c.field directly
+	// would dangle to a stale copy once Bubble Tea stores the returned model.
+	st *formState
+}
+
+// formState holds the operator form's bound values.
+type formState struct {
+	lang    string
+	version string
+	pkgs    string
+	confirm bool
 }
 
 // NewConsole builds a console reading events (and, optionally, the agent stream).
@@ -215,14 +223,17 @@ func (c Console) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // submitForm kicks off the operator action the completed form described.
 func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
+	if c.st == nil {
+		return c, nil
+	}
 	switch kind {
 	case "install":
-		c.running = installLabel(c.fLang, c.fAction)
+		c.running = installLabel(c.st.lang)
 		return c, c.ops.RunInstall(InstallRequest{
-			Lang: c.fLang, Action: c.fAction, Version: c.fVersion, Pkgs: c.fPkgs,
+			Lang: c.st.lang, Version: c.st.version, Pkgs: c.st.pkgs,
 		})
 	case "bootstrap":
-		if !c.fConfirm {
+		if !c.st.confirm {
 			return c, nil // operator declined at the confirm
 		}
 		c.running = "bootstrap"
@@ -232,45 +243,36 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 }
 
 func (c *Console) installForm() *huh.Form {
-	c.fLang, c.fAction, c.fVersion, c.fPkgs = "python", "runtime", "", ""
-	// huh hides at the group level, so the packages field (only meaningful when
-	// installing packages) lives in its own group, skipped for a runtime install.
-	return huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().Title("language").Value(&c.fLang).Options(
-				huh.NewOption("Python", "python"),
-				huh.NewOption("JavaScript", "javascript"),
-			),
-			huh.NewSelect[string]().Title("install").Value(&c.fAction).Options(
-				huh.NewOption("runtime", "runtime"),
-				huh.NewOption("packages", "packages"),
-			),
-			huh.NewInput().Title("version").
-				Description("Blank uses the recommended default (Python 3.12 · JavaScript 24).").
-				Placeholder("e.g. 3.12 / 24").Value(&c.fVersion),
+	c.st = &formState{lang: "python"}
+	// Two languages, packages-first: the operator names the tools they want; the
+	// runtime is installed for them as needed (a bare runtime is a CLI concern).
+	return huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().Title("language").Value(&c.st.lang).Options(
+			huh.NewOption("Python", "python"),
+			huh.NewOption("JavaScript", "javascript"),
 		),
-		huh.NewGroup(
-			huh.NewInput().Title("packages").Placeholder("e.g. requests / figlet cli-table3").
-				Value(&c.fPkgs).Validate(required("at least one package")),
-		).WithHideFunc(func() bool { return c.fAction != "packages" }),
-	)
+		huh.NewInput().Title("packages").Placeholder("e.g. requests / figlet cli-table3").
+			Value(&c.st.pkgs).Validate(required("at least one package")),
+		huh.NewInput().Title("version (optional)").
+			Description("Blank uses the recommended default — Python 3.12 · JavaScript 24.").
+			Placeholder("3.12 / 24").Value(&c.st.version),
+	))
 }
 
 // installLabel is the friendly running indicator for an install action.
-func installLabel(lang, action string) string {
-	name := "Python"
+func installLabel(lang string) string {
 	if lang == "javascript" {
-		name = "JavaScript"
+		return "JavaScript install"
 	}
-	return name + " " + action
+	return "Python install"
 }
 
 func (c *Console) bootstrapForm() *huh.Form {
-	c.fConfirm = false
+	c.st = &formState{}
 	return huh.NewForm(huh.NewGroup(
 		huh.NewConfirm().Title("Re-provision this sandbox?").
 			Description("Ensure the protocol tree, pip.conf, and NANA.md, then run the ping/pong smoke test. Idempotent — existing runtimes and approvals are kept.").
-			Value(&c.fConfirm),
+			Value(&c.st.confirm),
 	))
 }
 

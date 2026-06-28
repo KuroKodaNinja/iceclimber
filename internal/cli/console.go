@@ -109,45 +109,66 @@ func (o *consoleOps) RunBootstrap() tea.Cmd {
 	}
 }
 
-// doInstall maps the operator's language/action to the right installer and tier
-// (always auto — the form doesn't expose it), applying a recommended default
-// version when none was given, then verifies the result in the sandbox so Nana
-// echoes back confirmation.
+// doInstall ensures the language runtime exists (installing it at the requested
+// version, or the recommended default when blank), installs the requested packages
+// via the derived manager (pip / npm, tier auto), and verifies the result in the
+// sandbox so Nana echoes back confirmation.
 func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 	ver := defaultVersion(r.Lang, r.Version)
+	specs := splitSpecs(r.Pkgs)
 	switch r.Lang {
 	case "python":
-		if r.Action == "packages" {
-			out, err := pip.Run(o.ctx, pipDeps(o.sess), ver, parseSpecs(splitSpecs(r.Pkgs)), "auto")
-			if err != nil {
-				return opResult{typ: "pip.install", err: err}
-			}
-			return opResult{typ: "pip.install", detail: pkgSummary(out.Installed, out.Failed),
-				echoes: o.verifyPyPkgs(ver, out.Installed)}
-		}
-		res, err := newInstaller(o.sess).Install(o.ctx, ver)
+		echoes, err := o.ensurePython(ver)
 		if err != nil {
-			return opResult{typ: "python.install", err: err}
+			return opResult{typ: "python.install", err: err, echoes: echoes}
 		}
-		return opResult{typ: "python.install", detail: runtimeSummary("python", res.Version, res.Path, res.AlreadyInstalled),
-			echoes: []echo{o.verifyRuntime(res.Path, "-V")}}
+		out, err := pip.Run(o.ctx, pipDeps(o.sess), ver, parseSpecs(specs), "auto")
+		if err != nil {
+			return opResult{typ: "pip.install", err: err, echoes: echoes}
+		}
+		echoes = append(echoes, o.verifyPyPkgs(ver, out.Installed)...)
+		return opResult{typ: "pip.install", detail: pkgSummary(out.Installed, out.Failed), echoes: echoes}
 	case "javascript":
-		if r.Action == "packages" {
-			out, err := npm.Run(o.ctx, npmDeps(o.sess), ver, parseNpmSpecs(splitSpecs(r.Pkgs)), "auto")
-			if err != nil {
-				return opResult{typ: "npm.install", err: err}
-			}
-			return opResult{typ: "npm.install", detail: pkgSummary(out.Installed, out.Failed),
-				echoes: o.verifyNodePkgs(ver, out.Installed)}
-		}
-		res, err := newNodeInstaller(o.sess).Install(o.ctx, ver)
+		echoes, err := o.ensureNode(ver)
 		if err != nil {
-			return opResult{typ: "node.install", err: err}
+			return opResult{typ: "node.install", err: err, echoes: echoes}
 		}
-		return opResult{typ: "node.install", detail: runtimeSummary("node", res.Version, res.Path, res.AlreadyInstalled),
-			echoes: []echo{o.verifyRuntime(res.Path, "--version")}}
+		out, err := npm.Run(o.ctx, npmDeps(o.sess), ver, parseNpmSpecs(specs), "auto")
+		if err != nil {
+			return opResult{typ: "npm.install", err: err, echoes: echoes}
+		}
+		echoes = append(echoes, o.verifyNodePkgs(ver, out.Installed)...)
+		return opResult{typ: "npm.install", detail: pkgSummary(out.Installed, out.Failed), echoes: echoes}
 	}
 	return opResult{typ: "install", err: fmt.Errorf("unknown language %q", r.Lang)}
+}
+
+// ensurePython locates the Python runtime at ver, installing it if absent, and
+// returns a sandbox echo of the interpreter that will host the packages.
+func (o *consoleOps) ensurePython(ver string) ([]echo, error) {
+	bin, err := python.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
+	if err != nil {
+		res, ierr := newInstaller(o.sess).Install(o.ctx, ver)
+		if ierr != nil {
+			return nil, ierr
+		}
+		bin = res.Path
+	}
+	return []echo{o.verifyRuntime(bin, "-V")}, nil
+}
+
+// ensureNode locates the Node runtime at ver, installing it if absent, and returns
+// a sandbox echo of the runtime that will host the packages.
+func (o *consoleOps) ensureNode(ver string) ([]echo, error) {
+	bin, err := node.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
+	if err != nil {
+		res, ierr := newNodeInstaller(o.sess).Install(o.ctx, ver)
+		if ierr != nil {
+			return nil, ierr
+		}
+		bin = res.Path
+	}
+	return []echo{o.verifyRuntime(bin, "--version")}, nil
 }
 
 // verifyRuntime runs the freshly-installed interpreter in the sandbox; its version
@@ -264,13 +285,6 @@ func (o *consoleOps) echo(e echo) {
 	case o.events <- ev:
 	default:
 	}
-}
-
-func runtimeSummary(lang, version, p string, already bool) string {
-	if already {
-		return fmt.Sprintf("%s %s already at %s", lang, version, p)
-	}
-	return fmt.Sprintf("%s %s at %s", lang, version, p)
 }
 
 func pkgSummary(installed []pkg.Installed, failed []pkg.Failure) string {

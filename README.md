@@ -86,10 +86,10 @@ streams live activity, and surfaces every approval as a modal you answer in-plac
 a split-pane `[POPO]`/`[NANA]` cockpit (`[POPO]` = what the controller did, `[NANA]`
 = the sandbox's own voice — the agent's stream plus sandbox-verified confirmations).
 You can also drive the sandbox from inside it: **`i`** opens an install form (pick
-**Python** or **JavaScript**, then its runtime or packages — versions default
-sensibly), **`b`** re-provisions (bootstrap), **`q`** quits. Each operator install is
-**confirmed in the sandbox** (the interpreter's own version banner, a package
-presence check) and echoed into `[NANA]`.
+**Python** or **JavaScript** and the packages you want — the runtime is installed for
+you, version optional), **`b`** re-provisions (bootstrap), **`q`** quits. Each
+operator install is **confirmed in the sandbox** (the interpreter's own version
+banner, a package presence check) and echoed into `[NANA]`.
 
 ```sh
 ./iceclimber                    # the console (serve + watch + approve + manage)
