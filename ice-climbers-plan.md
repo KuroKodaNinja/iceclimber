@@ -19,6 +19,7 @@ The design below is kept in full; it is **not** all v1. To honor "ship the minim
 - `pip.install` Tier 0 (mirror, remote-exec) and Tier 1 (relay)
 - `web.fetch` with venue routing, the SSRF floor, **egress gating + fetch rewrites (§6.1)**, audit log
 - `NANA.md`
+- *(post-v1)* acceptance demo (phase 8, [`DEMO.md`](./DEMO.md)) + **observability**: a host activity log and `iceclimber logs` two-tail (`[POPO]`/`[NANA]`) viewer
 
 **Parked for v2 (thinking preserved in place, marked `v2:`):**
 
@@ -28,6 +29,7 @@ The design below is kept in full; it is **not** all v1. To honor "ship the minim
 | `web.research` sub-agent + Tier 3 (§4.5) | The sandbox is already a Claude agent; this is a second product | A concrete resolution case where surfacing to the operator proves insufficient |
 | Fleet design (§8) | "Design for it now" is the unrequested-flexibility anti-pattern | A second sandbox that one-process-per-sandbox can't serve. v1 keeps only `sandbox_id` namespacing. |
 | `ExecFS` bulk-transfer wire protocol (§6) | Hardest sub-problem, narrow trigger | A box with SFTP disabled *and* needing Python. v1 requires SFTP for the one-time Python push (§6); ExecFS carries only small-file protocol traffic. |
+| **Observability TUI** — a graphical, side-by-side host/sandbox dashboard | The two-tail `iceclimber logs` view (JSONL + merged `[POPO]`/`[NANA]`) covers the need for now; a TUI is a bigger surface to design/maintain | The merged logs are proven useful but cramped — multiple concurrent sandboxes, or correlation that scrolling text can't carry. The activity JSONL is already the data source a TUI would read. |
 
 ---
 
@@ -473,6 +475,7 @@ These are named explicitly so they don't get silently assumed during implementat
 | 37 | Demo agent authenticates with a **subscription** token (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`); `ANTHROPIC_API_KEY` always emptied at launch | Subscription billing, never the metered API; emptying the key makes accidental API billing impossible |
 | 38 | Two run modes: `make demo` (headless, pre-approve the fetch host, assert the artifact — CI gate) and `make demo-live` (operator approves the egress hold live) | A one-shot headless `claude -p` can't wait for a mid-run approval — it surfaces the `approve` cmd and exits (itself a gate demo); unattended runs pre-approve, live runs keep the human in the loop. Re-submit after approval needs a **new id** (maildir dedup, #13) |
 | 39 | Demo runs on **Alpine/musl** like the functional box (Claude Code needs `libgcc`/`libstdc++`/system `ripgrep` + `USE_BUILTIN_RIPGREP=0` + `bash`); a glibc/Ubuntu variant is parked | Same musl realism end-to-end with a real agent; we can't assume the sandbox distro, so glibc validation is a later phase |
+| 40 | **Activity log + `logs` two-tail.** `serve` records a per-sandbox JSONL activity stream (one event per serviced request + operator approve/deny) via a decoupled `Dispatcher.Observe` callback; `iceclimber logs -f [--agent-log]` merges it (`[POPO]`) with the agent's tee'd stream (`[NANA]`). JSONL is the source of truth; a graphical TUI is parked v2 (§0) | An opaque `serve` made runs hard to follow; structured JSONL keeps `protocol` decoupled from logging and seeds the future TUI, while the merged viewer satisfies "two tails side by side" now without new deps |
 
 ---
 

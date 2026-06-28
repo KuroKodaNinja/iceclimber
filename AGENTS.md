@@ -42,6 +42,10 @@ make sandbox-down     # tear it down
 make demo             # acceptance demo: real Claude agent in an air-gapped VM (DEMO.md)
 ```
 
+Watch a run unfold with `iceclimber logs -f` (Popo's `[POPO]` activity; add
+`--agent-log <file>` for the sandbox `[NANA]` side) — `make demo-logs` wires both
+for the demo VM. `serve` prints the same per-request feed on its stdout.
+
 ## Status
 
 **🎉 v1 is complete** — all phases below implemented and verified end-to-end
