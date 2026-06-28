@@ -179,9 +179,12 @@ learn the protocol by hand first, see [`test/PLAYGROUND.md`](test/PLAYGROUND.md)
 - **A real Claude agent in a network air-gapped sandbox**, with inline approvals —
   [`DEMO.md`](DEMO.md):
   ```sh
-  make demo-up && make demo-live      # supervised; approve each op (see DEMO.md)
+  make demo-up && make demo-live      # supervised serve; approve each op (see DEMO.md)
+  make demo-console                   # or the graphical console (bare iceclimber)
   make demo                           # or fully headless, asserts the result
   ```
+- **Build a real app in the sandbox** (per-language full-stack scenarios) —
+  [`test/scenarios/`](test/scenarios/): `make scenario`.
 
 ---
 
@@ -189,6 +192,7 @@ learn the protocol by hand first, see [`test/PLAYGROUND.md`](test/PLAYGROUND.md)
 
 - [`DEMO.md`](DEMO.md) — the air-gapped real-agent acceptance demo.
 - [`test/PLAYGROUND.md`](test/PLAYGROUND.md) — drive the protocol by hand.
+- [`test/scenarios/`](test/scenarios/) — per-language "build a real app" scenarios.
 - [`AGENTS.md`](AGENTS.md) — contributor guide, working agreement, build phases.
 - [`ice-climbers-plan.md`](ice-climbers-plan.md) — the design source of truth
   (architecture, protocol, decision log).
@@ -198,8 +202,11 @@ learn the protocol by hand first, see [`test/PLAYGROUND.md`](test/PLAYGROUND.md)
 [MIT](LICENSE).
 
 **Status:** v1 is complete — `probe`, the maildir protocol, `python.install`,
-`pip.install` (mirror + relay), gated `web.fetch`, supervised `serve`, observability
-— all verified end to end against a real Alpine/musl sandbox and a real Claude agent
-under a true network air-gap. Sophisticated extensions (sub-agent `web.research`,
-build-on-controller wheels, fleet multiplexing, a graphical TUI) are parked as
-demand-driven v2 work (see the plan's §0).
+`pip.install` (mirror + relay), gated `web.fetch`, supervised `serve` — all verified
+end to end against a real Alpine/musl sandbox and a real Claude agent under a true
+network air-gap. Since then, three increments have shipped: **Node/npm** (a second
+language), the **observability TUI**, and the **TUI-first operator console** (bare
+`iceclimber` — serve embedded with inline modal approvals). Sophisticated extensions
+(sub-agent `web.research`, a Tier 2 build environment, multi-sandbox fleet
+multiplexing) are parked as demand-driven work (see the plan's §0 and decision #46
+for the console roadmap).

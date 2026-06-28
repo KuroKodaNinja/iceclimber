@@ -374,22 +374,28 @@ A single conformance suite (`remotefstest.RunConformance`) runs against both —
 ## 9. CLI command surface
 
 ```
-iceclimber
+iceclimber                               # (no subcommand) → the operator console:
+                                         #   serve embedded in a TUI, live activity, inline approvals (#46)
   init                                   # scaffold iceclimber.yaml
   bootstrap [--sandbox ID] [--force]     # full idempotent setup; --force is destructive, needs confirmation
   probe [--sandbox ID]                   # read-only diagnostic
-  serve [--sandbox ID]                   # long-lived watch loop + sub-agent fallback
+  serve [--sandbox ID] [--yes|--supervise]  # headless watch loop (supervised on a TTY)
   status [--sandbox ID]                  # heartbeat age, queue depth, cache size, recent requests
 
   install python <version> [--sandbox ID]
-  install pip <pkg>[==version]... [--python VER] [--sandbox ID]
+  install pip <pkg>[==version]... [--python VER] [--tier auto|mirror|relay] [--sandbox ID]
+  install node <version> [--sandbox ID]                      # (#44)
+  install npm <pkg>[@version]... [--tier auto|mirror|relay] [--sandbox ID]   # (#44)
 
-  logs [--sandbox ID] [--follow] [--type TYPE]
+  web fetch <url> [--method M] [--venue V] [--sandbox ID]    # gated egress (§6.1)
+
+  logs [--sandbox ID] [--follow] [--agent-log FILE] [--type TYPE]
+  tui  [--sandbox ID] [--agent-log FILE] [--snapshot]        # passive attach dashboard (#45)
   pending [--sandbox ID]                 # controller-venue fetches held for egress approval (§6.1)
   approve <id> [--remember <pattern>] [--sandbox ID]   # --remember persists an allow rule
   deny <id> --reason "..." [--sandbox ID]
 
-  cache list | prune | gc
+  cache list | prune | gc                # (stub; v2)
   skill print | path
   config show | validate
 
@@ -415,7 +421,7 @@ These are named explicitly so they don't get silently assumed during implementat
 
 - ~~**`NANA.md` content**~~ — **resolved (phase 7):** authored in `internal/skill/NANA.md` (embedded), covering abstract file/exec actions, the maildir request/response flow, counter-based heartbeat liveness (§4.7), the absolute-path contract, all four verbs, and the capability self-report. Dropped at bootstrap; `skill print` surfaces it.
 - ~~**Audit log schema**~~ — **resolved (phase 6a, §6 floor):** controller-side JSONL, `{ts, id, type, url, method, venue, status_code, body_size, body_sha256, outcome}`. Phase 6b extends entries with fetch **rewrites** (original + rewritten URL) and **approval** outcomes (auto-allowed / one-shot / persisted / denied), per §6.1.
-- **Approval persistence format** — the `approvals.json` allow-list shape: pattern syntax (shared with `fetch_rewrites` matching), and whether rules can expire. Small; nail down with the audit schema.
+- ~~**Approval persistence format**~~ — **resolved (phase 6b):** `internal/egress/store.go` persists allow/deny rules to `approvals.json` (`AddAllow`/`AddDeny`), host-scoped by default with custom globs via `--remember`; deny rules checked before allow (#31–#32). Rule expiry isn't implemented (rules persist until removed) — revisit only if demand appears.
 
 **Resolved since last revision:**
 
@@ -474,7 +480,7 @@ These are named explicitly so they don't get silently assumed during implementat
 | 37 | Demo agent authenticates with a **subscription** token (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`); `ANTHROPIC_API_KEY` always emptied at launch | Subscription billing, never the metered API; emptying the key makes accidental API billing impossible |
 | 38 | Two run modes: `make demo` (headless, pre-approve the fetch host, assert the artifact — CI gate) and `make demo-live` (operator approves the egress hold live) | A one-shot headless `claude -p` can't wait for a mid-run approval — it surfaces the `approve` cmd and exits (itself a gate demo); unattended runs pre-approve, live runs keep the human in the loop. Re-submit after approval needs a **new id** (maildir dedup, #13) |
 | 39 | Demo runs on **Alpine/musl** like the functional box (Claude Code needs `libgcc`/`libstdc++`/system `ripgrep` + `USE_BUILTIN_RIPGREP=0` + `bash`); a glibc/Ubuntu variant is parked | Same musl realism end-to-end with a real agent; we can't assume the sandbox distro, so glibc validation is a later phase |
-| 40 | **Activity log + `logs` two-tail.** `serve` records a per-sandbox JSONL activity stream (one event per serviced request + operator approve/deny) via a decoupled `Dispatcher.Observe` callback; `iceclimber logs -f [--agent-log]` merges it (`[POPO]`) with the agent's tee'd stream (`[NANA]`). JSONL is the source of truth; a graphical TUI is parked v2 (§0) | An opaque `serve` made runs hard to follow; structured JSONL keeps `protocol` decoupled from logging and seeds the future TUI, while the merged viewer satisfies "two tails side by side" now without new deps |
+| 40 | **Activity log + `logs` two-tail.** `serve` records a per-sandbox JSONL activity stream (`internal/activity`, one event per serviced request + operator approve/deny) via a decoupled `Dispatcher.Observe` callback; `iceclimber logs -f [--agent-log]` merges it (`[POPO]`) with the agent's tee'd stream (`[NANA]`). JSONL is the source of truth; a graphical TUI is parked v2 (§0) | An opaque `serve` made runs hard to follow; structured JSONL keeps `protocol` decoupled from logging and seeds the future TUI, while the merged viewer satisfies "two tails side by side" now without new deps |
 | 41 | **Supervised `serve`.** On a TTY (not `--once`/`--yes`), prompt the operator Claude-Code-style with context before **every** operation and approve inline: a `Dispatcher.SetGate` pre-execution hook covers installs (deny → `operator_denied`); `web.fetch` self-gates in its handler. Inline approval **proceeds to the real fetch in the same pass** — dissolving the two-pass `needs_clarification`/re-submit (#38, #32). `--yes`/non-TTY = unattended (installs auto-run, fetches → pending); `--supervise` forces prompting without a TTY (scriptable; reads stdin — also how the functional test drives it) | Out-of-band pending/approve was clunky and forced re-submits; a synchronous prompt is the natural human-in-the-loop, and blocking the dispatcher is fine for one operator/one sandbox. Decoupled via callbacks so `protocol`/`webfetch` stay UI-agnostic |
 | 42 | Liveness during a blocking prompt: the approver refreshes the heartbeat (`WriteHeartbeat`) **right before** reading input — same goroutine, no fs race | The agent judges Popo-alive on `seq` advancing (#8); a stalled loop during a long prompt would read as "down". Keepalive keeps it honest without a concurrent heartbeat goroutine (revisit if a single decision can exceed ~2 min) |
 | 43 | Demo program **computes** a report (rich + pyfiglet: ASCII banner + stats table + bar chart) from **one** fetch; verify asserts both imports + the recomputed `len(title)` | Proves a real program ran (not an agent echo) and exercises two libraries, while a single fetch keeps token cost low |
