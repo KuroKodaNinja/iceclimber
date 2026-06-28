@@ -5,11 +5,13 @@ package harness
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -127,6 +129,58 @@ func (s *Sandbox) Sh(t *testing.T, script string) string {
 		t.Fatalf("sandbox sh %q: %v\n%s", script, err, out)
 	}
 	return string(out)
+}
+
+// Fetch delivers a web.fetch for url, services it with one serve cycle, and returns
+// the decoded response body. The config must allow the sandbox to reach the host
+// (network.allowed_domains … reachable_from: sandbox). Shared plumbing so each
+// language scenario doesn't re-implement the fetch.
+func (s *Sandbox) Fetch(t *testing.T, fs remotefs.FS, cfg, root, url string) []byte {
+	t.Helper()
+	ctx := context.Background()
+	tree := protocol.Tree{Root: root}
+	id := protocol.NewID()
+	name := protocol.RequestName(id)
+	data, _ := json.Marshal(protocol.Request{
+		SchemaVersion: protocol.SchemaVersion, ID: id, Type: "web.fetch",
+		CreatedAt: time.Now().UTC(), Params: json.RawMessage(fmt.Sprintf(`{"url":%q}`, url)),
+	})
+	if err := protocol.Deliver(ctx, fs, tree.Outbox(), name, data); err != nil {
+		t.Fatalf("deliver web.fetch: %v", err)
+	}
+	s.Run(t, "serve", "--once", "--config", cfg, "--transport", "sftp")
+
+	resp, err := protocol.ReadResponse(ctx, fs, tree, name)
+	if err != nil {
+		t.Fatalf("read web.fetch response: %v", err)
+	}
+	if resp.Status != protocol.StatusOK {
+		t.Fatalf("web.fetch status = %q, error = %+v", resp.Status, resp.Error)
+	}
+	var r struct {
+		Encoding   string `json:"encoding"`
+		BodyInline string `json:"body_inline"`
+		BodyBlob   string `json:"body_blob"`
+	}
+	if err := json.Unmarshal(resp.Result, &r); err != nil {
+		t.Fatalf("unmarshal fetch result: %v", err)
+	}
+	body := []byte(r.BodyInline)
+	if len(body) == 0 && r.BodyBlob != "" {
+		b, err := fs.ReadFile(ctx, path.Join(root, "protocol", r.BodyBlob))
+		if err != nil {
+			t.Fatalf("read body blob: %v", err)
+		}
+		body = b
+	}
+	if r.Encoding == "base64" {
+		dec, err := base64.StdEncoding.DecodeString(string(body))
+		if err != nil {
+			t.Fatalf("decode base64 body: %v", err)
+		}
+		body = dec
+	}
+	return body
 }
 
 // DialFS opens a RemoteFS over the sandbox (transport "sftp" or "exec"), closed at

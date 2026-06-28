@@ -11,6 +11,8 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/java"
+	"github.com/KuroKodaNinja/iceclimber/internal/maven"
 	"github.com/KuroKodaNinja/iceclimber/internal/node"
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
@@ -143,6 +145,21 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		}
 		echoes = append(echoes, o.verifyNodePkgs(ver, specNames(pkgs))...)
 		return opResult{typ: "npm.install", detail: pkgSummary(out.Installed, out.Failed), echoes: echoes}
+	case "java":
+		echoes, err := o.ensureJava(ver)
+		if err != nil {
+			return opResult{typ: "java.install", err: err, echoes: echoes}
+		}
+		coords, err := parseCoords(specs)
+		if err != nil {
+			return opResult{typ: "maven.install", err: err, echoes: echoes}
+		}
+		out, err := maven.Run(o.ctx, mavenDeps(o.sess), ver, coords, "auto")
+		if err != nil {
+			return opResult{typ: "maven.install", err: err, echoes: echoes}
+		}
+		echoes = append(echoes, mavenEchoes(out)...)
+		return opResult{typ: "maven.install", detail: pkgSummary(out.Installed, out.Failed), echoes: echoes}
 	}
 	return opResult{typ: "install", err: fmt.Errorf("unknown language %q", r.Lang)}
 }
@@ -173,6 +190,36 @@ func (o *consoleOps) ensureNode(ver string) ([]echo, error) {
 		bin = res.Path
 	}
 	return []echo{o.verifyRuntime(bin, "--version")}, nil
+}
+
+// ensureJava locates the JDK at ver, installing it if absent, and returns a sandbox
+// echo of the runtime that will host the resolved dependencies.
+func (o *consoleOps) ensureJava(ver string) ([]echo, error) {
+	bin, err := java.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
+	if err != nil {
+		res, ierr := newJavaInstaller(o.sess).Install(o.ctx, ver)
+		if ierr != nil {
+			return nil, ierr
+		}
+		bin = res.Path
+	}
+	return []echo{o.verifyRuntime(bin, "-version")}, nil
+}
+
+// mavenEchoes confirms the resolved coordinates and the classpath the sandbox now
+// has (the resolution downloaded/relayed the JARs into the sandbox).
+func mavenEchoes(out maven.Result) []echo {
+	echoes := make([]echo, 0, len(out.Installed)+len(out.Failed)+1)
+	for _, p := range out.Installed {
+		echoes = append(echoes, echo{p.Name + ":" + p.Version + " resolved", true})
+	}
+	for _, f := range out.Failed {
+		echoes = append(echoes, echo{f.Name + ":" + f.Version + " not resolved", false})
+	}
+	if out.Classpath != "" {
+		echoes = append(echoes, echo{fmt.Sprintf("%d jar(s) on the classpath", strings.Count(out.Classpath, ":")+1), true})
+	}
+	return echoes
 }
 
 // verifyRuntime runs the freshly-installed interpreter in the sandbox; its version
@@ -270,15 +317,19 @@ func firstLine(s string) string {
 }
 
 // defaultVersion supplies a sane runtime version when the operator left it blank:
-// Python 3.12, JavaScript (Node) 24 (musl arm64 needs Node ≥ 24).
+// Python 3.12, JavaScript (Node) 24 (musl arm64 needs Node ≥ 24), Java 21 (LTS).
 func defaultVersion(lang, v string) string {
 	if s := strings.TrimSpace(v); s != "" {
 		return s
 	}
-	if lang == "javascript" {
+	switch lang {
+	case "javascript":
 		return "24"
+	case "java":
+		return "21"
+	default:
+		return "3.12"
 	}
-	return "3.12"
 }
 
 // record appends the operator action to the activity log and pushes it to the

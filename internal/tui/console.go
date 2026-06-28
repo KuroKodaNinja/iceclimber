@@ -250,21 +250,27 @@ func (c *Console) installForm() *huh.Form {
 		huh.NewSelect[string]().Title("language").Value(&c.st.lang).Options(
 			huh.NewOption("Python", "python"),
 			huh.NewOption("JavaScript", "javascript"),
+			huh.NewOption("Java", "java"),
 		),
-		huh.NewInput().Title("packages").Placeholder("e.g. requests / figlet cli-table3").
+		huh.NewInput().Title("packages").
+			Placeholder("e.g. requests / figlet cli-table3 / com.google.guava:guava:33.0.0-jre").
 			Value(&c.st.pkgs).Validate(required("at least one package")),
 		huh.NewInput().Title("version (optional)").
-			Description("Blank uses the recommended default — Python 3.12 · JavaScript 24.").
-			Placeholder("3.12 / 24").Value(&c.st.version),
+			Description("Blank uses the recommended default — Python 3.12 · JavaScript 24 · Java 21.").
+			Placeholder("3.12 / 24 / 21").Value(&c.st.version),
 	))
 }
 
 // installLabel is the friendly running indicator for an install action.
 func installLabel(lang string) string {
-	if lang == "javascript" {
+	switch lang {
+	case "javascript":
 		return "JavaScript install"
+	case "java":
+		return "Java install"
+	default:
+		return "Python install"
 	}
-	return "Python install"
 }
 
 func (c *Console) bootstrapForm() *huh.Form {

@@ -36,6 +36,46 @@ no `InsecureIgnoreHostKey`).
 - **Commits.** Conventional Commits, atomic and self-contained — each commit
   builds and passes tests on its own. See `.agents/git/commits`.
 
+## Adding a language
+
+A language is only "done" when it has **the same treatment as Python, JavaScript,
+and Java**. Use this checklist (Python/Node/Java are the worked examples; decisions
+#22, #44, #51, #52). Stage it: **runtime first, then the package manager.**
+
+1. **De-risk distribution first.** Before writing code, confirm a portable runtime
+   exists for the sandbox matrix — **musl *and* glibc, aarch64 *and* x86_64** — from
+   a maintained, **checksummed** source, ideally a queryable API (PBS for Python,
+   nodejs.org/unofficial-builds for Node, the Adoptium API for Java). Prefer
+   `.tar.gz` (the gzip stream-push needs no xz). (The Node "musl arm64 needs ≥ 24"
+   surprise is why this is step 1.)
+2. **Runtime installer** `internal/<lang>` (mirror `internal/node`): resolve the
+   exact build for the sandbox's OS/arch/libc; download + **verify SHA256**; extract
+   with the Go stdlib and push the tree over `remotefs.FS`; **verify by running the
+   interpreter**; idempotent (`AlreadyInstalled`). Provide `Locate(...)` (highest
+   matching version) and a `Handler` for the `<lang>.install` verb.
+3. **Package manager** `internal/<pkgmgr>` (mirror `internal/pip`/`npm`/`maven`) over
+   the neutral `internal/pkg` types, with **both tiers**: **Tier 0** resolves in the
+   sandbox against a reachable mirror; **Tier 1 relay** has the controller fetch on
+   its network and Popo relay the artifacts in for air-gapped sandboxes. `auto` picks
+   relay when no sandbox mirror is configured. Validate the controller-side prereq
+   with a clear error (`controller_python`/`controller_npm`/`controller_java`).
+   Return whatever the agent needs to *use* the deps (installed-in-place / `NODE_PATH`
+   / `classpath`). `Handler` for the `<pkgmgr>.install` verb.
+4. **Wire it:** `install <lang> <version>` + `install <pkgmgr> …` commands; register
+   both verbs in `buildRegistry`; add config (mirror + controller tool + controller
+   repo) and thread it through the session.
+5. **Console parity:** add the language to the install form's options; handle it in
+   `consoleOps.doInstall` (ensure runtime → install packages); give it a recommended
+   **default version**; emit the **Nana verification echo** (runtime version +
+   package presence, run *in* the sandbox).
+6. **Tests — all of these:** unit tests for platform mapping + resolution parsing; a
+   **functional test** (live musl/aarch64 VM) that installs the runtime, resolves a
+   real dependency through **both tiers**, and **compiles/runs a program that uses
+   it**; **TUI flow test(s)** (teatest) for the new form path; and a **self-contained
+   scenario** in `test/scenarios/<lang>/` that builds and runs a real app.
+7. **Docs:** README (commands + verbs), this file's language bullet, and the plan
+   (§9 command surface + a decision-log entry).
+
 ## Quickstart
 
 ```sh
@@ -55,7 +95,7 @@ in [`test/scenarios/`](test/scenarios/), each self-contained with its own README
 Bare **`iceclimber`** launches the **operator console**: it serves the sandbox,
 streams live `[POPO]`/`[NANA]` activity, surfaces each approval as an inline modal,
 and lets you manage the sandbox from within — `i` opens an install form (pick
-**Python** or **JavaScript** and the packages, via huh; the runtime is installed for
+**Python**, **JavaScript**, or **Java** and the packages, via huh; the runtime is installed for
 you, the package manager pip/npm and tier are derived, version optional), `b`
 re-provisions (bootstrap), `q` quits. Each operator action is **verified in the
 sandbox** and
@@ -152,3 +192,6 @@ plan §0).
   relays them in — trivially correct since JVM bytecode is platform-independent.
   `auto` → relay when no sandbox mirror is set (air-gap default). Both tiers verified
   on the VM (Guava + transitive → compile+run; Tier 1 against the relayed classpath).
+  **Full parity** (per "Adding a language"): wired into the console install form +
+  executor with the Nana echo, a teatest flow, and a self-contained scenario
+  (`test/scenarios/java/`: fetch → JDK → Gson → compile+run).

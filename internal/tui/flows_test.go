@@ -243,6 +243,39 @@ func TestFlow_InstallJavaScript(t *testing.T) {
 	finalConsole(t, tm)
 }
 
+// TestFlow_InstallJava drives the third language through the form: select Java,
+// enter a Maven coordinate and a JDK version, submit.
+func TestFlow_InstallJava(t *testing.T) {
+	ops := newRecordOps()
+	tm := startConsole(t, ops)
+	waitText(t, tm, "i install")
+	press(tm, "i")
+	waitText(t, tm, "Java")
+	send(tm, tea.KeyDown)  // python → javascript
+	send(tm, tea.KeyDown)  // javascript → java
+	send(tm, tea.KeyEnter) // accept, advance to packages
+	waitText(t, tm, "requests / figlet")
+	tm.Type("org.apache.commons:commons-lang3:3.14.0")
+	waitText(t, tm, "commons-lang3")
+	send(tm, tea.KeyEnter) // advance to version
+	waitText(t, tm, "3.12 / 24")
+	tm.Type("17")
+	waitText(t, tm, "17")
+	send(tm, tea.KeyEnter) // submit
+	select {
+	case r := <-ops.install:
+		if r.Lang != "java" {
+			t.Fatalf("selecting Java must reach the request; got Lang=%q", r.Lang)
+		}
+		if r.Pkgs != "org.apache.commons:commons-lang3:3.14.0" || r.Version != "17" {
+			t.Fatalf("request = %+v, want {java org.apache.commons:commons-lang3:3.14.0 17}", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("java install never fired")
+	}
+	finalConsole(t, tm)
+}
+
 func TestFlow_InstallRequiresPackages(t *testing.T) {
 	ops := newRecordOps()
 	tm := startConsole(t, ops)
