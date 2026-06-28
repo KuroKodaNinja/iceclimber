@@ -50,7 +50,8 @@ On a terminal, `serve` runs **supervised**: it prompts (Claude-Code-style, with
 context) before each install/fetch and you approve inline — `y`/`a`/`n`/`d`.
 Inline approval returns the real result in one pass (no out-of-band
 pending/approve). `serve --yes` (or any non-TTY/CI run) services everything
-unattended.
+unattended; `serve --supervise` forces the prompt without a TTY (reads stdin —
+scriptable, and how the functional test drives it).
 
 ## Status
 
