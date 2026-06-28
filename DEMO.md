@@ -99,16 +99,18 @@ banner, a computed stats table, and a bar chart), press **Ctrl-C** in Terminal A
 program used `rich` + `pyfiglet`, computed stats (e.g. the title's character
 count) from the fetched data, and rendered it, all bridged through Popo.
 
-**Terminal C (optional) — the merged log:**
+**Terminal C (optional) — the merged log, or the graphical dashboard:**
 
 ```sh
-make demo-logs
+make demo-logs    # plain merged feed
+make demo-tui     # live split-pane [POPO]/[NANA] dashboard
 ```
 
 `[POPO]` lines are what Popo services plus your approve/deny decisions; `[NANA]`
 lines are the agent's own actions. (`serve` already prints the activity feed on its
-own stdout in Terminal A.) The same view works for any run —
-`iceclimber logs -f --config <cfg> [--agent-log <file>]`; the structured source is
+own stdout in Terminal A.) Both work for any run —
+`iceclimber logs -f --config <cfg> [--agent-log <file>]` /
+`iceclimber tui --config <cfg> [--agent-log <file>]`; the structured source is
 `~/.iceclimber/<sandbox_id>/activity.jsonl`.
 
 ### Prove the air-gap is real

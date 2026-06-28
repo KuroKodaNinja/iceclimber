@@ -47,8 +47,10 @@ Per-language application scenarios (build + run a real program in the sandbox) l
 in [`test/scenarios/`](test/scenarios/), each self-contained with its own README.
 
 Watch a run unfold with `iceclimber logs -f` (Popo's `[POPO]` activity; add
-`--agent-log <file>` for the sandbox `[NANA]` side) — `make demo-logs` wires both
-for the demo VM. `serve` prints the same per-request feed on its stdout.
+`--agent-log <file>` for the sandbox `[NANA]` side) — or `iceclimber tui` for a
+live split-pane dashboard over the same activity JSONL. `make demo-logs` /
+`make demo-tui` wire both for the demo VM. `serve` prints the same per-request feed
+on its stdout.
 
 On a terminal, `serve` runs **supervised**: it prompts (Claude-Code-style, with
 context) before each install/fetch and you approve inline — `y`/`a`/`n`/`d`.

@@ -110,6 +110,7 @@ operation the agent requests, with context, and you approve inline:
 |---|---|
 | `status` | Liveness (heartbeat), queue depth, installed runtimes, the agent's capabilities |
 | `logs -f [--agent-log <file>]` | Tail Popo's activity (`[POPO]`) merged with the agent's stream (`[NANA]`) |
+| `tui [--agent-log <file>]` | A live split-pane `[POPO]`/`[NANA]` dashboard (`--snapshot` for one static frame) |
 | `pending` / `approve <id>` / `deny <id>` | Async egress approval (when not serving on a TTY) |
 | `install python <minor>` · `install pip <pkg> --python <minor>` | Provision Python directly, without the agent |
 | `install node <version>` · `install npm <pkg> --node <version>` | Provision Node/npm directly |

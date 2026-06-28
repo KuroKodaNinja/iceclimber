@@ -14,7 +14,7 @@ BIN         := iceclimber
 
 .PHONY: build fmt vet test test-functional scenario e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
 	demo-up demo-down demo-status demo-firewall demo-firewall-down demo-shell \
-	demo demo-live demo-config demo-bootstrap demo-agent demo-verify demo-reset demo-logs clean
+	demo demo-live demo-config demo-bootstrap demo-agent demo-verify demo-reset demo-logs demo-tui clean
 
 build:
 	go build -o $(BIN) .
@@ -133,6 +133,10 @@ demo-verify:
 # Run in a separate terminal alongside `make demo-live`.
 demo-logs: build
 	@./$(BIN) logs -f --config $(DEMO_CFG) --agent-log $$HOME/.iceclimber/$(DEMO)/agent.log
+
+# The graphical version of demo-logs: a live [POPO]/[NANA] dashboard.
+demo-tui: build
+	@./$(BIN) tui --config $(DEMO_CFG) --agent-log $$HOME/.iceclimber/$(DEMO)/agent.log
 
 # Clear the protocol maildir + work dir for a fresh agent pass. Keeps the
 # installed runtimes (so re-runs are fast) and any egress approvals. Use this
