@@ -29,11 +29,12 @@ Two ways to run it:
   export CLAUDE_CODE_OAUTH_TOKEN=<the token it prints>
   ```
 
-  Or stash it once so the `make demo*` targets pick it up automatically (the file
-  is gitignored):
+  Or stash it once so the `make demo*` targets pick it up automatically (the
+  `.demo/` directory is gitignored):
 
   ```sh
-  echo 'export CLAUDE_CODE_OAUTH_TOKEN=<token>' > .demo-token.env
+  mkdir -p .demo
+  echo 'export CLAUDE_CODE_OAUTH_TOKEN=<token>' > .demo/token.env
   ```
 
   > A live agent run consumes your subscription usage. The harness always launches

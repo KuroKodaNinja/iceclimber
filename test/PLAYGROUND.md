@@ -135,6 +135,23 @@ Everything above is exactly what `NANA.md` instructs. To see an *actual* agent b
 Nana, run Claude Code (or any agent) **inside** the VM and give it the output of
 `./iceclimber skill print` as its instructions — it will drive the same files.
 
+For a turnkey, end-to-end version of that — a real Claude agent in a **network
+air-gapped** sandbox, with `serve` prompting you to approve each operation inline —
+see **[`../DEMO.md`](../DEMO.md)**. The short version:
+
+```sh
+make demo-up                       # boot + provision the demo VM (once)
+# Terminal A: set up + serve, supervised (approve each prompt with y/a/n/d)
+make demo-live
+# Terminal B: start the agent
+make demo-agent
+# Optional Terminal C: the merged [POPO]/[NANA] activity feed
+make demo-logs
+```
+
+Or fully automated (headless, asserts the result): `make demo`. Both need a Claude
+subscription token — see DEMO.md's prerequisites.
+
 ## Teardown
 
 ```sh
