@@ -46,6 +46,12 @@ Watch a run unfold with `iceclimber logs -f` (Popo's `[POPO]` activity; add
 `--agent-log <file>` for the sandbox `[NANA]` side) — `make demo-logs` wires both
 for the demo VM. `serve` prints the same per-request feed on its stdout.
 
+On a terminal, `serve` runs **supervised**: it prompts (Claude-Code-style, with
+context) before each install/fetch and you approve inline — `y`/`a`/`n`/`d`.
+Inline approval returns the real result in one pass (no out-of-band
+pending/approve). `serve --yes` (or any non-TTY/CI run) services everything
+unattended.
+
 ## Status
 
 **🎉 v1 is complete** — all phases below implemented and verified end-to-end
