@@ -3,6 +3,7 @@ package pip
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
@@ -55,6 +56,16 @@ func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, ti
 	}
 	plan, err := m.Resolve(ctx, specs)
 	if err != nil {
+		// Tier 0→1 auto-fallback (decision #25): when the tier was auto-selected as
+		// mirror and the mirror can't resolve a spec (e.g. it's absent there), try
+		// the relay before giving up. An explicit `--tier mirror` is respected.
+		if tier == "" || tier == "auto" {
+			out, relayErr := m.RelayInstall(ctx, specs, pythonVersion)
+			if relayErr == nil {
+				return out, nil
+			}
+			return pkg.Outcome{}, fmt.Errorf("mirror resolve failed (%v); relay fallback also failed: %w", err, relayErr)
+		}
 		return pkg.Outcome{}, err
 	}
 	return m.Install(ctx, plan)
