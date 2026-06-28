@@ -37,21 +37,8 @@ func newBootstrapCmd() *cobra.Command {
 			}
 			defer sess.Close()
 
-			if err := protocol.EnsureTree(ctx, sess.fs, sess.tree); err != nil {
+			if err := provision(ctx, sess); err != nil {
 				return err
-			}
-			if err := writePipConf(ctx, sess); err != nil {
-				return fmt.Errorf("write pip.conf: %w", err)
-			}
-			if err := sess.fs.WriteFile(ctx, sess.tree.SkillFile(), []byte(skill.NanaMD)); err != nil {
-				return fmt.Errorf("write NANA.md: %w", err)
-			}
-			disp := protocol.NewDispatcher(sess.fs, sess.tree, buildRegistry(sess))
-			if err := disp.WriteHeartbeat(ctx); err != nil {
-				return err
-			}
-			if err := smokeTest(ctx, sess.fs, sess.tree, disp); err != nil {
-				return fmt.Errorf("smoke test failed: %w", err)
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(),
@@ -65,6 +52,29 @@ func newBootstrapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().BoolVar(&force, "force", false, "re-run bootstrap (tree creation is idempotent)")
 	return cmd
+}
+
+// provision runs the idempotent setup steps shared by `bootstrap` and the console's
+// operator-initiated re-provision: ensure the protocol tree, write pip.conf and
+// NANA.md, write a heartbeat, and run the ping/pong smoke test.
+func provision(ctx context.Context, sess *session) error {
+	if err := protocol.EnsureTree(ctx, sess.fs, sess.tree); err != nil {
+		return err
+	}
+	if err := writePipConf(ctx, sess); err != nil {
+		return fmt.Errorf("write pip.conf: %w", err)
+	}
+	if err := sess.fs.WriteFile(ctx, sess.tree.SkillFile(), []byte(skill.NanaMD)); err != nil {
+		return fmt.Errorf("write NANA.md: %w", err)
+	}
+	disp := protocol.NewDispatcher(sess.fs, sess.tree, buildRegistry(sess))
+	if err := disp.WriteHeartbeat(ctx); err != nil {
+		return err
+	}
+	if err := smokeTest(ctx, sess.fs, sess.tree, disp); err != nil {
+		return fmt.Errorf("smoke test failed: %w", err)
+	}
+	return nil
 }
 
 // writePipConf records the mirror in state/pip.conf so the agent's ad-hoc pip

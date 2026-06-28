@@ -35,3 +35,29 @@ func TestTuiAsker_ShutdownDenies(t *testing.T) {
 		t.Errorf("shutdown should fail safe to deny, got %v", got)
 	}
 }
+
+func TestSplitSpecs(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want int
+	}{
+		{"", 0},
+		{"figlet", 1},
+		{"figlet cli-table3", 2},
+		{"figlet, cli-table3", 2},
+		{"  figlet ,, cli-table3  ", 2},
+	} {
+		if got := splitSpecs(tc.in); len(got) != tc.want {
+			t.Errorf("splitSpecs(%q) = %v, want %d items", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestTierOrAuto(t *testing.T) {
+	if tierOrAuto("") != "auto" {
+		t.Error("empty tier should default to auto")
+	}
+	if tierOrAuto("relay") != "relay" {
+		t.Error("explicit tier should be preserved")
+	}
+}

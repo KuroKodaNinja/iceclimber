@@ -34,6 +34,12 @@ func eventToLine(e activity.Event) popoLine {
 		return popoLine{plain: fmt.Sprintf("%s  ✓ approved %s", ts, e.Detail), style: okStyle}
 	case activity.KindDenied:
 		return popoLine{plain: fmt.Sprintf("%s  ✗ denied %s", ts, e.Detail), style: errStyle}
+	case activity.KindOperated:
+		st := okStyle
+		if e.Status == "failed" || e.Status == "error" {
+			st = errStyle
+		}
+		return popoLine{plain: strings.TrimRight(fmt.Sprintf("%s  ⚙ %-15s %s", ts, e.Type, e.Detail), " "), style: st}
 	case activity.KindServiced:
 		typ := e.Type
 		if typ == "" {
@@ -54,7 +60,7 @@ func eventToLine(e activity.Event) popoLine {
 }
 
 // dashboard renders the header + two panes + footer.
-func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, serving bool, popoLines []popoLine, nanaLines []string, hasNana bool) string {
+func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, serving bool, popoLines []popoLine, nanaLines []string, hasNana, hasOps bool, running string) string {
 	if w < 40 {
 		w = 40
 	}
@@ -62,7 +68,7 @@ func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS 
 		h = 10
 	}
 	hdr := header(w, sandboxID, served, approved, denied, lastTS, serving)
-	ftr := footer(w)
+	ftr := footer(w, hasOps, running)
 	bodyH := h - lipgloss.Height(hdr) - lipgloss.Height(ftr)
 	if bodyH < 4 {
 		bodyH = 4
@@ -91,8 +97,15 @@ func header(w int, sandboxID string, served, approved, denied int, lastTS time.T
 	return lipgloss.NewStyle().Width(w).Render(left + strings.Repeat(" ", gap) + right)
 }
 
-func footer(w int) string {
-	return dimStyle.Width(w).Render(" [POPO] Popo's activity   [NANA] the agent's stream   ·   q quit")
+func footer(w int, hasOps bool, running string) string {
+	if running != "" {
+		return warnStyle.Width(w).Render(" ⏳ running " + running + " …")
+	}
+	keys := "q quit"
+	if hasOps {
+		keys = "i install   b bootstrap   ·   q quit"
+	}
+	return dimStyle.Width(w).Render(" [POPO] Popo's activity   [NANA] the agent's stream   ·   " + keys)
 }
 
 func popoPane(w, h int, lines []popoLine) string {
@@ -157,6 +170,39 @@ func modalView(w, h int, req *ApprovalRequest) string {
 		MaxWidth(w - 4).
 		Render(b.String())
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box)
+}
+
+// formView frames an operator form (huh) centred over a blank screen, matching the
+// modal's look.
+func formView(w, h int, title, body string) string {
+	content := titleStyle.Render(title) + "\n\n" + body
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(cPopo).
+		Padding(1, 2).
+		MaxWidth(w - 4).
+		Render(content)
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box)
+}
+
+// formWidth/formHeight size a huh form to a comfortable fraction of the screen.
+func formWidth(w int) int {
+	fw := w - 12
+	if fw < 30 {
+		fw = 30
+	}
+	if fw > 64 {
+		fw = 64
+	}
+	return fw
+}
+
+func formHeight(h int) int {
+	fh := h - 8
+	if fh < 8 {
+		fh = 8
+	}
+	return fh
 }
 
 func paneBox(border lipgloss.Color, w, h int) lipgloss.Style {

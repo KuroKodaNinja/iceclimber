@@ -17,6 +17,7 @@ const (
 	KindServiced = "serviced" // Popo serviced a request (id/type/status/dur)
 	KindApproved = "approved" // operator approved a held egress
 	KindDenied   = "denied"   // operator denied a held egress
+	KindOperated = "operated" // operator-initiated action (console install/bootstrap)
 )
 
 // Event is one activity record. It is intentionally protocol-agnostic — the cli
