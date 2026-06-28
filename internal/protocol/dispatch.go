@@ -19,12 +19,28 @@ type Dispatcher struct {
 	tree     Tree
 	registry Registry
 	seq      int64
+	observe  func(ServiceEvent)
+}
+
+// ServiceEvent reports one serviced request to an optional observer. It carries
+// primitives only, so the dispatcher stays decoupled from logging (the cli layer
+// turns this into an activity-log event).
+type ServiceEvent struct {
+	Name string // the request file name (<id>.json)
+	Req  Request
+	Resp Response
+	Dur  time.Duration
 }
 
 // NewDispatcher builds a dispatcher.
 func NewDispatcher(fs remotefs.FS, tree Tree, reg Registry) *Dispatcher {
 	return &Dispatcher{fs: fs, tree: tree, registry: reg}
 }
+
+// Observe registers a callback invoked once per serviced request (after the
+// response is delivered). Used by `serve` to feed the activity log. Optional —
+// a nil observer is silent.
+func (d *Dispatcher) Observe(fn func(ServiceEvent)) { d.observe = fn }
 
 // RunOnce performs a single dispatch cycle: recover any in-flight requests left
 // in cur/ by a previous crash, then drain new/ oldest-first. Used by
@@ -135,6 +151,7 @@ func (d *Dispatcher) serviceCur(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", name, err)
 	}
+	start := time.Now()
 	resp := d.dispatch(ctx, name, data)
 	respBytes, err := json.Marshal(resp)
 	if err != nil {
@@ -142,6 +159,11 @@ func (d *Dispatcher) serviceCur(ctx context.Context, name string) error {
 	}
 	if err := Deliver(ctx, d.fs, d.tree.Inbox(), name, respBytes); err != nil {
 		return fmt.Errorf("deliver response %s: %w", name, err)
+	}
+	if d.observe != nil {
+		var req Request // best-effort: resp carries id/status even if this fails
+		_ = json.Unmarshal(data, &req)
+		d.observe(ServiceEvent{Name: name, Req: req, Resp: resp, Dur: time.Since(start)})
 	}
 	return nil
 }

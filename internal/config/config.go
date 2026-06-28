@@ -26,6 +26,10 @@ type Config struct {
 	// AuditLog is the controller-side web.fetch audit JSONL path. Empty means
 	// the default ~/.iceclimber/audit/<sandbox_id>.jsonl.
 	AuditLog string `yaml:"audit_log"`
+	// ActivityLog is the controller-side request/operator activity JSONL path
+	// (what `serve` records and `iceclimber logs` tails). Empty means the default
+	// ~/.iceclimber/<sandbox_id>/activity.jsonl.
+	ActivityLog string `yaml:"activity_log"`
 	// Network governs web.fetch venue routing + egress gating (§6.1).
 	Network Network `yaml:"network"`
 	// Rewrites redirect/re-venue fetch URLs before gating (§6.1).
@@ -91,6 +95,8 @@ func Load(path, selectSandbox string) (*Config, error) {
 	c.SSH.IdentityFile = expandHome(c.SSH.IdentityFile)
 	c.SSH.KnownHosts = expandHome(c.SSH.KnownHosts)
 	c.CacheDir = expandHome(c.CacheDir)
+	c.AuditLog = expandHome(c.AuditLog)
+	c.ActivityLog = expandHome(c.ActivityLog)
 	if err := c.validate(selectSandbox); err != nil {
 		return nil, err
 	}

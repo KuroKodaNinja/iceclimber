@@ -133,3 +133,16 @@ func auditPath(cfg *config.Config) string {
 	}
 	return filepath.Join(home, ".iceclimber", "audit", cfg.SandboxID+".jsonl")
 }
+
+// activityPath returns the configured activity log path, or the default
+// ~/.iceclimber/<sandbox_id>/activity.jsonl (alongside approvals/pending).
+func activityPath(cfg *config.Config) string {
+	if cfg.ActivityLog != "" {
+		return cfg.ActivityLog
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".iceclimber", cfg.SandboxID, "activity.jsonl")
+}
