@@ -24,6 +24,7 @@ func newServeCmd() *cobra.Command {
 	var transport string
 	var interval time.Duration
 	var deny []string
+	var yes bool
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Watch the outbox and service requests (Popo)",
@@ -38,16 +39,23 @@ func newServeCmd() *cobra.Command {
 			if once {
 				ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
 				defer cancel()
-				return withDispatcher(ctx, cfg, transport, deny, out, func(d *protocol.Dispatcher) error {
+				return withDispatcher(ctx, cfg, transport, deny, out, false, func(d *protocol.Dispatcher) error {
 					return d.RunOnce(ctx)
 				})
 			}
 
+			// Supervised iff attached to a terminal (and not --yes): prompt before
+			// each operation. Piped/backgrounded/CI serve runs unattended.
+			supervised := !yes && isTerminal(os.Stdin)
+
 			// Long-lived: stop cleanly on Ctrl-C / SIGTERM.
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return withDispatcher(ctx, cfg, transport, deny, out, func(d *protocol.Dispatcher) error {
+			return withDispatcher(ctx, cfg, transport, deny, out, supervised, func(d *protocol.Dispatcher) error {
 				fmt.Fprintf(out, "serving sandbox %s; Ctrl-C to stop\n", cfg.SandboxID)
+				if supervised {
+					fmt.Fprintln(out, "supervised: you'll be asked to approve each operation")
+				}
 				if err := d.Serve(ctx, interval); err != nil && !errors.Is(err, context.Canceled) {
 					return err
 				}
@@ -59,25 +67,47 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "poll interval for the watch loop")
 	cmd.Flags().StringArrayVar(&deny, "deny", nil, "disable a verb, e.g. --deny web.fetch (repeatable)")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "auto-approve every operation (skip the interactive prompt)")
 	return cmd
 }
 
+// isTerminal reports whether f is an interactive terminal (a char device).
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
 // withDispatcher opens a session, builds a dispatcher (minus any denied verbs),
-// wires the activity observer (durable JSONL + a live stdout feed), runs fn, and
-// cleans up.
-func withDispatcher(ctx context.Context, cfg *config.Config, transport string, deny []string, out io.Writer, fn func(*protocol.Dispatcher) error) error {
+// wires the activity observer (durable JSONL + a live stdout feed) and — when
+// supervised — the interactive approver (gate + inline egress approval), runs fn,
+// and cleans up.
+func withDispatcher(ctx context.Context, cfg *config.Config, transport string, deny []string, out io.Writer, supervised bool, fn func(*protocol.Dispatcher) error) error {
 	sess, err := openSession(ctx, cfg, transport)
 	if err != nil {
 		return err
 	}
 	defer sess.Close()
+
+	act := activity.New(activityPath(cfg))
+
+	// Build the approver before the registry so web.fetch's Deps receives it.
+	var approver *terminalApprover
+	if supervised {
+		approver = newTerminalApprover(os.Stdin, out, cfg.SandboxID, act, nil)
+		sess.approver = approver
+	}
+
 	reg := buildRegistry(sess)
 	for _, v := range deny {
 		delete(reg, v)
 	}
 	disp := protocol.NewDispatcher(sess.fs, sess.tree, reg)
+	if approver != nil {
+		// keepalive refreshes liveness right before a prompt blocks (same goroutine).
+		approver.keepalive = func() { _ = disp.WriteHeartbeat(ctx) }
+		disp.SetGate(approver.gate)
+	}
 
-	act := activity.New(activityPath(cfg))
 	disp.Observe(func(ev protocol.ServiceEvent) {
 		detail := serviceDetail(ev.Req.Type, ev.Resp)
 		_ = act.Append(activity.Event{

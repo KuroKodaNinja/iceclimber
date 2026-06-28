@@ -12,6 +12,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
+	"github.com/KuroKodaNinja/iceclimber/internal/webfetch"
 	"github.com/pkg/sftp"
 )
 
@@ -29,6 +30,8 @@ type session struct {
 	controllerPython string
 	auditPath        string
 	policy           *egress.Policy
+	sandboxID        string
+	approver         webfetch.Approver // non-nil only in interactive serve
 }
 
 // Close releases the SFTP client (if any) and the SSH connection.
@@ -70,7 +73,7 @@ func openSession(ctx context.Context, cfg *config.Config, transport string) (*se
 		}
 	}
 
-	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, controllerPython: cfg.ControllerPython, auditPath: auditPath(cfg), policy: buildPolicy(cfg)}
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, controllerPython: cfg.ControllerPython, auditPath: auditPath(cfg), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"

@@ -37,14 +37,17 @@ func pipDeps(sess *session) pip.Deps {
 	}
 }
 
-// webfetchDeps builds the web.fetch dependency bundle from an open session.
+// webfetchDeps builds the web.fetch dependency bundle from an open session. The
+// approver is non-nil only in interactive serve (inline egress approval).
 func webfetchDeps(sess *session) webfetch.Deps {
 	return webfetch.Deps{
-		Runner: sess.runner,
-		FS:     sess.fs,
-		Root:   sess.tree.Root,
-		Policy: sess.policy,
-		Audit:  audit.New(sess.auditPath),
+		Runner:    sess.runner,
+		FS:        sess.fs,
+		Root:      sess.tree.Root,
+		Policy:    sess.policy,
+		Audit:     audit.New(sess.auditPath),
+		SandboxID: sess.sandboxID,
+		Approver:  sess.approver,
 	}
 }
 
