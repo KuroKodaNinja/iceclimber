@@ -83,6 +83,22 @@ agent in two passes:
 
 On exit it restores egress and stops `serve`.
 
+### Watch it happen (merged log)
+
+In a **third terminal**, tail Popo's activity and the agent's stream merged into
+one feed:
+
+```sh
+make demo-logs
+```
+
+`[POPO]` lines are what the controller services (`python.install → ok`,
+`pip.install → ok rich …`, `web.fetch → held`, then `approved`, then
+`web.fetch → ok`); `[NANA]` lines are the agent's own actions. The same view
+works for any run — `iceclimber logs -f --config <cfg> [--agent-log <file>]`; the
+structured source is `~/.iceclimber/<sandbox_id>/activity.jsonl`. `serve` also
+prints this feed on its own stdout.
+
 ### Prove the air-gap is real
 
 While the VM is air-gapped, these **fail** — so everything the agent achieves, it

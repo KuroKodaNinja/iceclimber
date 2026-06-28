@@ -13,7 +13,7 @@ BIN         := iceclimber
 
 .PHONY: build fmt vet test test-functional e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
 	demo-up demo-down demo-status demo-firewall demo-firewall-down demo-shell \
-	demo demo-live demo-config demo-bootstrap demo-agent demo-verify demo-reset clean
+	demo demo-live demo-config demo-bootstrap demo-agent demo-verify demo-reset demo-logs clean
 
 build:
 	go build -o $(BIN) .
@@ -119,6 +119,11 @@ demo-agent:
 # Check the agent's program renders the data it fetched through Popo.
 demo-verify:
 	@bash test/lima/demo-verify.sh $(DEMO)
+
+# Tail the merged host (Popo) + sandbox (agent) activity during a demo run.
+# Run in a separate terminal alongside `make demo-live`.
+demo-logs: build
+	@./$(BIN) logs -f --config iceclimber-demo.yaml --agent-log $$HOME/.iceclimber/$(DEMO)/agent.log
 
 # Clear the protocol maildir + work dir for a fresh agent pass. Keeps the
 # installed runtimes (so re-runs are fast) and any egress approvals. Use this

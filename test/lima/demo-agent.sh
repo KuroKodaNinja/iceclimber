@@ -37,7 +37,14 @@ echo ">>> watch Popo's 'serve' in your other terminal service its requests."
 prompt="Read the file TASK.md in your current directory and complete the task it
 describes, exactly. Start by reading the NANA.md path it points you to."
 
+# Persist the agent's stream so `iceclimber logs --agent-log` can show the [NANA]
+# side (it still streams to this terminal). Append so both demo-live passes land
+# in one file.
+agentlog="$HOME/.iceclimber/$DEMO/agent.log"
+mkdir -p "$(dirname "$agentlog")"
+
 # --max-turns bounds a runaway agent (belt-and-suspenders for CI).
 limactl shell "$DEMO" -- \
 	env CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" ANTHROPIC_API_KEY= \
-	bash -lc "cd '$ROOT/work' && claude -p \"$prompt\" --dangerously-skip-permissions --verbose --max-turns 60"
+	bash -lc "cd '$ROOT/work' && claude -p \"$prompt\" --dangerously-skip-permissions --verbose --max-turns 60" \
+	| tee -a "$agentlog"
