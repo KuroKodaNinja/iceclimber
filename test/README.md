@@ -48,6 +48,16 @@ you to `make sandbox-up` — boot once, iterate often.
 - `TestProbe_RejectsUnknownHostKey` confirms an unknown host is rejected rather
   than trusted on first use.
 
+## Application scenarios
+
+Beyond these per-feature tests, [`scenarios/`](scenarios/) holds **full-stack
+"build a real application" tests** — one self-contained directory per language that
+provisions a runtime + packages, fetches data through Popo, and builds/runs a real
+program in the sandbox (the scripted equivalent of the agent demo). They use a
+separate `scenario` build tag; run them with `make scenario`. Each scenario's
+operating notes live in its own directory's `README.md` — see
+[`scenarios/README.md`](scenarios/README.md).
+
 ## Not covered yet
 
 **Network-boundary simulation is deferred.** A real sandbox has no general egress

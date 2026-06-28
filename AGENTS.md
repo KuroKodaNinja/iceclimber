@@ -38,9 +38,13 @@ make build            # build ./iceclimber
 make test             # unit suite (go test -race ./...)
 make sandbox-up       # boot the Lima/Alpine functional sandbox
 make test-functional  # black-box E2E against the VM
+make scenario         # full-stack "build a real app" tests per language (test/scenarios/)
 make sandbox-down     # tear it down
 make demo             # acceptance demo: real Claude agent in an air-gapped VM (DEMO.md)
 ```
+
+Per-language application scenarios (build + run a real program in the sandbox) live
+in [`test/scenarios/`](test/scenarios/), each self-contained with its own README.
 
 Watch a run unfold with `iceclimber logs -f` (Popo's `[POPO]` activity; add
 `--agent-log <file>` for the sandbox `[NANA]` side) — `make demo-logs` wires both
