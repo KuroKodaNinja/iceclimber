@@ -130,12 +130,12 @@ func TestConsole_SubmitInstallRunsOp(t *testing.T) {
 	ops := &fakeOps{}
 	c := NewConsole("sbx", make(chan tea.Msg), "", ops)
 	c.formKind = "install"
-	c.fLang, c.fVersion, c.fPkgs, c.fTier = "npm", "24", "figlet", "auto"
+	c.fLang, c.fAction, c.fVersion, c.fPkgs = "javascript", "packages", "24", "figlet"
 
 	updated, cmd := c.submitForm("install")
 	c2 := updated.(Console)
-	if c2.running != "npm.install" {
-		t.Fatalf("running = %q, want npm.install", c2.running)
+	if c2.running != "JavaScript packages" {
+		t.Fatalf("running = %q, want JavaScript packages", c2.running)
 	}
 	if cmd == nil {
 		t.Fatal("submit should return the op command")
@@ -143,7 +143,8 @@ func TestConsole_SubmitInstallRunsOp(t *testing.T) {
 	if _, ok := cmd().(OpResultMsg); !ok {
 		t.Error("op command should resolve to OpResultMsg")
 	}
-	if ops.install == nil || ops.install.Lang != "npm" || ops.install.Version != "24" || ops.install.Pkgs != "figlet" {
+	if ops.install == nil || ops.install.Lang != "javascript" || ops.install.Action != "packages" ||
+		ops.install.Version != "24" || ops.install.Pkgs != "figlet" {
 		t.Errorf("RunInstall got %+v", ops.install)
 	}
 

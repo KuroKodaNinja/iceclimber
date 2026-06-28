@@ -68,8 +68,7 @@ type consoleOps struct {
 
 func (o *consoleOps) RunInstall(r tui.InstallRequest) tea.Cmd {
 	return func() tea.Msg {
-		typ := r.Lang + ".install"
-		detail, err := o.doInstall(r)
+		typ, detail, err := o.doInstall(r)
 		o.record(typ, detail, err)
 		return tui.OpResultMsg{}
 	}
@@ -83,35 +82,53 @@ func (o *consoleOps) RunBootstrap() tea.Cmd {
 	}
 }
 
-// doInstall runs the matching installer and returns a one-line summary.
-func (o *consoleOps) doInstall(r tui.InstallRequest) (string, error) {
+// doInstall maps the operator's language/action to the right installer and tier,
+// applying a recommended default version when none was given. It returns the
+// activity type (the underlying verb — pip/npm/python/node), a one-line summary,
+// and any error. Tier is always auto (the form doesn't expose it).
+func (o *consoleOps) doInstall(r tui.InstallRequest) (string, string, error) {
+	ver := defaultVersion(r.Lang, r.Version)
 	switch r.Lang {
-	case "node":
-		res, err := newNodeInstaller(o.sess).Install(o.ctx, r.Version)
-		if err != nil {
-			return "", err
-		}
-		return runtimeSummary("node", res.Version, res.Path, res.AlreadyInstalled), nil
 	case "python":
-		res, err := newInstaller(o.sess).Install(o.ctx, r.Version)
-		if err != nil {
-			return "", err
+		if r.Action == "packages" {
+			out, err := pip.Run(o.ctx, pipDeps(o.sess), ver, parseSpecs(splitSpecs(r.Pkgs)), "auto")
+			if err != nil {
+				return "pip.install", "", err
+			}
+			return "pip.install", pkgSummary(out.Installed, out.Failed), nil
 		}
-		return runtimeSummary("python", res.Version, res.Path, res.AlreadyInstalled), nil
-	case "npm":
-		out, err := npm.Run(o.ctx, npmDeps(o.sess), r.Version, parseNpmSpecs(splitSpecs(r.Pkgs)), tierOrAuto(r.Tier))
+		res, err := newInstaller(o.sess).Install(o.ctx, ver)
 		if err != nil {
-			return "", err
+			return "python.install", "", err
 		}
-		return pkgSummary(out.Installed, out.Failed), nil
-	case "pip":
-		out, err := pip.Run(o.ctx, pipDeps(o.sess), r.Version, parseSpecs(splitSpecs(r.Pkgs)), tierOrAuto(r.Tier))
+		return "python.install", runtimeSummary("python", res.Version, res.Path, res.AlreadyInstalled), nil
+	case "javascript":
+		if r.Action == "packages" {
+			out, err := npm.Run(o.ctx, npmDeps(o.sess), ver, parseNpmSpecs(splitSpecs(r.Pkgs)), "auto")
+			if err != nil {
+				return "npm.install", "", err
+			}
+			return "npm.install", pkgSummary(out.Installed, out.Failed), nil
+		}
+		res, err := newNodeInstaller(o.sess).Install(o.ctx, ver)
 		if err != nil {
-			return "", err
+			return "node.install", "", err
 		}
-		return pkgSummary(out.Installed, out.Failed), nil
+		return "node.install", runtimeSummary("node", res.Version, res.Path, res.AlreadyInstalled), nil
 	}
-	return "", fmt.Errorf("unknown language %q", r.Lang)
+	return "install", "", fmt.Errorf("unknown language %q", r.Lang)
+}
+
+// defaultVersion supplies a sane runtime version when the operator left it blank:
+// Python 3.12, JavaScript (Node) 24 (musl arm64 needs Node ≥ 24).
+func defaultVersion(lang, v string) string {
+	if s := strings.TrimSpace(v); s != "" {
+		return s
+	}
+	if lang == "javascript" {
+		return "24"
+	}
+	return "3.12"
 }
 
 // record appends the operator action to the activity log and pushes it to the
@@ -164,13 +181,6 @@ func pkgSummary(installed []pkg.Installed, failed []pkg.Failure) string {
 // splitSpecs turns a free-text "figlet, cli-table3" field into discrete args.
 func splitSpecs(s string) []string {
 	return strings.FieldsFunc(s, func(r rune) bool { return r == ' ' || r == ',' || r == '\t' })
-}
-
-func tierOrAuto(t string) string {
-	if t == "" {
-		return "auto"
-	}
-	return t
 }
 
 // runConsole opens a session, runs the dispatcher in the background, and presents

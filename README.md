@@ -84,8 +84,9 @@ skill doc into your agent's instructions (see the Nana side).
 Bare **`iceclimber`** launches the interactive **console**: it serves the sandbox,
 streams live activity, and surfaces every approval as a modal you answer in-place —
 a split-pane `[POPO]`/`[NANA]` cockpit. You can also drive the sandbox from inside
-it: **`i`** opens an install form (python/node/pip/npm), **`b`** re-provisions
-(bootstrap), **`q`** quits.
+it: **`i`** opens an install form (pick **Python** or **JavaScript**, then its
+runtime or packages — versions default sensibly), **`b`** re-provisions (bootstrap),
+**`q`** quits.
 
 ```sh
 ./iceclimber                    # the console (serve + watch + approve + manage)

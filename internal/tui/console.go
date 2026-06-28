@@ -45,12 +45,15 @@ type ApprovalRequest struct {
 }
 
 // InstallRequest is an operator-initiated install (not an agent maildir request),
-// filled from the console's install form and handed to the OpRunner.
+// filled from the console's install form and handed to the OpRunner. The operator
+// picks a language (Python / JavaScript) and whether to install its runtime or
+// packages; the underlying package manager (pip / npm) and resolution tier are
+// derived by the cli layer, not chosen here.
 type InstallRequest struct {
-	Lang    string // "python" | "node" | "pip" | "npm"
-	Version string // runtime version (python/node) or target runtime (pip/npm)
-	Pkgs    string // space/comma-separated specs (pip/npm only)
-	Tier    string // "auto" | "mirror" | "relay" (pip/npm only)
+	Lang    string // "python" | "javascript"
+	Action  string // "runtime" | "packages"
+	Version string // runtime version to install or target (blank = recommended default)
+	Pkgs    string // space/comma-separated specs (Action == "packages")
 }
 
 // OpResultMsg signals an operator-initiated action finished; it clears the running
@@ -91,8 +94,8 @@ type Console struct {
 	height    int
 
 	// form-bound values
-	fLang, fVersion, fPkgs, fTier string
-	fConfirm                      bool
+	fLang, fAction, fVersion, fPkgs string
+	fConfirm                        bool
 }
 
 // NewConsole builds a console reading events (and, optionally, the agent stream).
@@ -214,9 +217,9 @@ func (c Console) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 	switch kind {
 	case "install":
-		c.running = c.fLang + ".install"
+		c.running = installLabel(c.fLang, c.fAction)
 		return c, c.ops.RunInstall(InstallRequest{
-			Lang: c.fLang, Version: c.fVersion, Pkgs: c.fPkgs, Tier: c.fTier,
+			Lang: c.fLang, Action: c.fAction, Version: c.fVersion, Pkgs: c.fPkgs,
 		})
 	case "bootstrap":
 		if !c.fConfirm {
@@ -229,31 +232,37 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 }
 
 func (c *Console) installForm() *huh.Form {
-	c.fLang, c.fVersion, c.fPkgs, c.fTier = "node", "", "", "auto"
-	// huh hides at the group level, so packages+tier (pip/npm only) live in their
-	// own group, skipped when a runtime (python/node) is selected.
-	isRuntime := func() bool { return c.fLang == "python" || c.fLang == "node" }
+	c.fLang, c.fAction, c.fVersion, c.fPkgs = "python", "runtime", "", ""
+	// huh hides at the group level, so the packages field (only meaningful when
+	// installing packages) lives in its own group, skipped for a runtime install.
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().Title("language").Value(&c.fLang).Options(
-				huh.NewOption("node", "node"),
-				huh.NewOption("python", "python"),
-				huh.NewOption("npm", "npm"),
-				huh.NewOption("pip", "pip"),
+				huh.NewOption("Python", "python"),
+				huh.NewOption("JavaScript", "javascript"),
 			),
-			huh.NewInput().Title("runtime version").Placeholder("e.g. 24 / 3.12").Value(&c.fVersion).
-				Validate(required("a version")),
+			huh.NewSelect[string]().Title("install").Value(&c.fAction).Options(
+				huh.NewOption("runtime", "runtime"),
+				huh.NewOption("packages", "packages"),
+			),
+			huh.NewInput().Title("version").
+				Description("Blank uses the recommended default (Python 3.12 · JavaScript 24).").
+				Placeholder("e.g. 3.12 / 24").Value(&c.fVersion),
 		),
 		huh.NewGroup(
-			huh.NewInput().Title("packages").Placeholder("e.g. figlet cli-table3").Value(&c.fPkgs).
-				Validate(required("at least one package")),
-			huh.NewSelect[string]().Title("tier").Value(&c.fTier).Options(
-				huh.NewOption("auto", "auto"),
-				huh.NewOption("mirror", "mirror"),
-				huh.NewOption("relay", "relay"),
-			),
-		).WithHideFunc(isRuntime),
+			huh.NewInput().Title("packages").Placeholder("e.g. requests / figlet cli-table3").
+				Value(&c.fPkgs).Validate(required("at least one package")),
+		).WithHideFunc(func() bool { return c.fAction != "packages" }),
 	)
+}
+
+// installLabel is the friendly running indicator for an install action.
+func installLabel(lang, action string) string {
+	name := "Python"
+	if lang == "javascript" {
+		name = "JavaScript"
+	}
+	return name + " " + action
 }
 
 func (c *Console) bootstrapForm() *huh.Form {

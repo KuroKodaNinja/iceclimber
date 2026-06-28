@@ -48,10 +48,11 @@ in [`test/scenarios/`](test/scenarios/), each self-contained with its own README
 
 Bare **`iceclimber`** launches the **operator console**: it serves the sandbox,
 streams live `[POPO]`/`[NANA]` activity, surfaces each approval as an inline modal,
-and lets you manage the sandbox from within — `i` opens an install form
-(python/node/pip/npm, via huh), `b` re-provisions (bootstrap), `q` quits. The
-TUI-first cockpit (`make demo-console` wires it for the demo VM). Subcommands stay
-for scripting/CI; `iceclimber serve` is the headless path.
+and lets you manage the sandbox from within — `i` opens an install form (pick
+**Python** or **JavaScript**, then its runtime or packages, via huh; the package
+manager pip/npm and tier are derived, versions default sensibly), `b` re-provisions
+(bootstrap), `q` quits. The TUI-first cockpit (`make demo-console` wires it for the
+demo VM). Subcommands stay for scripting/CI; `iceclimber serve` is the headless path.
 
 Watch a *headless* run unfold with `iceclimber logs -f` (Popo's `[POPO]` activity;
 add `--agent-log <file>` for the sandbox `[NANA]` side) — or `iceclimber tui` for a
