@@ -184,6 +184,10 @@ learn the protocol by hand first, see [`test/PLAYGROUND.md`](test/PLAYGROUND.md)
 - [`ice-climbers-plan.md`](ice-climbers-plan.md) — the design source of truth
   (architecture, protocol, decision log).
 
+## License
+
+[MIT](LICENSE).
+
 **Status:** v1 is complete — `probe`, the maildir protocol, `python.install`,
 `pip.install` (mirror + relay), gated `web.fetch`, supervised `serve`, observability
 — all verified end to end against a real Alpine/musl sandbox and a real Claude agent
