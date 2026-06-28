@@ -13,9 +13,9 @@ import (
 func stubCommands() []*cobra.Command {
 	return []*cobra.Command{
 		parent("cache", "Manage the local wheel/runtime cache",
-			leaf("list", "List cached artifacts", "phase: pip.install"),
-			leaf("prune", "Remove stale cache entries", "phase: pip.install"),
-			leaf("gc", "Garbage-collect the cache", "phase: pip.install"),
+			leaf("list", "List cached artifacts", "v2"),
+			leaf("prune", "Remove stale cache entries", "v2"),
+			leaf("gc", "Garbage-collect the cache", "v2"),
 		),
 		parent("nana", "Optional sandbox-side convenience binary",
 			leaf("request", "Submit a request from inside the sandbox", "v2"),
