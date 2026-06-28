@@ -54,13 +54,15 @@ func newJavaInstaller(sess *session) *java.Installer {
 // mavenDeps builds the maven.install dependency bundle from an open session.
 func mavenDeps(sess *session) maven.Deps {
 	return maven.Deps{
-		FS:        sess.fs,
-		Runner:    sess.runner,
-		Root:      sess.tree.Root,
-		Arch:      sess.fp.Arch,
-		Libc:      sess.fp.Libc.Family,
-		MirrorURL: sess.maven.RepositoryURL,
-		CacheDir:  sess.cacheDir,
+		FS:                   sess.fs,
+		Runner:               sess.runner,
+		Root:                 sess.tree.Root,
+		Arch:                 sess.fp.Arch,
+		Libc:                 sess.fp.Libc.Family,
+		MirrorURL:            sess.maven.RepositoryURL,
+		ControllerJava:       sess.controllerJava,
+		ControllerRepository: sess.maven.ControllerRepository,
+		CacheDir:             sess.cacheDir,
 	}
 }
 

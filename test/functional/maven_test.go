@@ -27,9 +27,10 @@ func TestMavenResolve(t *testing.T) {
 		t.Fatalf("could not parse java path from %q", jout)
 	}
 
-	// Resolve Guava + its transitive deps into a classpath (Coursier; heavy first run).
+	// Resolve Guava + its transitive deps into a classpath (Tier 0: sandbox-side
+	// Coursier against Maven Central; heavy first run).
 	mout := string(runIceclimber(t, "install", "maven", "com.google.guava:guava:33.0.0-jre",
-		"--java", "21", "--config", cfg, "--transport", "sftp"))
+		"--java", "21", "--tier", "mirror", "--config", cfg, "--transport", "sftp"))
 	if !strings.Contains(mout, "resolved com.google.guava:guava") {
 		t.Fatalf("maven resolve output = %q", mout)
 	}

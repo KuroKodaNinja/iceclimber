@@ -163,7 +163,7 @@ learn the protocol by hand first, see [`test/PLAYGROUND.md`](test/PLAYGROUND.md)
 | `node.install` | A portable Node.js runtime (npm bundled), run by absolute path |
 | `npm.install` | npm packages (Tier 0 mirror / Tier 1 relay); returns a `NODE_PATH` to `require()` them |
 | `java.install` | A portable Temurin JDK (javac bundled), run by absolute path |
-| `maven.install` | JVM deps (Maven coordinates) resolved via Coursier (Tier 0); returns a `classpath` to run with `java -cp` |
+| `maven.install` | JVM deps (Maven coordinates) resolved via Coursier — Tier 0 mirror or Tier 1 relay; returns a `classpath` to run with `java -cp` |
 | `web.fetch` | A URL — via the **sandbox's** own egress (ungated) or **Popo's** network (gated controller venue) |
 
 ---

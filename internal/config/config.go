@@ -30,6 +30,9 @@ type Config struct {
 	ControllerNpm string `yaml:"controller_npm"`
 	// Maven configures JVM (Maven-coordinate) dependency resolution (§5).
 	Maven Maven `yaml:"maven"`
+	// ControllerJava is the operator's java on the controller, used for Tier-1
+	// JVM dependency relay. Defaults to "java" at use.
+	ControllerJava string `yaml:"controller_java"`
 	// AuditLog is the controller-side web.fetch audit JSONL path. Empty means
 	// the default ~/.iceclimber/audit/<sandbox_id>.jsonl.
 	AuditLog string `yaml:"audit_log"`
@@ -74,9 +77,11 @@ type Npm struct {
 }
 
 // Maven configures JVM dependency resolution (§5). RepositoryURL is an optional
-// sandbox-reachable Maven repository for Tier 0 (empty = Maven Central).
+// sandbox-reachable Maven repository for Tier 0; ControllerRepository is the Tier-1
+// source Popo resolves from (both empty = Maven Central).
 type Maven struct {
-	RepositoryURL string `yaml:"repository_url"`
+	RepositoryURL        string `yaml:"repository_url"`
+	ControllerRepository string `yaml:"controller_repository"`
 }
 
 // Pip configures package install (§5). IndexURL is the Tier-0 mirror

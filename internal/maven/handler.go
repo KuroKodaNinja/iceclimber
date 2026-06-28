@@ -3,7 +3,6 @@ package maven
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"path"
 
@@ -16,14 +15,16 @@ import (
 
 // Deps are what a maven.install needs from the session.
 type Deps struct {
-	FS         remotefs.FS
-	Runner     remote.Runner
-	Root       string
-	Arch       string
-	Libc       string
-	MirrorURL  string // Tier-0 Maven repository; empty = Maven Central
-	CacheDir   string
-	HTTPClient *http.Client
+	FS                   remotefs.FS
+	Runner               remote.Runner
+	Root                 string
+	Arch                 string
+	Libc                 string
+	MirrorURL            string // Tier-0 sandbox-reachable Maven repository; empty = Central
+	ControllerJava       string // Tier-1: operator's java on the controller (default "java")
+	ControllerRepository string // Tier-1: Popo-reachable Maven repository; empty = Central
+	CacheDir             string
+	HTTPClient           *http.Client
 }
 
 // Result is the maven.install response body: the resolved coordinates plus the
@@ -40,33 +41,59 @@ func Run(ctx context.Context, d Deps, javaVersion string, specs []pkg.Spec, tier
 	if err != nil {
 		return Result{}, err
 	}
-	if resolveTier(tier) == pkg.TierRelay {
-		return Result{}, fmt.Errorf("java dependency relay (Tier 1) is not yet implemented; use --tier mirror with a sandbox-reachable Maven repository")
-	}
 	m := New(Config{
-		Runner:        d.Runner,
-		FS:            d.FS,
-		JavaBin:       javaBin,
-		ToolsDir:      path.Join(d.Root, "tools"),
-		CoursierCache: path.Join(d.Root, "runtimes", "coursier-cache"),
-		MirrorURL:     d.MirrorURL,
-		CacheDir:      d.CacheDir,
-		HTTPClient:    d.HTTPClient,
+		Runner:               d.Runner,
+		FS:                   d.FS,
+		JavaBin:              javaBin,
+		ToolsDir:             path.Join(d.Root, "tools"),
+		CoursierCache:        path.Join(d.Root, "runtimes", "coursier-cache"),
+		RelayDir:             path.Join(d.Root, "runtimes", "maven-relay"),
+		MirrorURL:            d.MirrorURL,
+		ControllerJava:       d.ControllerJava,
+		ControllerRepository: d.ControllerRepository,
+		CacheDir:             d.CacheDir,
+		HTTPClient:           d.HTTPClient,
 	})
-	out, cp, err := m.Resolve(ctx, specs)
+	result := func(o pkg.Outcome, cp string) Result {
+		return Result{Installed: o.Installed, Failed: o.Failed, Classpath: cp}
+	}
+
+	if resolveTier(tier, d.MirrorURL) == pkg.TierRelay {
+		o, cp, err := m.RelayResolve(ctx, specs)
+		if err != nil {
+			return Result{}, err
+		}
+		return result(o, cp), nil
+	}
+	o, cp, err := m.Resolve(ctx, specs)
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Installed: out.Installed, Failed: out.Failed, Classpath: cp}, nil
+	// Tier 0→1 auto-fallback (mirror pip #25 / npm): if auto-mirror resolved
+	// nothing, try the relay (controller-side).
+	if (tier == "" || tier == "auto") && len(o.Installed) == 0 && len(o.Failed) > 0 {
+		if ro, rcp, rerr := m.RelayResolve(ctx, specs); rerr == nil && len(ro.Installed) > 0 {
+			return result(ro, rcp), nil
+		}
+	}
+	return result(o, cp), nil
 }
 
-// resolveTier maps the requested tier to a concrete one. "relay" is explicit-only
-// for now (not yet implemented); "auto"/""/"mirror" resolve in the sandbox (Tier 0).
-func resolveTier(tier string) string {
-	if tier == pkg.TierRelay {
+// resolveTier maps the requested tier to a concrete one. "auto" picks relay when no
+// sandbox-reachable Maven repository is configured (the air-gapped default), else
+// the sandbox-side mirror; "mirror"/"relay" force the choice.
+func resolveTier(tier, mirrorURL string) string {
+	switch tier {
+	case pkg.TierRelay:
 		return pkg.TierRelay
+	case pkg.TierMirror:
+		return pkg.TierMirror
+	default: // "auto" or ""
+		if mirrorURL == "" {
+			return pkg.TierRelay
+		}
+		return pkg.TierMirror
 	}
-	return pkg.TierMirror
 }
 
 type installParams struct {

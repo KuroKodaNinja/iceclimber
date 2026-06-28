@@ -31,6 +31,7 @@ type session struct {
 	maven            config.Maven
 	controllerPython string
 	controllerNpm    string
+	controllerJava   string
 	auditPath        string
 	policy           *egress.Policy
 	sandboxID        string
@@ -76,7 +77,7 @@ func openSession(ctx context.Context, cfg *config.Config, transport string) (*se
 		}
 	}
 
-	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, auditPath: auditPath(cfg), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID}
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, auditPath: auditPath(cfg), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"

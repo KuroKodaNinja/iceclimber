@@ -33,12 +33,20 @@ func TestLastNonEmpty(t *testing.T) {
 }
 
 func TestResolveTier(t *testing.T) {
-	if resolveTier("relay") != pkg.TierRelay {
+	// Explicit choices are forced regardless of config.
+	if resolveTier("relay", "https://mirror") != pkg.TierRelay {
 		t.Error("explicit relay should stay relay")
 	}
-	for _, tier := range []string{"", "auto", "mirror"} {
-		if resolveTier(tier) != pkg.TierMirror {
-			t.Errorf("tier %q should resolve to mirror (Tier 0) for now", tier)
+	if resolveTier("mirror", "") != pkg.TierMirror {
+		t.Error("explicit mirror should stay mirror")
+	}
+	// auto: relay when no sandbox-reachable repo (air-gap default), else mirror.
+	for _, tier := range []string{"", "auto"} {
+		if resolveTier(tier, "") != pkg.TierRelay {
+			t.Errorf("tier %q with no mirror should pick relay (air-gap default)", tier)
+		}
+		if resolveTier(tier, "https://nexus.corp/maven") != pkg.TierMirror {
+			t.Errorf("tier %q with a mirror should pick mirror", tier)
 		}
 	}
 }

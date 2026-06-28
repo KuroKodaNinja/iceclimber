@@ -147,7 +147,8 @@ plan §0).
   (single-file launch). **Dependencies — Tier 0 done:** `internal/maven` resolves
   Maven coordinates via **Coursier** (25 kB launcher relayed in, run on the installed
   JDK) into a **classpath** the agent runs with `java -cp`; `install maven … --java
-  VER` + the `maven.install` verb. Verified on the VM (Guava + transitive →
-  compile+run). **Tier 1 relay (controller resolves, Popo relays JARs) is next —
-  trivially correct since JVM bytecode is platform-independent; `--tier relay` errors
-  with that guidance for now.**
+  VER` + the `maven.install` verb. **Tier 0** runs in the sandbox; **Tier 1 relay**
+  has the controller's java resolve + download the JARs (`controller_java`) and Popo
+  relays them in — trivially correct since JVM bytecode is platform-independent.
+  `auto` → relay when no sandbox mirror is set (air-gap default). Both tiers verified
+  on the VM (Guava + transitive → compile+run; Tier 1 against the relayed classpath).
