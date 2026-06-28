@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/KuroKodaNinja/iceclimber/internal/audit"
 	"github.com/KuroKodaNinja/iceclimber/internal/node"
+	"github.com/KuroKodaNinja/iceclimber/internal/npm"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
@@ -51,6 +52,20 @@ func pipDeps(sess *session) pip.Deps {
 	}
 }
 
+// npmDeps builds the npm.install dependency bundle from an open session.
+func npmDeps(sess *session) npm.Deps {
+	return npm.Deps{
+		FS:                 sess.fs,
+		Runner:             sess.runner,
+		Root:               sess.tree.Root,
+		Arch:               sess.fp.Arch,
+		Libc:               sess.fp.Libc.Family,
+		RegistryURL:        sess.npm.RegistryURL,
+		ControllerNpm:      sess.controllerNpm,
+		ControllerRegistry: sess.npm.ControllerRegistry,
+	}
+}
+
 // webfetchDeps builds the web.fetch dependency bundle from an open session. The
 // approver is non-nil only in interactive serve (inline egress approval).
 func webfetchDeps(sess *session) webfetch.Deps {
@@ -73,6 +88,7 @@ func buildRegistry(sess *session) protocol.Registry {
 		"python.install": python.Handler(newInstaller(sess)),
 		"pip.install":    pip.Handler(pipDeps(sess)),
 		"node.install":   node.Handler(newNodeInstaller(sess)),
+		"npm.install":    npm.Handler(npmDeps(sess)),
 		"web.fetch":      webfetch.Handler(webfetchDeps(sess)),
 	}
 }

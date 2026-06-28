@@ -23,6 +23,11 @@ type Config struct {
 	// ControllerPython is the operator's python on the controller, used for
 	// Tier-1 cross-platform wheel downloads. Defaults to "python3" at use.
 	ControllerPython string `yaml:"controller_python"`
+	// Npm configures npm package installs (§5).
+	Npm Npm `yaml:"npm"`
+	// ControllerNpm is the operator's npm on the controller, used for Tier-1
+	// relay. Defaults to "npm" at use.
+	ControllerNpm string `yaml:"controller_npm"`
 	// AuditLog is the controller-side web.fetch audit JSONL path. Empty means
 	// the default ~/.iceclimber/audit/<sandbox_id>.jsonl.
 	AuditLog string `yaml:"audit_log"`
@@ -56,6 +61,14 @@ type Rewrite struct {
 	Match     string `yaml:"match"`
 	RewriteTo string `yaml:"rewrite_to"`
 	Venue     string `yaml:"venue"` // "sandbox" | "controller"
+}
+
+// Npm configures npm package install (§5). RegistryURL is the Tier-0 mirror
+// (sandbox-reachable); ControllerRegistry is the Tier-1 source Popo downloads
+// from (defaults to the npm public registry at use).
+type Npm struct {
+	RegistryURL        string `yaml:"registry_url"`
+	ControllerRegistry string `yaml:"controller_registry"`
 }
 
 // Pip configures package install (§5). IndexURL is the Tier-0 mirror
