@@ -2,6 +2,7 @@ package cli
 
 import (
 	"github.com/KuroKodaNinja/iceclimber/internal/audit"
+	"github.com/KuroKodaNinja/iceclimber/internal/node"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
@@ -11,6 +12,19 @@ import (
 // newInstaller builds the Python installer from an open session.
 func newInstaller(sess *session) *python.Installer {
 	return python.NewInstaller(python.Config{
+		FS:       sess.fs,
+		Runner:   sess.runner,
+		Root:     sess.tree.Root,
+		OS:       sess.fp.OS,
+		Arch:     sess.fp.Arch,
+		Libc:     sess.fp.Libc.Family,
+		CacheDir: sess.cacheDir,
+	})
+}
+
+// newNodeInstaller builds the Node installer from an open session.
+func newNodeInstaller(sess *session) *node.Installer {
+	return node.NewInstaller(node.Config{
 		FS:       sess.fs,
 		Runner:   sess.runner,
 		Root:     sess.tree.Root,
@@ -58,6 +72,7 @@ func buildRegistry(sess *session) protocol.Registry {
 		"ping":           protocol.PingHandler(version),
 		"python.install": python.Handler(newInstaller(sess)),
 		"pip.install":    pip.Handler(pipDeps(sess)),
+		"node.install":   node.Handler(newNodeInstaller(sess)),
 		"web.fetch":      webfetch.Handler(webfetchDeps(sess)),
 	}
 }

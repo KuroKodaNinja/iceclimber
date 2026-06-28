@@ -15,9 +15,46 @@ import (
 func newInstallCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install Python or pip packages into the sandbox",
+		Short: "Install language runtimes or packages into the sandbox",
 	}
-	cmd.AddCommand(newInstallPythonCmd(), newInstallPipCmd())
+	cmd.AddCommand(newInstallPythonCmd(), newInstallPipCmd(), newInstallNodeCmd())
+	return cmd
+}
+
+func newInstallNodeCmd() *cobra.Command {
+	var transport string
+	cmd := &cobra.Command{
+		Use:   "node <version>",
+		Short: "Install a portable Node.js runtime (npm bundled)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(cfgFile, sandboxID)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
+			defer cancel()
+
+			sess, err := openSession(ctx, cfg, transport)
+			if err != nil {
+				return err
+			}
+			defer sess.Close()
+
+			res, err := newNodeInstaller(sess).Install(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			verb := "installed"
+			if res.AlreadyInstalled {
+				verb = "already installed:"
+			}
+			fmt.Fprintf(w, "%s node %s at %s\n", verb, res.Version, res.Path)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	return cmd
 }
 
