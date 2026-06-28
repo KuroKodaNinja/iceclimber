@@ -104,3 +104,11 @@ plan §0).
   operator-approved walkthrough. Validated end-to-end: the agent relayed in Python
   3.12.13 + `rich`, fetched `xkcd` through the gated controller venue, and rendered
   it. See [`DEMO.md`](./DEMO.md). (glibc/Ubuntu variant parked.)
+- **Node/npm — done (2nd language).** `internal/node` (mirror of `internal/python`)
+  installs a portable Node (glibc nodejs.org/dist, musl unofficial-builds; both
+  `.tar.gz`, no xz dep); `internal/npm` (mirror of `internal/pip`) installs globally
+  into the runtime prefix and returns a `NODE_PATH` — Tier 0 (sandbox npm vs a
+  registry) + Tier 1 relay (controller npm → relay the `node_modules` tree).
+  `install node`/`install npm`, the `node.install`/`npm.install` verbs. Verified on
+  the aarch64/musl VM (both tiers, `require()` via `NODE_PATH`). Pure-JS only
+  (native addons = Node Tier 2, deferred); musl arm64 needs Node ≥ 24.

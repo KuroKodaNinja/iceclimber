@@ -5,9 +5,9 @@
 A capable agent dropped into a locked-down box — a corp VM, a CI runner, a
 hardened container — often can't do the basics: no Python, no package installs, no
 outbound network. iceclimber bridges that gap over nothing but an **SSH/SFTP**
-link. A controller you run *outside* the sandbox provisions Python, packages, and
-web data on the agent's behalf — and **you** stay in the loop, approving each
-operation.
+link. A controller you run *outside* the sandbox provisions language runtimes
+(Python, Node.js), packages, and web data on the agent's behalf — and **you** stay
+in the loop, approving each operation.
 
 One Go binary, two roles, named after the Ice Climbers:
 
@@ -111,7 +111,8 @@ operation the agent requests, with context, and you approve inline:
 | `status` | Liveness (heartbeat), queue depth, installed runtimes, the agent's capabilities |
 | `logs -f [--agent-log <file>]` | Tail Popo's activity (`[POPO]`) merged with the agent's stream (`[NANA]`) |
 | `pending` / `approve <id>` / `deny <id>` | Async egress approval (when not serving on a TTY) |
-| `install python <minor>` · `install pip <pkg> --python <minor>` | Provision directly, without the agent |
+| `install python <minor>` · `install pip <pkg> --python <minor>` | Provision Python directly, without the agent |
+| `install node <version>` · `install npm <pkg> --node <version>` | Provision Node/npm directly |
 | `web fetch <url>` | Run a fetch yourself (same gating) |
 | `skill print` / `skill path` | The `NANA.md` contract |
 
@@ -144,7 +145,9 @@ learn the protocol by hand first, see [`test/PLAYGROUND.md`](test/PLAYGROUND.md)
 |---|---|
 | `ping` | Liveness check (`pong`) |
 | `python.install` | A portable Python (python-build-standalone), run by absolute path |
-| `pip.install` | Packages — from a sandbox-reachable mirror (Tier 0) or relayed in by Popo for air-gapped boxes (Tier 1) |
+| `pip.install` | Python packages — from a sandbox-reachable mirror (Tier 0) or relayed in by Popo for air-gapped boxes (Tier 1) |
+| `node.install` | A portable Node.js runtime (npm bundled), run by absolute path |
+| `npm.install` | npm packages (Tier 0 mirror / Tier 1 relay); returns a `NODE_PATH` to `require()` them |
 | `web.fetch` | A URL — via the **sandbox's** own egress (ungated) or **Popo's** network (gated controller venue) |
 
 ---

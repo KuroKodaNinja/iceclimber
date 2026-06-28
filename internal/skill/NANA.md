@@ -137,6 +137,33 @@ result: {
 resolve to whatever the package manager picks; the exact version is recorded in
 `installed`.
 
+### `node.install` — install a Node.js runtime
+```jsonc
+params: { "version": "20" }       // version line; Popo pins the exact release
+result: { "version": "20.11.1",
+          "path": "/abs/$ROOT/runtimes/node/20.11.1-aarch64-musl/bin/node",
+          "already_installed": false }
+```
+Run it by the absolute `path`; npm sits beside it at `bin/npm`. (On musl sandboxes,
+arm64 needs Node ≥ 24.)
+
+### `npm.install` — install npm packages into an installed Node runtime
+```jsonc
+params: {
+  "node_version": "20",
+  "packages": [ { "name": "left-pad", "version": "1.3.0" },   // pinned
+                { "name": "chalk" } ]                          // or unversioned
+}
+result: {
+  "installed": [ { "name": "left-pad", "version": "1.3.0", "tier": "relay" } ],
+  "failed":    [ ],
+  "node_path": "/abs/$ROOT/runtimes/node/20.11.1-aarch64-musl/lib/node_modules"
+}
+```
+To use the packages, run node with `NODE_PATH` set to `node_path`, e.g.
+`NODE_PATH=<node_path> <node> -e "console.log(require('left-pad'))"`. CLI tools
+land beside `bin/node`. Pure-JS packages only for now (no native/binary addons).
+
 ### `web.fetch` — fetch a URL
 ```jsonc
 params: { "url": "https://...", "method": "GET", "headers": {}, "body": null }
