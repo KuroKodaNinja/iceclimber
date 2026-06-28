@@ -18,7 +18,44 @@ func newInstallCmd() *cobra.Command {
 		Use:   "install",
 		Short: "Install language runtimes or packages into the sandbox",
 	}
-	cmd.AddCommand(newInstallPythonCmd(), newInstallPipCmd(), newInstallNodeCmd(), newInstallNpmCmd())
+	cmd.AddCommand(newInstallPythonCmd(), newInstallPipCmd(), newInstallNodeCmd(), newInstallNpmCmd(), newInstallJavaCmd())
+	return cmd
+}
+
+func newInstallJavaCmd() *cobra.Command {
+	var transport string
+	cmd := &cobra.Command{
+		Use:   "java <version>",
+		Short: "Install a portable Temurin JDK (javac bundled)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(cfgFile, sandboxID)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
+			defer cancel()
+
+			sess, err := openSession(ctx, cfg, transport)
+			if err != nil {
+				return err
+			}
+			defer sess.Close()
+
+			res, err := newJavaInstaller(sess).Install(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			verb := "installed"
+			if res.AlreadyInstalled {
+				verb = "already installed:"
+			}
+			fmt.Fprintf(w, "%s java %s at %s\n", verb, res.Version, res.Path)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	return cmd
 }
 

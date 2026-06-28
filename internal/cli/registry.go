@@ -2,6 +2,7 @@ package cli
 
 import (
 	"github.com/KuroKodaNinja/iceclimber/internal/audit"
+	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/node"
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
@@ -26,6 +27,19 @@ func newInstaller(sess *session) *python.Installer {
 // newNodeInstaller builds the Node installer from an open session.
 func newNodeInstaller(sess *session) *node.Installer {
 	return node.NewInstaller(node.Config{
+		FS:       sess.fs,
+		Runner:   sess.runner,
+		Root:     sess.tree.Root,
+		OS:       sess.fp.OS,
+		Arch:     sess.fp.Arch,
+		Libc:     sess.fp.Libc.Family,
+		CacheDir: sess.cacheDir,
+	})
+}
+
+// newJavaInstaller builds the JDK installer from an open session.
+func newJavaInstaller(sess *session) *java.Installer {
+	return java.NewInstaller(java.Config{
 		FS:       sess.fs,
 		Runner:   sess.runner,
 		Root:     sess.tree.Root,
@@ -89,6 +103,7 @@ func buildRegistry(sess *session) protocol.Registry {
 		"pip.install":    pip.Handler(pipDeps(sess)),
 		"node.install":   node.Handler(newNodeInstaller(sess)),
 		"npm.install":    npm.Handler(npmDeps(sess)),
+		"java.install":   java.Handler(newJavaInstaller(sess)),
 		"web.fetch":      webfetch.Handler(webfetchDeps(sess)),
 	}
 }

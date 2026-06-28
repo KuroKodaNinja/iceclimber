@@ -139,3 +139,11 @@ plan §0).
   `install node`/`install npm`, the `node.install`/`npm.install` verbs. Verified on
   the aarch64/musl VM (both tiers, `require()` via `NODE_PATH`). Pure-JS only
   (native addons = Node Tier 2, deferred); musl arm64 needs Node ≥ 24.
+- **Java — JDK runtime done (3rd language).** `internal/java` (mirror of
+  `internal/node`) installs a portable **Temurin JDK** resolved via the Adoptium
+  API (musl = os `alpine-linux`, glibc = `linux`; `.tar.gz`, SHA256-verified, no xz
+  dep); `install java <version>` + the `java.install` verb. Verified on the
+  aarch64/musl VM: installs JDK 21, runs `java`/`javac`, and compiles+runs a program
+  (single-file launch). **Dependency resolution (Maven coordinates via Coursier,
+  Tier 0/1 — JARs are platform-independent so the relay is trivially correct) is the
+  next increment.**

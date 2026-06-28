@@ -125,6 +125,7 @@ operation the agent requests, with context, and you approve inline:
 | `pending` / `approve <id>` / `deny <id>` | Async egress approval (when not serving on a TTY) |
 | `install python <minor>` · `install pip <pkg> --python <minor>` | Provision Python directly, without the agent |
 | `install node <version>` · `install npm <pkg> --node <version>` | Provision Node/npm directly |
+| `install java <version>` | Provision a Temurin JDK (javac bundled) directly |
 | `web fetch <url>` | Run a fetch yourself (same gating) |
 | `skill print` / `skill path` | The `NANA.md` contract |
 
@@ -160,6 +161,7 @@ learn the protocol by hand first, see [`test/PLAYGROUND.md`](test/PLAYGROUND.md)
 | `pip.install` | Python packages — from a sandbox-reachable mirror (Tier 0) or relayed in by Popo for air-gapped boxes (Tier 1) |
 | `node.install` | A portable Node.js runtime (npm bundled), run by absolute path |
 | `npm.install` | npm packages (Tier 0 mirror / Tier 1 relay); returns a `NODE_PATH` to `require()` them |
+| `java.install` | A portable Temurin JDK (javac bundled), run by absolute path |
 | `web.fetch` | A URL — via the **sandbox's** own egress (ungated) or **Popo's** network (gated controller venue) |
 
 ---
