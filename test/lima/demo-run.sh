@@ -47,8 +47,8 @@ trap cleanup EXIT
 limactl shell "$DEMO" -- sudo sh -s up < "$HERE/demo-firewall.sh"
 
 # 4. Popo serves in the background — the only thing the sandbox can reach besides
-#    its own API.
-"$BIN" serve --config "$CFG" &
+#    its own API. --yes: unattended, never prompt (egress is pre-approved above).
+"$BIN" serve --yes --config "$CFG" &
 SERVE_PID=$!
 sleep 2
 

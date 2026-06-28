@@ -49,7 +49,11 @@ Boot the VM once (the first boot installs node + Claude Code, so it's slow):
 make demo-up
 ```
 
-Then the whole guided demo is a single command:
+The live demo uses **two terminals** (a third is optional). `serve` runs
+**supervised** in the foreground and pauses for you to approve each operation
+inline — Claude-Code style.
+
+**Terminal A — set up + serve (supervised):**
 
 ```sh
 export CLAUDE_CODE_OAUTH_TOKEN=...    # subscription token (see Prerequisites)
@@ -57,47 +61,54 @@ make demo-live
 ```
 
 `make demo-live` points a config at the VM, creates the tree + `NANA.md`,
-**air-gaps** the sandbox, starts Popo's `serve` in the background, and runs the
-agent in two passes:
+**air-gaps** the sandbox, then runs Popo's `serve` in the foreground. It will pause
+with a prompt before each operation the agent requests.
 
-1. **Pass 1 (you watch).** The agent reads `NANA.md` and drives the maildir to
-   install Python 3.12 and `rich` — each serviced by Popo, because the agent can
-   reach neither directly. Then it tries to **fetch `https://xkcd.com/info.0.json`**,
-   which goes out through *Popo's* network (the controller venue) and is **gated**.
-   The fetch is held, so the agent prints an `iceclimber approve …` command and
-   stops.
-   > That stop *is the gate working*: the agent cannot reach the network — not even
-   > its requested URL — without your explicit approval. (A one-shot headless
-   > `claude -p` can't block waiting for an out-of-band approval, hence two passes.)
+**Terminal B — start the agent:**
 
-2. **You approve**, in another terminal:
-   ```sh
-   ./iceclimber pending --config iceclimber-demo.yaml          # the held fetch + its id
-   ./iceclimber approve <id> --config iceclimber-demo.yaml     # persists a host allow rule
-   ```
-   then press **Enter** back in the `make demo-live` terminal.
+```sh
+make demo-agent
+```
 
-3. **Pass 2.** The fetch is now allowed; the agent fetches, writes
-   `work/comics.py`, runs it, and `demo-live` verifies. A **`DEMO VERIFY: PASS`**
-   line means Python, `rich`, and the data all bridged in through Popo.
+The agent reads `NANA.md` and asks Popo for what it needs. Back in **Terminal A**
+you'll be prompted to approve each step, with context:
 
-On exit it restores egress and stops `serve`.
+```
+  ╭─────────────────────────────────────────────
+  │ Approve operation · sandbox iceclimber-demo
+  │ Install Python packages
+  │   python    3.12
+  │   packages  rich, pyfiglet
+  ╰─────────────────────────────────────────────
+    [y] approve   [a] approve all pip.install   [n] deny   [d] deny+remember   [?]
+```
 
-### Watch it happen (merged log)
+- `Install Python …` → `y`
+- `Install Python packages · rich, pyfiglet` → `y`
+- `web.fetch GET https://xkcd.com/info.0.json` (⚠ *leaves YOUR network*) → `y`
 
-In a **third terminal**, tail Popo's activity and the agent's stream merged into
-one feed:
+> Each prompt *is the gate working*: nothing installs, and no byte leaves your
+> machine's network, without your say-so. Approving a fetch returns the **real
+> result in the same pass** — no re-submit. `[a]` approves all of that type for the
+> session; `[n]`/`[d]` deny (the agent gets `operator_denied`).
+
+When the agent finishes in Terminal B (it prints the comic report — an ASCII
+banner, a computed stats table, and a bar chart), press **Ctrl-C** in Terminal A.
+`make demo-live` then verifies and prints **`DEMO VERIFY: PASS`** — proving the
+program used `rich` + `pyfiglet`, computed stats (e.g. the title's character
+count) from the fetched data, and rendered it, all bridged through Popo.
+
+**Terminal C (optional) — the merged log:**
 
 ```sh
 make demo-logs
 ```
 
-`[POPO]` lines are what the controller services (`python.install → ok`,
-`pip.install → ok rich …`, `web.fetch → held`, then `approved`, then
-`web.fetch → ok`); `[NANA]` lines are the agent's own actions. The same view
-works for any run — `iceclimber logs -f --config <cfg> [--agent-log <file>]`; the
-structured source is `~/.iceclimber/<sandbox_id>/activity.jsonl`. `serve` also
-prints this feed on its own stdout.
+`[POPO]` lines are what Popo services plus your approve/deny decisions; `[NANA]`
+lines are the agent's own actions. (`serve` already prints the activity feed on its
+own stdout in Terminal A.) The same view works for any run —
+`iceclimber logs -f --config <cfg> [--agent-log <file>]`; the structured source is
+`~/.iceclimber/<sandbox_id>/activity.jsonl`.
 
 ### Prove the air-gap is real
 
@@ -111,22 +122,11 @@ make demo-shell
   exit
 ```
 
-### Drive it by hand instead
+### Unattended?
 
-`make demo-live` is a convenience over the individual targets. To step through it:
-
-```sh
-make demo-bootstrap                                   # config + tree + NANA.md
-make demo-firewall                                    # air-gap
-./iceclimber serve --config iceclimber-demo.yaml      # Terminal A (Popo)
-make demo-agent                                       # Terminal B — provisions, holds at the gate
-./iceclimber approve <id> --config iceclimber-demo.yaml
-make demo-reset && make demo-agent                    # clean pass; completes
-make demo-verify
-```
-
-> `demo-reset` is needed because Popo's effectively-once dedup won't re-service a
-> *held* id; a re-submit under a **new id** (as `NANA.md` instructs) would also work.
+`./iceclimber serve --yes` services everything without prompting — that's what the
+headless `make demo` does (with egress pre-approved), asserting the result. See
+[Automated run](#automated-run).
 
 ### Teardown
 
