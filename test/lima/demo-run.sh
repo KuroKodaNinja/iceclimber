@@ -19,13 +19,13 @@ REPO="$(cd "$HERE/../.." && pwd)"
 cd "$REPO"
 
 BIN="$REPO/iceclimber"
-CFG="$REPO/iceclimber-demo.yaml"
+CFG="$REPO/.demo/config.yaml"
 [ -x "$BIN" ] || { echo "build the binary first: make build" >&2; exit 1; }
 # Local convenience: load the subscription token from a gitignored file if the
 # operator stashed it there and it isn't already in the environment (CI sets the
 # real env var, so the file is absent there).
-[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "$REPO/.demo-token.env" ] && . "$REPO/.demo-token.env"
-: "${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or stash it in .demo-token.env — subscription, not API}"
+[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "$REPO/.demo/token.env" ] && . "$REPO/.demo/token.env"
+: "${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or stash it in .demo/token.env — subscription, not API}"
 
 # 1. Point a config at the VM (remote_root pinned) and create the tree.
 root="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"

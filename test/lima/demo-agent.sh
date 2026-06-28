@@ -18,8 +18,8 @@ REPO="$(cd "$HERE/../.." && pwd)"
 
 # Local convenience: load the subscription token from a gitignored file if the
 # operator stashed it there and it isn't already in the environment.
-[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "$REPO/.demo-token.env" ] && . "$REPO/.demo-token.env"
-: "${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or stash it in .demo-token.env — subscription, NOT an API key}"
+[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "$REPO/.demo/token.env" ] && . "$REPO/.demo/token.env"
+: "${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or stash it in .demo/token.env — subscription, NOT an API key}"
 
 ROOT="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"
 

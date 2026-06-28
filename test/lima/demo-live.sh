@@ -19,7 +19,7 @@ REPO="$(cd "$HERE/../.." && pwd)"
 cd "$REPO"
 
 BIN="$REPO/iceclimber"
-CFG="$REPO/iceclimber-demo.yaml"
+CFG="$REPO/.demo/config.yaml"
 [ -x "$BIN" ] || { echo "build the binary first: make build" >&2; exit 1; }
 
 # 1. Stage the tree + a fresh, ungated egress gate + a clean maildir.

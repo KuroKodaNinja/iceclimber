@@ -9,6 +9,7 @@ SANDBOX     := iceclimber-sandbox
 SANDBOX_TPL := test/lima/sandbox.yaml
 DEMO        := iceclimber-demo
 DEMO_TPL    := test/lima/demo.yaml
+DEMO_CFG    := .demo/config.yaml
 BIN         := iceclimber
 
 .PHONY: build fmt vet test test-functional e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
@@ -101,15 +102,16 @@ demo-firewall-down:
 demo-shell:
 	@limactl shell $(DEMO)
 
-# Write iceclimber-demo.yaml pointing at the demo VM, with remote_root pinned to
-# a predictable tree ($HOME/iceclimber-demo) so the agent brief can name paths.
+# Write the demo config (.demo/config.yaml) pointing at the demo VM, with
+# remote_root pinned to a predictable tree ($HOME/iceclimber-demo) so the agent
+# brief can name paths.
 demo-config:
 	@root=$$(limactl shell $(DEMO) -- sh -lc 'echo $$HOME/iceclimber-demo'); \
-	 bash test/lima/gen-config.sh $(DEMO) iceclimber-demo.yaml $$root
+	 bash test/lima/gen-config.sh $(DEMO) $(DEMO_CFG) $$root
 
 # Create the protocol tree + drop NANA.md in the demo VM.
 demo-bootstrap: build demo-config
-	./$(BIN) bootstrap --config iceclimber-demo.yaml
+	./$(BIN) bootstrap --config $(DEMO_CFG)
 
 # Launch the agent in the (air-gapped) demo VM. Needs CLAUDE_CODE_OAUTH_TOKEN
 # (subscription) and Popo serving in another terminal. See DEMO.md.
@@ -123,7 +125,7 @@ demo-verify:
 # Tail the merged host (Popo) + sandbox (agent) activity during a demo run.
 # Run in a separate terminal alongside `make demo-live`.
 demo-logs: build
-	@./$(BIN) logs -f --config iceclimber-demo.yaml --agent-log $$HOME/.iceclimber/$(DEMO)/agent.log
+	@./$(BIN) logs -f --config $(DEMO_CFG) --agent-log $$HOME/.iceclimber/$(DEMO)/agent.log
 
 # Clear the protocol maildir + work dir for a fresh agent pass. Keeps the
 # installed runtimes (so re-runs are fast) and any egress approvals. Use this

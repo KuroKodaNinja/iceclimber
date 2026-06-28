@@ -3,11 +3,10 @@
 
 # Local operator config and caches (may contain host/path details)
 /iceclimber.yaml
-/iceclimber-demo.yaml
 /.iceclimber-cache/
 
-# Demo subscription token (never commit; sourced at agent launch)
-/.demo-token.env
+# Demo state: generated config + the subscription token (never commit)
+/.demo/
 
 # Go build/test artifacts
 *.test
