@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/KuroKodaNinja/iceclimber/internal/audit"
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
+	"github.com/KuroKodaNinja/iceclimber/internal/maven"
 	"github.com/KuroKodaNinja/iceclimber/internal/node"
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
@@ -48,6 +49,19 @@ func newJavaInstaller(sess *session) *java.Installer {
 		Libc:     sess.fp.Libc.Family,
 		CacheDir: sess.cacheDir,
 	})
+}
+
+// mavenDeps builds the maven.install dependency bundle from an open session.
+func mavenDeps(sess *session) maven.Deps {
+	return maven.Deps{
+		FS:        sess.fs,
+		Runner:    sess.runner,
+		Root:      sess.tree.Root,
+		Arch:      sess.fp.Arch,
+		Libc:      sess.fp.Libc.Family,
+		MirrorURL: sess.maven.RepositoryURL,
+		CacheDir:  sess.cacheDir,
+	}
 }
 
 // pipDeps builds the pip.install dependency bundle from an open session.
@@ -104,6 +118,7 @@ func buildRegistry(sess *session) protocol.Registry {
 		"node.install":   node.Handler(newNodeInstaller(sess)),
 		"npm.install":    npm.Handler(npmDeps(sess)),
 		"java.install":   java.Handler(newJavaInstaller(sess)),
+		"maven.install":  maven.Handler(mavenDeps(sess)),
 		"web.fetch":      webfetch.Handler(webfetchDeps(sess)),
 	}
 }

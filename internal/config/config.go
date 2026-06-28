@@ -28,6 +28,8 @@ type Config struct {
 	// ControllerNpm is the operator's npm on the controller, used for Tier-1
 	// relay. Defaults to "npm" at use.
 	ControllerNpm string `yaml:"controller_npm"`
+	// Maven configures JVM (Maven-coordinate) dependency resolution (§5).
+	Maven Maven `yaml:"maven"`
 	// AuditLog is the controller-side web.fetch audit JSONL path. Empty means
 	// the default ~/.iceclimber/audit/<sandbox_id>.jsonl.
 	AuditLog string `yaml:"audit_log"`
@@ -69,6 +71,12 @@ type Rewrite struct {
 type Npm struct {
 	RegistryURL        string `yaml:"registry_url"`
 	ControllerRegistry string `yaml:"controller_registry"`
+}
+
+// Maven configures JVM dependency resolution (§5). RepositoryURL is an optional
+// sandbox-reachable Maven repository for Tier 0 (empty = Maven Central).
+type Maven struct {
+	RepositoryURL string `yaml:"repository_url"`
 }
 
 // Pip configures package install (§5). IndexURL is the Tier-0 mirror

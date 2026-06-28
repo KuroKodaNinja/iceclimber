@@ -144,6 +144,10 @@ plan §0).
   API (musl = os `alpine-linux`, glibc = `linux`; `.tar.gz`, SHA256-verified, no xz
   dep); `install java <version>` + the `java.install` verb. Verified on the
   aarch64/musl VM: installs JDK 21, runs `java`/`javac`, and compiles+runs a program
-  (single-file launch). **Dependency resolution (Maven coordinates via Coursier,
-  Tier 0/1 — JARs are platform-independent so the relay is trivially correct) is the
-  next increment.**
+  (single-file launch). **Dependencies — Tier 0 done:** `internal/maven` resolves
+  Maven coordinates via **Coursier** (25 kB launcher relayed in, run on the installed
+  JDK) into a **classpath** the agent runs with `java -cp`; `install maven … --java
+  VER` + the `maven.install` verb. Verified on the VM (Guava + transitive →
+  compile+run). **Tier 1 relay (controller resolves, Popo relays JARs) is next —
+  trivially correct since JVM bytecode is platform-independent; `--tier relay` errors
+  with that guidance for now.**

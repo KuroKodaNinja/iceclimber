@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/maven"
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
@@ -18,8 +19,75 @@ func newInstallCmd() *cobra.Command {
 		Use:   "install",
 		Short: "Install language runtimes or packages into the sandbox",
 	}
-	cmd.AddCommand(newInstallPythonCmd(), newInstallPipCmd(), newInstallNodeCmd(), newInstallNpmCmd(), newInstallJavaCmd())
+	cmd.AddCommand(newInstallPythonCmd(), newInstallPipCmd(), newInstallNodeCmd(), newInstallNpmCmd(),
+		newInstallJavaCmd(), newInstallMavenCmd())
 	return cmd
+}
+
+func newInstallMavenCmd() *cobra.Command {
+	var transport, javaVersion, tier, mirror string
+	cmd := &cobra.Command{
+		Use:   "maven <group:artifact:version>...",
+		Short: "Resolve JVM dependencies (Maven coordinates) into a classpath via Coursier",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(cfgFile, sandboxID)
+			if err != nil {
+				return err
+			}
+			specs, err := parseCoords(args)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
+			defer cancel()
+
+			sess, err := openSession(ctx, cfg, transport)
+			if err != nil {
+				return err
+			}
+			defer sess.Close()
+
+			deps := mavenDeps(sess)
+			if mirror != "" {
+				deps.MirrorURL = mirror
+			}
+			res, err := maven.Run(ctx, deps, javaVersion, specs, tier)
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			for _, p := range res.Installed {
+				fmt.Fprintf(w, "resolved %s:%s (%s)\n", p.Name, p.Version, p.Tier)
+			}
+			for _, f := range res.Failed {
+				fmt.Fprintf(w, "FAILED   %s:%s: %s\n", f.Name, f.Version, f.Error)
+			}
+			if res.Classpath != "" {
+				fmt.Fprintf(w, "classpath: %s\n", res.Classpath)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
+	cmd.Flags().StringVar(&javaVersion, "java", "", "target JDK feature version, e.g. 21 (required)")
+	cmd.Flags().StringVar(&tier, "tier", "auto", "resolution tier: auto|mirror|relay")
+	cmd.Flags().StringVar(&mirror, "mirror", "", "Maven repository URL (overrides config; Tier 0)")
+	_ = cmd.MarkFlagRequired("java")
+	return cmd
+}
+
+// parseCoords turns "group:artifact:version" args into specs (Name = "group:artifact").
+func parseCoords(args []string) ([]pkg.Spec, error) {
+	specs := make([]pkg.Spec, 0, len(args))
+	for _, a := range args {
+		parts := strings.SplitN(a, ":", 3)
+		if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+			return nil, fmt.Errorf("invalid coordinate %q (want group:artifact:version)", a)
+		}
+		specs = append(specs, pkg.Spec{Name: parts[0] + ":" + parts[1], Version: parts[2]})
+	}
+	return specs, nil
 }
 
 func newInstallJavaCmd() *cobra.Command {

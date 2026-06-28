@@ -126,6 +126,7 @@ operation the agent requests, with context, and you approve inline:
 | `install python <minor>` · `install pip <pkg> --python <minor>` | Provision Python directly, without the agent |
 | `install node <version>` · `install npm <pkg> --node <version>` | Provision Node/npm directly |
 | `install java <version>` | Provision a Temurin JDK (javac bundled) directly |
+| `install maven <group:artifact:version> --java <version>` | Resolve JVM deps into a classpath (Coursier) |
 | `web fetch <url>` | Run a fetch yourself (same gating) |
 | `skill print` / `skill path` | The `NANA.md` contract |
 
@@ -162,6 +163,7 @@ learn the protocol by hand first, see [`test/PLAYGROUND.md`](test/PLAYGROUND.md)
 | `node.install` | A portable Node.js runtime (npm bundled), run by absolute path |
 | `npm.install` | npm packages (Tier 0 mirror / Tier 1 relay); returns a `NODE_PATH` to `require()` them |
 | `java.install` | A portable Temurin JDK (javac bundled), run by absolute path |
+| `maven.install` | JVM deps (Maven coordinates) resolved via Coursier (Tier 0); returns a `classpath` to run with `java -cp` |
 | `web.fetch` | A URL — via the **sandbox's** own egress (ungated) or **Popo's** network (gated controller venue) |
 
 ---
