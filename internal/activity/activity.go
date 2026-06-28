@@ -18,6 +18,13 @@ const (
 	KindApproved = "approved" // operator approved a held egress
 	KindDenied   = "denied"   // operator denied a held egress
 	KindOperated = "operated" // operator-initiated action (console install/bootstrap)
+	KindVerified = "verified" // sandbox-side confirmation (Nana echo: ran in the sandbox)
+)
+
+// Event sides: which actor an event is attributed to (drives the console pane).
+const (
+	SidePopo = "popo" // the controller (default when unset)
+	SideNana = "nana" // the sandbox itself — output captured from running in it
 )
 
 // Event is one activity record. It is intentionally protocol-agnostic — the cli
@@ -25,6 +32,7 @@ const (
 type Event struct {
 	TS     string `json:"ts"`
 	Kind   string `json:"kind"`
+	Side   string `json:"side,omitempty"` // "" / "popo" = controller, "nana" = sandbox echo
 	ID     string `json:"id,omitempty"`
 	Type   string `json:"type,omitempty"`
 	Status string `json:"status,omitempty"`

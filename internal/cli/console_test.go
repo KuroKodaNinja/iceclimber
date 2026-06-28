@@ -53,6 +53,19 @@ func TestSplitSpecs(t *testing.T) {
 	}
 }
 
+func TestFirstLine(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"", ""},
+		{"Python 3.12.13", "Python 3.12.13"},
+		{"\n\n  v24.4.0  \nextra", "v24.4.0"},
+		{"  \n", ""},
+	} {
+		if got := firstLine(tc.in); got != tc.want {
+			t.Errorf("firstLine(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestDefaultVersion(t *testing.T) {
 	if defaultVersion("python", "") != "3.12" {
 		t.Error("blank python version should default to 3.12")

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -10,10 +11,13 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/node"
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
+	"github.com/KuroKodaNinja/iceclimber/internal/python"
+	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/tui"
 )
 
@@ -66,10 +70,28 @@ type consoleOps struct {
 	events chan tea.Msg
 }
 
+// echo is one sandbox-side confirmation line (Nana's voice).
+type echo struct {
+	text string
+	ok   bool
+}
+
+// opResult bundles an operator action's controller summary (typ/detail/err) with
+// the sandbox-side echoes that confirm it landed.
+type opResult struct {
+	typ    string
+	detail string
+	err    error
+	echoes []echo
+}
+
 func (o *consoleOps) RunInstall(r tui.InstallRequest) tea.Cmd {
 	return func() tea.Msg {
-		typ, detail, err := o.doInstall(r)
-		o.record(typ, detail, err)
+		res := o.doInstall(r)
+		o.record(res.typ, res.detail, res.err)
+		for _, e := range res.echoes {
+			o.echo(e)
+		}
 		return tui.OpResultMsg{}
 	}
 }
@@ -78,45 +100,116 @@ func (o *consoleOps) RunBootstrap() tea.Cmd {
 	return func() tea.Msg {
 		err := provision(o.ctx, o.sess)
 		o.record("bootstrap", "tree + pip.conf + NANA.md + ping/pong smoke test", err)
+		if err == nil {
+			// provision's smoke test already round-tripped a ping/pong through the
+			// sandbox maildir — that IS the sandbox echoing back.
+			o.echo(echo{"sandbox echoed pong (ping/pong smoke test)", true})
+		}
 		return tui.OpResultMsg{}
 	}
 }
 
-// doInstall maps the operator's language/action to the right installer and tier,
-// applying a recommended default version when none was given. It returns the
-// activity type (the underlying verb — pip/npm/python/node), a one-line summary,
-// and any error. Tier is always auto (the form doesn't expose it).
-func (o *consoleOps) doInstall(r tui.InstallRequest) (string, string, error) {
+// doInstall maps the operator's language/action to the right installer and tier
+// (always auto — the form doesn't expose it), applying a recommended default
+// version when none was given, then verifies the result in the sandbox so Nana
+// echoes back confirmation.
+func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 	ver := defaultVersion(r.Lang, r.Version)
 	switch r.Lang {
 	case "python":
 		if r.Action == "packages" {
 			out, err := pip.Run(o.ctx, pipDeps(o.sess), ver, parseSpecs(splitSpecs(r.Pkgs)), "auto")
 			if err != nil {
-				return "pip.install", "", err
+				return opResult{typ: "pip.install", err: err}
 			}
-			return "pip.install", pkgSummary(out.Installed, out.Failed), nil
+			return opResult{typ: "pip.install", detail: pkgSummary(out.Installed, out.Failed),
+				echoes: o.verifyPyPkgs(ver, out.Installed)}
 		}
 		res, err := newInstaller(o.sess).Install(o.ctx, ver)
 		if err != nil {
-			return "python.install", "", err
+			return opResult{typ: "python.install", err: err}
 		}
-		return "python.install", runtimeSummary("python", res.Version, res.Path, res.AlreadyInstalled), nil
+		return opResult{typ: "python.install", detail: runtimeSummary("python", res.Version, res.Path, res.AlreadyInstalled),
+			echoes: []echo{o.verifyRuntime(res.Path, "-V")}}
 	case "javascript":
 		if r.Action == "packages" {
 			out, err := npm.Run(o.ctx, npmDeps(o.sess), ver, parseNpmSpecs(splitSpecs(r.Pkgs)), "auto")
 			if err != nil {
-				return "npm.install", "", err
+				return opResult{typ: "npm.install", err: err}
 			}
-			return "npm.install", pkgSummary(out.Installed, out.Failed), nil
+			return opResult{typ: "npm.install", detail: pkgSummary(out.Installed, out.Failed),
+				echoes: o.verifyNodePkgs(ver, out.Installed)}
 		}
 		res, err := newNodeInstaller(o.sess).Install(o.ctx, ver)
 		if err != nil {
-			return "node.install", "", err
+			return opResult{typ: "node.install", err: err}
 		}
-		return "node.install", runtimeSummary("node", res.Version, res.Path, res.AlreadyInstalled), nil
+		return opResult{typ: "node.install", detail: runtimeSummary("node", res.Version, res.Path, res.AlreadyInstalled),
+			echoes: []echo{o.verifyRuntime(res.Path, "--version")}}
 	}
-	return "install", "", fmt.Errorf("unknown language %q", r.Lang)
+	return opResult{typ: "install", err: fmt.Errorf("unknown language %q", r.Lang)}
+}
+
+// verifyRuntime runs the freshly-installed interpreter in the sandbox; its version
+// banner is the sandbox itself confirming the runtime loads.
+func (o *consoleOps) verifyRuntime(bin, flag string) echo {
+	res, err := o.sess.runner.Run(o.ctx, remote.ShellQuote(bin)+" "+flag, nil)
+	if err != nil || res.ExitCode != 0 {
+		return echo{path.Base(bin) + " did not run in the sandbox", false}
+	}
+	banner := firstLine(string(res.Stdout) + string(res.Stderr))
+	if banner == "" {
+		banner = path.Base(bin) + " ran"
+	}
+	return echo{banner, true}
+}
+
+// verifyPyPkgs confirms each installed package is present in the sandbox runtime
+// via `pip show` (the dist name, so no import-name guessing).
+func (o *consoleOps) verifyPyPkgs(ver string, installed []pkg.Installed) []echo {
+	bin, err := python.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
+	if err != nil {
+		return []echo{{"python " + ver + " runtime not found to verify packages", false}}
+	}
+	echoes := make([]echo, 0, len(installed))
+	for _, p := range installed {
+		res, err := o.sess.runner.Run(o.ctx, remote.ShellQuote(bin)+" -m pip show "+remote.ShellQuote(p.Name), nil)
+		if err != nil || res.ExitCode != 0 {
+			echoes = append(echoes, echo{p.Name + " not present", false})
+			continue
+		}
+		echoes = append(echoes, echo{p.Name + " " + p.Version + " present", true})
+	}
+	return echoes
+}
+
+// verifyNodePkgs confirms each installed package's node_modules dir exists in the
+// sandbox runtime (the dir name is the package name, so no require-name guessing).
+func (o *consoleOps) verifyNodePkgs(ver string, installed []pkg.Installed) []echo {
+	bin, err := node.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
+	if err != nil {
+		return []echo{{"node " + ver + " runtime not found to verify packages", false}}
+	}
+	modules := path.Join(path.Dir(path.Dir(bin)), "lib", "node_modules")
+	echoes := make([]echo, 0, len(installed))
+	for _, p := range installed {
+		if _, err := o.sess.fs.ReadFile(o.ctx, path.Join(modules, p.Name, "package.json")); err != nil {
+			echoes = append(echoes, echo{p.Name + " not present in node_modules", false})
+			continue
+		}
+		echoes = append(echoes, echo{p.Name + " " + p.Version + " present", true})
+	}
+	return echoes
+}
+
+// firstLine returns the first non-blank line of s, trimmed.
+func firstLine(s string) string {
+	for _, ln := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(ln); t != "" {
+			return t
+		}
+	}
+	return ""
 }
 
 // defaultVersion supplies a sane runtime version when the operator left it blank:
@@ -148,6 +241,27 @@ func (o *consoleOps) record(typ, detail string, err error) {
 	_ = o.act.Append(e)
 	select {
 	case o.events <- e:
+	default:
+	}
+}
+
+// echo records a sandbox-side confirmation (Nana's voice) — attributed to the
+// sandbox so the console routes it to the [NANA] pane.
+func (o *consoleOps) echo(e echo) {
+	status := "ok"
+	if !e.ok {
+		status = "failed"
+	}
+	ev := activity.Event{
+		TS:     time.Now().UTC().Format(time.RFC3339),
+		Kind:   activity.KindVerified,
+		Side:   activity.SideNana,
+		Status: status,
+		Detail: e.text,
+	}
+	_ = o.act.Append(ev)
+	select {
+	case o.events <- ev:
 	default:
 	}
 }

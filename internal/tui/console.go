@@ -179,7 +179,7 @@ func (c Console) View() string {
 		return formView(c.width, c.height, c.formTitle(), c.form.View())
 	}
 	return dashboard(c.width, c.height, c.sandboxID, c.served, c.approved, c.denied,
-		c.lastTS, true, c.popoLines, c.nanaLines, c.nana != nil, c.ops != nil, c.running)
+		c.lastTS, true, c.popoLines, c.nanaLines, true, c.nana != nil, c.ops != nil, c.running)
 }
 
 // openForm builds and focuses the named operator form.
@@ -282,6 +282,15 @@ func (c Console) formTitle() string {
 }
 
 func (c *Console) applyEvent(e activity.Event) {
+	if t, err := time.Parse(time.RFC3339, e.TS); err == nil {
+		c.lastTS = t
+	}
+	// Sandbox echoes are the sandbox's own voice — show them in the [NANA] pane
+	// alongside the agent's stream, not in Popo's activity.
+	if e.Side == activity.SideNana {
+		c.addNana(nanaEcho(e))
+		return
+	}
 	switch e.Kind {
 	case activity.KindServiced:
 		c.served++
@@ -289,9 +298,6 @@ func (c *Console) applyEvent(e activity.Event) {
 		c.approved++
 	case activity.KindDenied:
 		c.denied++
-	}
-	if t, err := time.Parse(time.RFC3339, e.TS); err == nil {
-		c.lastTS = t
 	}
 	c.popoLines = append(c.popoLines, eventToLine(e))
 	if len(c.popoLines) > maxLines {

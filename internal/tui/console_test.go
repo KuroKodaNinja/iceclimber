@@ -51,6 +51,42 @@ func TestConsole_OperatedEvent(t *testing.T) {
 	}
 }
 
+func TestConsole_SandboxEchoRoutesToNana(t *testing.T) {
+	c := NewConsole("sbx", make(chan tea.Msg, 4), "", nil)
+	updated, cmd := c.Update(activity.Event{
+		TS: "2026-06-28T18:00:03Z", Kind: activity.KindVerified, Side: activity.SideNana,
+		Status: "ok", Detail: "python 3.12.13",
+	})
+	c2 := updated.(Console)
+	if len(c2.popoLines) != 0 {
+		t.Errorf("a sandbox echo must not appear in the POPO pane, got %d lines", len(c2.popoLines))
+	}
+	if len(c2.nanaLines) != 1 {
+		t.Fatalf("a sandbox echo should land in the NANA pane, got %d lines", len(c2.nanaLines))
+	}
+	if !strings.Contains(c2.nanaLines[0], "✓") || !strings.Contains(c2.nanaLines[0], "python 3.12.13") {
+		t.Errorf("nana line = %q", c2.nanaLines[0])
+	}
+	if c2.served != 0 {
+		t.Errorf("a sandbox echo is not a serviced request; served = %d, want 0", c2.served)
+	}
+	if cmd == nil {
+		t.Error("an event should re-arm the event listener")
+	}
+}
+
+func TestConsole_FailedEchoMarked(t *testing.T) {
+	c := NewConsole("sbx", make(chan tea.Msg, 4), "", nil)
+	updated, _ := c.Update(activity.Event{
+		TS: "2026-06-28T18:00:04Z", Kind: activity.KindVerified, Side: activity.SideNana,
+		Status: "failed", Detail: "requests not present",
+	})
+	c2 := updated.(Console)
+	if len(c2.nanaLines) != 1 || !strings.Contains(c2.nanaLines[0], "✗") {
+		t.Errorf("failed echo should be marked ✗, got %v", c2.nanaLines)
+	}
+}
+
 func TestConsole_ApprovalModal(t *testing.T) {
 	c := NewConsole("sbx", make(chan tea.Msg, 4), "", nil)
 	reply := make(chan int, 1)

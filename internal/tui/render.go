@@ -59,8 +59,19 @@ func eventToLine(e activity.Event) popoLine {
 	}
 }
 
-// dashboard renders the header + two panes + footer.
-func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, serving bool, popoLines []popoLine, nanaLines []string, hasNana, hasOps bool, running string) string {
+// nanaEcho formats a sandbox-side confirmation for the [NANA] pane: real output
+// captured from running something in the sandbox.
+func nanaEcho(e activity.Event) string {
+	glyph := "✓"
+	if e.Status == "failed" {
+		glyph = "✗"
+	}
+	return glyph + " " + e.Detail
+}
+
+// dashboard renders the header + two panes + footer. showNana renders the [NANA]
+// pane (the sandbox's voice); hasAgentLog only tweaks the empty-pane hint.
+func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, serving bool, popoLines []popoLine, nanaLines []string, showNana, hasAgentLog, hasOps bool, running string) string {
 	if w < 40 {
 		w = 40
 	}
@@ -73,10 +84,10 @@ func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS 
 	if bodyH < 4 {
 		bodyH = 4
 	}
-	if hasNana {
+	if showNana {
 		lw := (w - 1) / 2
 		rw := w - 1 - lw
-		body := lipgloss.JoinHorizontal(lipgloss.Top, popoPane(lw, bodyH, popoLines), " ", nanaPane(rw, bodyH, true, nanaLines))
+		body := lipgloss.JoinHorizontal(lipgloss.Top, popoPane(lw, bodyH, popoLines), " ", nanaPane(rw, bodyH, hasAgentLog, nanaLines))
 		return lipgloss.JoinVertical(lipgloss.Left, hdr, body, ftr)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, hdr, popoPane(w, bodyH, popoLines), ftr)
@@ -105,7 +116,7 @@ func footer(w int, hasOps bool, running string) string {
 	if hasOps {
 		keys = "i install   b bootstrap   ·   q quit"
 	}
-	return dimStyle.Width(w).Render(" [POPO] Popo's activity   [NANA] the agent's stream   ·   " + keys)
+	return dimStyle.Width(w).Render(" [POPO] Popo's activity   [NANA] the sandbox's voice   ·   " + keys)
 }
 
 func popoPane(w, h int, lines []popoLine) string {
@@ -126,10 +137,14 @@ func nanaPane(w, h int, hasNana bool, lines []string) string {
 	if ch < 2 {
 		ch = 2
 	}
-	title := titleStyle.Render("[NANA] sandbox agent")
+	title := titleStyle.Render("[NANA] sandbox")
 	var content string
-	if !hasNana {
-		content = title + "\n" + dimStyle.Render("(no --agent-log)")
+	if len(lines) == 0 {
+		hint := "(sandbox echoes appear here)"
+		if hasNana {
+			hint = "(waiting for agent output)"
+		}
+		content = title + "\n" + dimStyle.Render(hint)
 	} else {
 		start := 0
 		if n := len(lines); n > ch-1 {
