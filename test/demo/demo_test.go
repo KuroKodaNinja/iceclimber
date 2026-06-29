@@ -15,8 +15,9 @@ import (
 
 // TestAcceptanceDemo runs the full demo end to end: a real Claude agent, sealed
 // in a sandbox that can reach only the Claude API, uses iceclimber to provision
-// Python + rich + web data through Popo, builds a program, and runs it. We assert
-// the program renders the data it fetched.
+// three runtimes (Python, Node, Java) + Python/JavaScript packages + web data
+// through Popo, then builds and runs a small program in each language. We assert
+// all three computed values from the data Popo fetched.
 //
 // Opt-in: needs CLAUDE_CODE_OAUTH_TOKEN (a *subscription* token from
 // `claude setup-token`, never the metered API) and the provisioned demo VM

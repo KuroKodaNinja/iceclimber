@@ -3,8 +3,8 @@
 Every functional test runs against a VM with **open internet**, so they prove the
 *mechanism* but not the **premise**. This demo proves the premise: a sandbox that
 genuinely *can't* reach the network, with a **real Claude agent living inside it**,
-uses iceclimber to get the Python, package, and web data it needs — and builds and
-runs a working program.
+uses iceclimber to get the runtimes, packages, and web data it needs — and builds
+and runs a working program in **three languages** (Python, JavaScript, and Java).
 
 The sandbox is air-gapped down to **only the Claude API** (so the agent can think)
 — PyPI, GitHub, and the data URL are all unreachable. The only way out is Popo.
@@ -86,25 +86,27 @@ you'll be prompted to approve each step, with context:
   │ Approve operation · sandbox iceclimber-demo
   │ Install Python packages
   │   python    3.12
-  │   packages  rich, pyfiglet
+  │   packages  rich
   ╰─────────────────────────────────────────────
     [y] approve   [a] approve all pip.install   [n] deny   [d] deny+remember   [?]
 ```
 
-- `Install Python …` → `y`
-- `Install Python packages · rich, pyfiglet` → `y`
-- `web.fetch GET https://xkcd.com/info.0.json` (⚠ *leaves YOUR network*) → `y`
+The task spans **three languages**, so you'll approve a handful of operations —
+`web.fetch` for the xkcd JSON, then `python.install` + `pip.install` (rich),
+`node.install` + `npm.install` (left-pad), and `java.install`. Approve each with
+`y` (or `[a]` to approve all of a type for the session).
 
 > Each prompt *is the gate working*: nothing installs, and no byte leaves your
 > machine's network, without your say-so. Approving a fetch returns the **real
 > result in the same pass** — no re-submit. `[a]` approves all of that type for the
 > session; `[n]`/`[d]` deny (the agent gets `operator_denied`).
 
-When the agent finishes in Terminal B (it prints the comic report — an ASCII
-banner, a computed stats table, and a bar chart), press **Ctrl-C** in Terminal A.
-`make demo-live` then verifies and prints **`DEMO VERIFY: PASS`** — proving the
-program used `rich` + `pyfiglet`, computed stats (e.g. the title's character
-count) from the fetched data, and rendered it, all bridged through Popo.
+When the agent finishes in Terminal B, it has built and run a small program in
+**each** of Python, JavaScript, and Java that reads the one fetched comic and prints
+a computed `[<lang>] xkcd #<num> title-length=<N>` line. Press **Ctrl-C** in
+Terminal A. `make demo-live` then verifies and prints **`DEMO VERIFY: PASS`** —
+proving all three runtimes, the Python/JavaScript packages, and the data were
+bridged through Popo, and each program computed the same comic number from it.
 
 **Terminal C (optional) — the merged log, or the graphical dashboard:**
 

@@ -43,8 +43,9 @@ describes, exactly. Start by reading the NANA.md path it points you to."
 agentlog="$HOME/.iceclimber/$DEMO/agent.log"
 mkdir -p "$(dirname "$agentlog")"
 
-# --max-turns bounds a runaway agent (belt-and-suspenders for CI).
+# --max-turns bounds a runaway agent (belt-and-suspenders for CI). The
+# three-language task is more Popo round-trips than one language, so give it room.
 limactl shell "$DEMO" -- \
 	env CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" ANTHROPIC_API_KEY= \
-	bash -lc "cd '$ROOT/work' && claude -p \"$prompt\" --dangerously-skip-permissions --verbose --max-turns 60" \
+	bash -lc "cd '$ROOT/work' && claude -p \"$prompt\" --dangerously-skip-permissions --verbose --max-turns 150" \
 	| tee -a "$agentlog"

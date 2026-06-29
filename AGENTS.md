@@ -33,6 +33,11 @@ no `InsecureIgnoreHostKey`).
   runtime via `teatest` (`internal/tui/flows_test.go`), the interactive analogue of
   the CLI's stdin/stdout tests. New TUI behaviour ⇒ a new flow test. The console's
   executor also has a live-VM functional test (`make tui-functional`).
+- **Keep the acceptance demo current.** The demo proves the *premise* — a real
+  Claude agent, air-gapped, building real software bridged through Popo. **Whenever a
+  major feature or a language is added, refresh it** (`test/demo/TASK.md` +
+  `test/lima/demo-verify.sh`) so the premise stays proven for what we've actually
+  built, then re-run `make demo`. See [`DEMO.md`](./DEMO.md).
 - **Commits.** Conventional Commits, atomic and self-contained — each commit
   builds and passes tests on its own. See `.agents/git/commits`.
 
@@ -73,7 +78,12 @@ and Java**. Use this checklist (Python/Node/Java are the worked examples; decisi
    real dependency through **both tiers**, and **compiles/runs a program that uses
    it**; **TUI flow test(s)** (teatest) for the new form path; and a **self-contained
    scenario** in `test/scenarios/<lang>/` that builds and runs a real app.
-7. **Docs:** README (commands + verbs), this file's language bullet, and the plan
+7. **Skill doc:** add the new verbs to the embedded `internal/skill/NANA.md` — the
+   sandbox agent learns its available actions there; an undocumented verb is invisible
+   to it.
+8. **Acceptance demo:** refresh `test/demo/` so the air-gapped agent exercises the new
+   language, and re-run `make demo` (see the working agreement).
+9. **Docs:** README (commands + verbs), this file's language bullet, and the plan
    (§9 command surface + a decision-log entry).
 
 ## Quickstart

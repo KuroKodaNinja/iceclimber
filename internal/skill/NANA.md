@@ -164,6 +164,32 @@ To use the packages, run node with `NODE_PATH` set to `node_path`, e.g.
 `NODE_PATH=<node_path> <node> -e "console.log(require('left-pad'))"`. CLI tools
 land beside `bin/node`. Pure-JS packages only for now (no native/binary addons).
 
+### `java.install` — install a JDK (Temurin)
+```jsonc
+params: { "version": "21" }   // feature version, e.g. "21" or "17"
+result: { "version": "21.0.11+10",
+          "path": "/abs/$ROOT/runtimes/java/21.0.11+10-aarch64-musl/bin/java",
+          "already_installed": false }
+```
+Run it by the absolute `path`; `javac` sits beside it at `bin/javac`. Java 11+ can
+run a single source file directly (`<java> Program.java`) — no separate compile step.
+
+### `maven.install` — resolve JVM (Maven) dependencies onto a classpath
+```jsonc
+params: {
+  "java_version": "21",
+  "packages": [ { "name": "com.google.code.gson:gson", "version": "2.10.1" } ]  // group:artifact + version
+}
+result: {
+  "installed": [ { "name": "com.google.code.gson:gson", "version": "2.10.1", "tier": "relay" } ],
+  "failed":    [ ],
+  "classpath": "/abs/.../gson-2.10.1.jar:/abs/.../..."
+}
+```
+Coordinates are `group:artifact` plus a `version`; Popo resolves them and their
+transitive dependencies into a `classpath`. Compile and run with it:
+`<javac> -cp <classpath> -d out Program.java` then `<java> -cp <classpath>:out Program`.
+
 ### `web.fetch` — fetch a URL
 ```jsonc
 params: { "url": "https://...", "method": "GET", "headers": {}, "body": null }
