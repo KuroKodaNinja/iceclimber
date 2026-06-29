@@ -138,8 +138,9 @@ scriptable, and how the functional test drives it).
 against a real Alpine/musl sandbox, and the **acceptance demo** (phase 8,
 [`DEMO.md`](./DEMO.md)) proves the whole premise with a real Claude agent under a
 true air-gap. Remaining work: incremental polish + the v2 backlog (sub-agent/
-`web.research`, Tier 2 build, `ExecFS` bulk-transfer, true fleet multiplexing —
-plan §0).
+`web.research`, Tier 2 build, true fleet multiplexing — plan §0). The `ExecFS`
+bulk-transfer shipped (decision #55): runtime trees push in one `tar -xf -` exec,
+so all languages install over either transport (no SFTP-only constraint).
 
 - **Phase 1 — done.** CLI skeleton + `probe` (fingerprint OS/arch/libc/root
   viability), verified end-to-end against Alpine.

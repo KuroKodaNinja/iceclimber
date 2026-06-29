@@ -76,9 +76,9 @@ func (i *Installer) Install(ctx context.Context, version string) (Result, error)
 	if err != nil {
 		return Result{}, err
 	}
-	// Node tarballs nest everything under "<asset-without-.tar.gz>/".
-	strip := strings.TrimSuffix(r.AssetName, ".tar.gz") + "/"
-	if err := i.extractAndPush(ctx, tarball, target, strip); err != nil {
+	// Node tarballs nest everything under one top-level dir, which the shared push
+	// strips.
+	if err := i.extractAndPush(ctx, tarball, target); err != nil {
 		return Result{}, fmt.Errorf("push node tree: %w", err)
 	}
 	if err := i.verify(ctx, bin); err != nil {

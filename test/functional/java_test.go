@@ -88,3 +88,27 @@ func TestJavaInstall(t *testing.T) {
 		t.Errorf("running Hello.java = %q, want hello-from-java 21.x", strings.TrimSpace(run))
 	}
 }
+
+// TestJavaInstallOverExec installs a JDK over the ExecFS transport (no SFTP).
+// The JDK is the largest tree (~200 MB, thousands of files), so this is the
+// strongest end-to-end proof that the bulk `tar` push streams a big tree into
+// BusyBox in one exec; it then runs bin/java to confirm the artifact works.
+func TestJavaInstallOverExec(t *testing.T) {
+	sb := requireSandbox(t)
+	root := "/tmp/iceclimber-javaexec-" + protocol.NewID()
+	cfg := writeConfigRoot(t, sb, root)
+
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "exec")
+	out := runIceclimber(t, "install", "java", "21", "--config", cfg, "--transport", "exec")
+	if !strings.Contains(string(out), "java 21.") {
+		t.Fatalf("install java 21 over exec output = %q, want a 21.x version", string(out))
+	}
+
+	bin := strings.TrimSpace(limaSh(t, "ls "+root+"/runtimes/java/*/bin/java 2>/dev/null | head -1"))
+	if bin == "" {
+		t.Fatal("no java under runtimes/java after exec-transport install")
+	}
+	if v := limaSh(t, remoteQuote(bin)+" -version 2>&1"); !strings.Contains(v, "21") {
+		t.Errorf("java -version = %q, want a 21.x runtime", strings.TrimSpace(v))
+	}
+}

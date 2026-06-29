@@ -96,10 +96,13 @@ func TestPushTarGz(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Push via the shared remotefs path over a local ExecFS: this exercises the
+	// bulk `tar` transfer (ExecFS is a TreePusher) end to end against a real local
+	// runner + real filesystem — strip, exec bit, and symlink all via tar.
 	target := t.TempDir()
-	inst := NewInstaller(Config{FS: remotefs.NewExecFS(remotefstest.LocalRunner{})})
-	if err := inst.pushTarGz(context.Background(), &buf, target); err != nil {
-		t.Fatalf("pushTarGz: %v", err)
+	fsys := remotefs.NewExecFS(remotefstest.LocalRunner{})
+	if err := remotefs.PushTarGz(context.Background(), fsys, &buf, target); err != nil {
+		t.Fatalf("PushTarGz: %v", err)
 	}
 
 	// Regular executable: content + exec bit.

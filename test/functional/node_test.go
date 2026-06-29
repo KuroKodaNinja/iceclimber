@@ -66,3 +66,30 @@ func TestNodeInstall(t *testing.T) {
 
 // remoteQuote single-quotes a path for a remote sh -c.
 func remoteQuote(p string) string { return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'" }
+
+// TestNodeInstallOverExec installs Node over the ExecFS transport (no SFTP),
+// proving the bulk `tar` push lands the Node tree on BusyBox and bin/node runs.
+func TestNodeInstallOverExec(t *testing.T) {
+	sb := requireSandbox(t)
+	root := "/tmp/iceclimber-nodeexec-" + protocol.NewID()
+	cfg := writeConfigRoot(t, sb, root)
+
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "exec")
+	out := runIceclimber(t, "install", "node", "24", "--config", cfg, "--transport", "exec")
+	if !strings.Contains(string(out), "node 24.") || !strings.Contains(string(out), "/runtimes/node/") {
+		t.Errorf("install node over exec output unexpected:\n%s", out)
+	}
+
+	bin := strings.TrimSpace(limaSh(t, "ls "+root+"/runtimes/node/*/bin/node 2>/dev/null | head -1"))
+	if bin == "" {
+		t.Fatal("no node under runtimes/node after exec-transport install")
+	}
+	if v := limaSh(t, remoteQuote(bin)+" --version"); !strings.HasPrefix(strings.TrimSpace(v), "v24.") {
+		t.Errorf("node --version = %q, want v24.x", strings.TrimSpace(v))
+	}
+	// npx is a symlink in the Node layout; the bulk tar push must preserve it.
+	npx := strings.TrimSuffix(bin, "/node") + "/npx"
+	if got := strings.TrimSpace(limaSh(t, "test -L "+remoteQuote(npx)+" && echo symlink || echo other")); got != "symlink" {
+		t.Errorf("bin/npx is %q on the VM, want a symlink preserved by the bulk tar push", got)
+	}
+}

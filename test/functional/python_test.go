@@ -17,9 +17,8 @@ import (
 // maildir — proving both paths. The interpreter is run by install's own verify
 // step, so a successful install is proof it executes on musl.
 //
-// The ExecFS push path is covered by the fast unit test (internal/python
-// TestPushTarGz over a local shell); a full interpreter over ExecFS is thousands
-// of round trips, so it's intentionally not exercised in the suite here.
+// The SFTP-less (ExecFS) path now pushes the whole tree in one `tar` round trip
+// (the bulk transfer) and is exercised end to end by TestPythonInstallOverExec.
 func TestPythonInstall(t *testing.T) {
 	sb := requireSandbox(t)
 	root := "/tmp/iceclimber-py-" + protocol.NewID()
@@ -81,5 +80,42 @@ func TestPythonInstall(t *testing.T) {
 	}
 	if !strings.HasPrefix(result.Version, "3.12.") || result.Path == "" {
 		t.Errorf("python.install result = %+v", result)
+	}
+}
+
+// TestPythonInstallOverExec installs a real CPython onto the sandbox over the
+// ExecFS transport (no SFTP), proving the bulk `tar` transfer works on the
+// sandbox's BusyBox: the whole runtime tree lands in one exec, executable bits
+// and symlinks intact, and install's own verify step runs the interpreter.
+func TestPythonInstallOverExec(t *testing.T) {
+	sb := requireSandbox(t)
+	root := "/tmp/iceclimber-pyexec-" + protocol.NewID()
+	cfg := writeConfigRoot(t, sb, root)
+
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "exec")
+
+	out := runIceclimber(t, "install", "python", "3.12", "--config", cfg, "--transport", "exec")
+	if !strings.Contains(string(out), "python 3.12.") || !strings.Contains(string(out), "/runtimes/python/") {
+		t.Errorf("install over exec output unexpected:\n%s", out)
+	}
+
+	// Idempotent re-install over exec, same as the SFTP path.
+	if out2 := runIceclimber(t, "install", "python", "3.12", "--config", cfg, "--transport", "exec"); !strings.Contains(string(out2), "already installed") {
+		t.Errorf("expected idempotent re-install over exec, got:\n%s", out2)
+	}
+
+	// The tree must actually be on the VM, and its bin/python3 must run on musl.
+	py := strings.TrimSpace(limaSh(t, "ls "+root+"/runtimes/python/*/bin/python3 2>/dev/null | head -1"))
+	if py == "" {
+		t.Fatal("no python under runtimes/python after exec-transport install")
+	}
+	if v := limaSh(t, remoteQuote(py)+" --version 2>&1"); !strings.Contains(v, "3.12") {
+		t.Errorf("python --version = %q, want 3.12.x", strings.TrimSpace(v))
+	}
+	// The bulk tar push must preserve symlinks on BusyBox: bin/python3 is a
+	// symlink to python3.x in the PBS layout, so `tar` (not per-file ln -s) must
+	// have recreated it. `test -L` is the portable check.
+	if got := strings.TrimSpace(limaSh(t, "test -L "+remoteQuote(py)+" && echo symlink || echo regular")); got != "symlink" {
+		t.Errorf("bin/python3 is %q on the VM, want a symlink preserved by the bulk tar push", got)
 	}
 }

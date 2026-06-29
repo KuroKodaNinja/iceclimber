@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"sort"
@@ -74,6 +75,18 @@ func (e *ExecFS) Chmod(ctx context.Context, path string, mode os.FileMode) error
 func (e *ExecFS) Symlink(ctx context.Context, target, link string) error {
 	res, err := e.r.Run(ctx, "ln -s "+remote.ShellQuote(target)+" "+remote.ShellQuote(link), nil)
 	return e.check("symlink", link, res, err)
+}
+
+// PushTar extracts a plain tar stream into target in a single exec — the
+// bulk-transfer path (TreePusher), far faster than cat-per-file for a runtime
+// tree. BusyBox `tar -xf -` reads the archive from stdin and preserves modes and
+// symlinks. target is created first (tar -C requires it).
+func (e *ExecFS) PushTar(ctx context.Context, tarStream io.Reader, target string) error {
+	if err := e.Mkdir(ctx, target); err != nil {
+		return err
+	}
+	res, err := e.r.Run(ctx, "tar -xf - -C "+remote.ShellQuote(target), tarStream)
+	return e.check("push-tar", target, res, err)
 }
 
 func (e *ExecFS) RemoveAll(ctx context.Context, path string) error {
