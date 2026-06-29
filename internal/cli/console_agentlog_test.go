@@ -31,7 +31,7 @@ func TestPollAgentLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := pollAgentLogs(ctx, fs, base, offsets)
-	if len(got) != 2 || got[0].Text != "hello popo" || got[1].Text != "asking for python" {
+	if len(got) != 2 || got[0] != "hello popo" || got[1] != "asking for python" {
 		t.Fatalf("first poll = %+v, want the two lines unprefixed", got)
 	}
 
@@ -47,7 +47,7 @@ func TestPollAgentLogs(t *testing.T) {
 	}
 	f.WriteString("got python 3.12\n")
 	f.Close()
-	if got := pollAgentLogs(ctx, fs, base, offsets); len(got) != 1 || got[0].Text != "got python 3.12" {
+	if got := pollAgentLogs(ctx, fs, base, offsets); len(got) != 1 || got[0] != "got python 3.12" {
 		t.Errorf("append poll = %+v, want just the new line", got)
 	}
 
@@ -55,7 +55,7 @@ func TestPollAgentLogs(t *testing.T) {
 	if err := os.WriteFile(claudeLog, []byte("fresh start\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := pollAgentLogs(ctx, fs, base, offsets); len(got) != 1 || got[0].Text != "fresh start" {
+	if got := pollAgentLogs(ctx, fs, base, offsets); len(got) != 1 || got[0] != "fresh start" {
 		t.Errorf("post-truncate poll = %+v, want the restarted line", got)
 	}
 
@@ -68,7 +68,7 @@ func TestPollAgentLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = pollAgentLogs(ctx, fs, base, offsets)
-	if len(got) != 1 || got[0].Text != "[other] other agent up" {
+	if len(got) != 1 || got[0] != "[other] other agent up" {
 		t.Fatalf("multi-agent poll = %+v, want the new agent's line prefixed", got)
 	}
 }

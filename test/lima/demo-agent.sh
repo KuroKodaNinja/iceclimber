@@ -38,16 +38,11 @@ echo ">>> watch Popo's 'serve' in your other terminal service its requests."
 # system context, so the prompt only needs to hand over the task.
 prompt="Read $ROOT/work/TASK.md and complete the task it describes, exactly."
 
-# Persist the agent's stream so `iceclimber logs --agent-log` can show the [NANA]
-# side (it still streams to this terminal). Append so both demo-live passes land
-# in one file.
-agentlog="$HOME/.iceclimber/$DEMO/agent.log"
-mkdir -p "$(dirname "$agentlog")"
-
 # nana wraps the agent: it picks the sole installed agent (claude), sets up auth +
-# NANA.md, and passes these flags through to it. --verbose streams the agent's tool
-# calls; --max-turns bounds a runaway agent (the three-language task is more Popo
-# round-trips than one language, so give it room).
+# NANA.md, and passes these flags through to it. With -p (headless), nana mirrors the
+# stream to the sandbox session.log, which the serving Popo bridges to the controller
+# so `iceclimber logs`/`tui`/the console show it with no --agent-log. --verbose streams
+# the agent's tool calls; --max-turns bounds a runaway agent (the three-language task
+# is more Popo round-trips than one language, so give it room).
 limactl shell "$DEMO" -- \
-	"$nana" -p "$prompt" --dangerously-skip-permissions --verbose --max-turns 150 \
-	| tee -a "$agentlog"
+	"$nana" -p "$prompt" --dangerously-skip-permissions --verbose --max-turns 150

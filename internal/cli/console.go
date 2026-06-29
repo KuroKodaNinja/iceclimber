@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -563,14 +565,16 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 		}
 	}()
 
-	// With no explicit --agent-log, auto-tail the sandbox's per-agent session.log(s)
-	// so the [NANA] pane shows the agent's stream with no Popo-side flag.
-	if agentLog == "" {
-		go tailAgentSessions(ctx, sess, events)
+	// With no explicit --agent-log, default to the controller-side agent.log and
+	// bridge the sandbox's agent stream into it, so [NANA] populates with no flag.
+	logPath := agentLog
+	if logPath == "" {
+		logPath = agentLogPath(cfg)
+		go bridgeAgentLog(ctx, sess, logPath)
 	}
 
 	ops := &consoleOps{ctx: ctx, sess: sess, act: act, events: events}
-	model := tui.NewConsole(cfg.SandboxID, events, agentLog, ops)
+	model := tui.NewConsole(cfg.SandboxID, events, logPath, ops)
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 	cancel() // stop serving; any pending approval fails safe via done
 	return err
@@ -582,7 +586,10 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 // dir's log is read whole and the new suffix emitted (offset-tracked; a shrink means
 // the log was rotated/truncated, so we restart). Best-effort: a missing log is just
 // skipped, and a slow/full UI never blocks (non-blocking send).
-func tailAgentSessions(ctx context.Context, sess *session, events chan<- tea.Msg) {
+func bridgeAgentLog(ctx context.Context, sess *session, dst string) {
+	if dst == "" {
+		return
+	}
 	base := path.Join(sess.tree.Root, "agent")
 	offsets := map[string]int{}
 	t := time.NewTicker(1500 * time.Millisecond)
@@ -592,11 +599,8 @@ func tailAgentSessions(ctx context.Context, sess *session, events chan<- tea.Msg
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			for _, ln := range pollAgentLogs(ctx, sess.fs, base, offsets) {
-				select {
-				case events <- ln:
-				default: // never block serving/UI on a slow channel
-				}
+			if lines := pollAgentLogs(ctx, sess.fs, base, offsets); len(lines) > 0 {
+				appendLines(dst, lines)
 			}
 		}
 	}
@@ -607,13 +611,13 @@ func tailAgentSessions(ctx context.Context, sess *session, events chan<- tea.Msg
 // than its offset was rotated/truncated → restart from the top. Lines are prefixed
 // with the agent name when more than one agent is installed. Missing logs / a missing
 // base are skipped (nil).
-func pollAgentLogs(ctx context.Context, fs remotefs.FS, base string, offsets map[string]int) []tui.AgentLine {
+func pollAgentLogs(ctx context.Context, fs remotefs.FS, base string, offsets map[string]int) []string {
 	names, err := fs.List(ctx, base)
 	if err != nil {
 		return nil
 	}
 	multi := len(names) > 1
-	var out []tui.AgentLine
+	var out []string
 	for _, name := range names {
 		logp := path.Join(base, name, "session.log")
 		data, err := fs.ReadFile(ctx, logp)
@@ -637,10 +641,25 @@ func pollAgentLogs(ctx context.Context, fs remotefs.FS, base string, offsets map
 			if multi {
 				line = "[" + name + "] " + line
 			}
-			out = append(out, tui.AgentLine{Text: line})
+			out = append(out, line)
 		}
 	}
 	return out
+}
+
+// appendLines appends lines to the controller-side agent-log file (best-effort).
+func appendLines(dst string, lines []string) {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(dst, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	for _, l := range lines {
+		fmt.Fprintln(f, l)
+	}
 }
 
 // trustHostInteractive fetches the sandbox's offered host key, shows its

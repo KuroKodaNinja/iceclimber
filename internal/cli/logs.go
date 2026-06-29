@@ -33,6 +33,11 @@ func newLogsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Default to the controller-side agent.log a serving process bridges the
+			// sandbox agent stream into, so [NANA] shows the agent with no flag.
+			if agentLog == "" {
+				agentLog = agentLogPath(cfg)
+			}
 			out := cmd.OutOrStdout()
 
 			cutoff := time.Time{}

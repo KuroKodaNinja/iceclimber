@@ -143,6 +143,12 @@ func withDispatcher(ctx context.Context, cfg *config.Config, transport string, d
 		line := fmt.Sprintf("  %s  %-15s %-19s %s", time.Now().Format("15:04:05"), typ, ev.Resp.Status, detail)
 		fmt.Fprintln(out, strings.TrimRight(line, " "))
 	})
+
+	// Bridge the sandbox's per-agent session.log(s) into the controller-side agent.log
+	// so `iceclimber logs`/`tui` (which default --agent-log there) show the agent's
+	// stream without a flag, just like the embedded-serve console.
+	go bridgeAgentLog(ctx, sess, agentLogPath(cfg))
+
 	return fn(disp)
 }
 

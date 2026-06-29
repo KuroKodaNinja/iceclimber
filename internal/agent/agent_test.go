@@ -85,10 +85,11 @@ func TestRenderRun(t *testing.T) {
 		`nana='/r/skill/NANA.md'`, // references NANA.md
 		`set -- '--append-system-prompt' "$(cat "$nana")" "$@"`, // NANA as system context, then passthrough
 		`bin='/r/agent/claude/claude'`,
-		`if [ -t 1 ]; then`, // tty-gated capture
-		`exec "$bin" "$@"`,  // interactive: clean tty
-		`| tee -a "$log"`,   // headless: mirror to session.log
-		`log="$self/session.log"`,
+		`[ -t 1 ] || headless=1`,                 // capture when not a tty…
+		`case "$a" in -p|--print) headless=1 ;;`, // …or a print flag is present
+		`if [ "$headless" = 1 ]; then`,
+		`| tee -a "$log"`,  // headless: mirror to session.log
+		`exec "$bin" "$@"`, // interactive: clean tty
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("run script missing %q:\n%s", want, got)

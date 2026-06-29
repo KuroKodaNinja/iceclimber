@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 )
@@ -74,6 +75,42 @@ func TestAgentInstallClaude(t *testing.T) {
 	if out := limaSh(t, "cat "+sessionLog+" 2>/dev/null"); !strings.Contains(out, ".") {
 		t.Errorf("session.log = %q, want the agent's version output captured for the [NANA] pane", strings.TrimSpace(out))
 	}
+}
+
+// TestAgentLogBridge proves a serving Popo bridges the sandbox's per-agent
+// session.log into the controller-side agent.log — the no-flag path that feeds
+// `iceclimber logs`/`tui`/the console's [NANA] pane. We simulate a headless agent by
+// writing a session.log in the sandbox, run `serve` in the background, and assert the
+// line reaches the controller file.
+func TestAgentLogBridge(t *testing.T) {
+	sb := requireSandbox(t)
+	root := "/tmp/iceclimber-bridge-" + protocol.NewID()
+	cfg := writeConfigRoot(t, sb, root)
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
+
+	// Stand in for a headless nana run: a session.log under the agent dir.
+	limaSh(t, "mkdir -p "+root+"/agent/claude && printf 'nana: hello popo\\n' > "+root+"/agent/claude/session.log")
+
+	// agentLogPath default is ~/.iceclimber/<sandbox_id>/agent.log.
+	agentLog := filepath.Join(os.Getenv("HOME"), ".iceclimber", sandboxName, "agent.log")
+	_ = os.Remove(agentLog)
+
+	serve := exec.Command(iceclimberBin, "serve", "--yes", "--config", cfg, "--transport", "sftp")
+	if err := serve.Start(); err != nil {
+		t.Fatalf("start serve: %v", err)
+	}
+	defer func() { _ = serve.Process.Kill(); _, _ = serve.Process.Wait() }()
+
+	// The bridge polls every 1.5s; give it a generous window.
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, _ := os.ReadFile(agentLog); strings.Contains(string(b), "nana: hello popo") {
+			return // bridged through to the controller — success
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	b, _ := os.ReadFile(agentLog)
+	t.Fatalf("serve did not bridge the sandbox session.log to %s; have: %q", agentLog, b)
 }
 
 // TestAgentInstallRejectsAPIKey proves the command refuses an API-key token.

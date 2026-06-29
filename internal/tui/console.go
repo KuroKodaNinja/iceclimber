@@ -60,11 +60,6 @@ type InstallRequest struct {
 // emits, so the result reads identically whether it was operator- or agent-driven.
 type OpResultMsg struct{}
 
-// AgentLine is one line of an agent's own output stream — from a sandbox session.log
-// the console auto-tails (no --agent-log needed) or the --agent-log file. It renders
-// in the [NANA] pane, the sandbox's voice.
-type AgentLine struct{ Text string }
-
 // OpRunner executes operator-initiated actions. Each method returns a tea.Cmd that
 // performs the work off the UI goroutine, appends an activity event (so the [POPO]
 // pane and JSONL both reflect it), and finally emits an OpResultMsg. The cli layer
@@ -228,9 +223,6 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case OpResultMsg:
 		c.running = ""
 		return c, nil
-	case AgentLine:
-		c.addNana(msg.Text)
-		return c, c.waitEvent()
 	case tickMsg:
 		if c.nana != nil {
 			for _, l := range c.nana.Poll() {

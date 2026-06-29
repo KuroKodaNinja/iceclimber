@@ -153,3 +153,14 @@ func activityPath(cfg *config.Config) string {
 	}
 	return filepath.Join(home, ".iceclimber", cfg.SandboxID, "activity.jsonl")
 }
+
+// agentLogPath is the controller-side file the serve loop bridges the sandbox agent
+// stream into (~/.iceclimber/<sandbox_id>/agent.log) — the default --agent-log for
+// the console, `tui`, and `logs`, so the [NANA] pane shows the agent with no flag.
+func agentLogPath(cfg *config.Config) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".iceclimber", cfg.SandboxID, "agent.log")
+}

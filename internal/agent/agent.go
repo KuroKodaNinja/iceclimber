@@ -27,6 +27,10 @@ type Descriptor struct {
 	APIKeyEnv   string   // API-key env var to BLANK so it can't fall back to metered billing
 	Env         []EnvVar // extra runtime env written into the agent's env file
 	VersionArgs []string // args that print the version (used to verify the install)
+	// PrintFlags are the harness's non-interactive/headless flags (e.g. -p, --print).
+	// nana captures the session to session.log when one is present (or stdout is not
+	// a tty) — never for an interactive run, whose TUI needs the tty untouched.
+	PrintFlags []string
 	// SystemPromptFlag is the harness flag that appends a string to the agent's
 	// system prompt; the `nana` launcher passes NANA.md's contents to it so the
 	// Popo contract is persistent context every turn. Empty = the harness has no
@@ -51,6 +55,7 @@ var Claude = Descriptor{
 		{Key: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", Value: "1"},
 	},
 	VersionArgs:      []string{"--version"},
+	PrintFlags:       []string{"-p", "--print"},
 	SystemPromptFlag: "--append-system-prompt",
 }
 

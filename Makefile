@@ -146,19 +146,20 @@ demo-verify:
 	@bash test/lima/demo-verify.sh $(DEMO)
 
 # Tail the merged host (Popo) + sandbox (agent) activity during a demo run.
-# Run in a separate terminal alongside `make demo-live`.
+# Run in a separate terminal alongside `make demo-live`. No --agent-log needed: the
+# serving Popo bridges the sandbox agent stream into the default agent.log it tails.
 demo-logs: build
-	@./$(BIN) logs -f --config $(DEMO_CFG) --agent-log $$HOME/.iceclimber/$(DEMO)/agent.log
+	@./$(BIN) logs -f --config $(DEMO_CFG)
 
 # The graphical version of demo-logs: a live [POPO]/[NANA] dashboard.
 demo-tui: build
-	@./$(BIN) tui --config $(DEMO_CFG) --agent-log $$HOME/.iceclimber/$(DEMO)/agent.log
+	@./$(BIN) tui --config $(DEMO_CFG)
 
 # The full operator console for the demo VM: bare iceclimber serves the sandbox and
 # handles approvals inline. Run `make demo-agent` in another terminal and approve
 # the modals here. (Needs the gate air-gapped/cleared like make demo-live.)
 demo-console: build
-	@./$(BIN) --config $(DEMO_CFG) --agent-log $$HOME/.iceclimber/$(DEMO)/agent.log
+	@./$(BIN) --config $(DEMO_CFG)
 
 # Clear the protocol maildir + work dir for a fresh agent pass. Keeps the
 # installed runtimes (so re-runs are fast) and any egress approvals. Use this

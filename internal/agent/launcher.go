@@ -26,9 +26,19 @@ func renderRun(d Descriptor, dir, binPath, nanaPath string) string {
 	fmt.Fprintf(&b, "set -eu\n")
 	fmt.Fprintf(&b, "self=%s\n", remote.ShellQuote(dir))
 	fmt.Fprintf(&b, "[ -f \"$self/env.sh\" ] && . \"$self/env.sh\"\n")
+	fmt.Fprintf(&b, "bin=%s\n", remote.ShellQuote(binPath))
+
+	// Decide capture before mangling the args: headless when stdout isn't a tty or a
+	// print flag is present. An interactive run (tty, no print flag) is never tee'd —
+	// its TUI needs the tty.
+	fmt.Fprintf(&b, "headless=0\n")
+	fmt.Fprintf(&b, "[ -t 1 ] || headless=1\n")
+	if len(d.PrintFlags) > 0 {
+		fmt.Fprintf(&b, "for a in \"$@\"; do case \"$a\" in %s) headless=1 ;; esac; done\n", strings.Join(d.PrintFlags, "|"))
+	}
+
 	if d.SystemPromptFlag != "" {
-		// Prepend the system-prompt args (NANA.md contents) ahead of the operator's
-		// args, when NANA.md is present.
+		// Prepend the system-prompt args (NANA.md contents) ahead of the operator's args.
 		fmt.Fprintf(&b, "nana=%s\n", remote.ShellQuote(nanaPath))
 		fmt.Fprintf(&b, "if [ -f \"$nana\" ]; then\n")
 		fmt.Fprintf(&b, "  set -- %s \"$(cat \"$nana\")\" \"$@\"\n", remote.ShellQuote(d.SystemPromptFlag))
@@ -36,14 +46,14 @@ func renderRun(d Descriptor, dir, binPath, nanaPath string) string {
 		fmt.Fprintf(&b, "  echo \"nana: NANA.md not found at $nana — launching without the Popo contract; run 'iceclimber bootstrap'\" >&2\n")
 		fmt.Fprintf(&b, "fi\n")
 	}
-	fmt.Fprintf(&b, "bin=%s\n", remote.ShellQuote(binPath))
-	fmt.Fprintf(&b, "if [ -t 1 ]; then\n")
-	fmt.Fprintf(&b, "  exec \"$bin\" \"$@\"\n") // interactive: keep the agent's tty
-	fmt.Fprintf(&b, "else\n")
-	// Headless: mirror stdout+stderr to session.log so the console can tail it.
+
+	fmt.Fprintf(&b, "if [ \"$headless\" = 1 ]; then\n")
+	// Headless: mirror stdout+stderr to session.log so a serving process can bridge it.
 	fmt.Fprintf(&b, "  log=\"$self/session.log\"\n")
 	fmt.Fprintf(&b, "  printf '\\n=== nana session %%s ===\\n' \"$(date 2>/dev/null || echo)\" >>\"$log\" 2>/dev/null || true\n")
 	fmt.Fprintf(&b, "  \"$bin\" \"$@\" 2>&1 | tee -a \"$log\"\n")
+	fmt.Fprintf(&b, "else\n")
+	fmt.Fprintf(&b, "  exec \"$bin\" \"$@\"\n") // interactive: keep the agent's tty
 	fmt.Fprintf(&b, "fi\n")
 	return b.String()
 }

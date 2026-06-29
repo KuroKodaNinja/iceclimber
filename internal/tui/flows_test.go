@@ -3,6 +3,8 @@ package tui
 import (
 	"bytes"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -107,12 +109,23 @@ func TestFlow_DashboardChrome(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 }
 
-func TestFlow_NanaPaneHintThenAgentStream(t *testing.T) {
-	tm := startConsole(t, newRecordOps())
-	// With no agent output yet, the [NANA] pane shows the actionable hint…
+func TestFlow_NanaPaneHint(t *testing.T) {
+	tm := startConsole(t, newRecordOps()) // no agent-log
+	// With no agent output, the [NANA] pane shows the actionable hint.
 	waitText(t, tm, "$ROOT/nana")
-	// …and a streamed agent line (auto-tailed session.log) lands in the pane.
-	tm.Send(AgentLine{Text: "nana fetched comic.json"})
+	tm.Quit()
+	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+}
+
+func TestFlow_NanaPaneTailsAgentLog(t *testing.T) {
+	// The console tails the (bridged) agent-log file and renders it in [NANA] — the
+	// same path whether the file is the auto-bridged default or an explicit --agent-log.
+	logf := filepath.Join(t.TempDir(), "agent.log")
+	if err := os.WriteFile(logf, []byte("nana fetched comic.json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tm := teatest.NewTestModel(t, NewConsole("sbx", make(chan tea.Msg), logf, newRecordOps()),
+		teatest.WithInitialTermSize(120, 40))
 	waitText(t, tm, "nana fetched comic.json")
 	tm.Quit()
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
