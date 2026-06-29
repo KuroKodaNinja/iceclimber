@@ -17,10 +17,8 @@ func stubCommands() []*cobra.Command {
 			leaf("prune", "Remove stale cache entries", "v2"),
 			leaf("gc", "Garbage-collect the cache", "v2"),
 		),
-		parent("nana", "Optional sandbox-side convenience binary",
-			leaf("request", "Submit a request from inside the sandbox", "v2"),
-			leaf("capabilities", "Self-report Nana's harness capabilities", "v2"),
-		),
+		// (The old "nana" sandbox-side request stub is superseded by the real `popo`
+		// client (cmd/popo, relayed to $ROOT/popo) and the `nana` launcher script.)
 	}
 }
 

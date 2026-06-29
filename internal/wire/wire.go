@@ -103,9 +103,11 @@ func (t Tree) BlobRef(name string) string {
 	return strings.TrimPrefix(path.Join(t.Blobs(), name), t.Root+"/")
 }
 
-// Skill holds the dropped NANA.md skill doc; Capabilities is Nana's self-report.
+// Skill holds the dropped skill docs (NANA.md + the PROTOCOL.md fallback);
+// Capabilities is Nana's optional self-report.
 func (t Tree) Skill() string        { return path.Join(t.Root, "skill") }
 func (t Tree) SkillFile() string    { return path.Join(t.Skill(), "NANA.md") }
+func (t Tree) ProtocolFile() string { return path.Join(t.Skill(), "PROTOCOL.md") }
 func (t Tree) Capabilities() string { return path.Join(t.protocolDir(), "capabilities.json") }
 
 // Maildir is one tmp/new/cur triple.

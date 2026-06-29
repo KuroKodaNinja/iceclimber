@@ -580,12 +580,11 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	return err
 }
 
-// tailAgentSessions polls the sandbox's per-agent session.log files (written by the
-// nana launcher in headless mode) and pushes new lines to the console's [NANA] pane
-// — so the operator sees the agent's stream with no --agent-log flag. Each agent
-// dir's log is read whole and the new suffix emitted (offset-tracked; a shrink means
-// the log was rotated/truncated, so we restart). Best-effort: a missing log is just
-// skipped, and a slow/full UI never blocks (non-blocking send).
+// bridgeAgentLog copies new lines from the sandbox's per-agent session.log files
+// (written by the nana launcher in headless mode) into the controller-side file dst,
+// so every view (console / tui / logs) shows the agent's stream by tailing one local
+// file — no --agent-log flag needed. The per-file read/offset/rotation logic and the
+// stream-json rendering live in pollAgentLogs.
 func bridgeAgentLog(ctx context.Context, sess *session, dst string) {
 	if dst == "" {
 		return

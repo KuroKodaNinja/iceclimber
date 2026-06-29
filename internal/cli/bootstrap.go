@@ -68,7 +68,7 @@ func provision(ctx context.Context, sess *session) error {
 	if err := sess.fs.WriteFile(ctx, sess.tree.SkillFile(), []byte(skill.NanaMD)); err != nil {
 		return fmt.Errorf("write NANA.md: %w", err)
 	}
-	if err := sess.fs.WriteFile(ctx, path.Join(sess.tree.Skill(), "PROTOCOL.md"), []byte(skill.ProtocolMD)); err != nil {
+	if err := sess.fs.WriteFile(ctx, sess.tree.ProtocolFile(), []byte(skill.ProtocolMD)); err != nil {
 		return fmt.Errorf("write PROTOCOL.md: %w", err)
 	}
 	if err := dropPopo(ctx, sess); err != nil {
