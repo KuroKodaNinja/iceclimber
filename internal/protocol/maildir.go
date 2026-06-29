@@ -5,49 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
-	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
-	"github.com/oklog/ulid/v2"
+	"github.com/KuroKodaNinja/iceclimber/internal/wire"
 )
 
-// Tree is the on-sandbox layout rooted at an install root (plan §3). All paths
-// are absolute POSIX paths (path, not path/filepath).
-type Tree struct {
-	Root string
-}
+// Tree / Maildir layout + id helpers re-exported from the wire leaf package.
+type (
+	Tree    = wire.Tree
+	Maildir = wire.Maildir
+)
 
-func (t Tree) protocolDir() string { return path.Join(t.Root, "protocol") }
-
-// Outbox carries requests (Nana -> Popo); Inbox carries responses (Popo -> Nana).
-func (t Tree) Outbox() Maildir { return Maildir{base: path.Join(t.protocolDir(), "outbox")} }
-func (t Tree) Inbox() Maildir  { return Maildir{base: path.Join(t.protocolDir(), "inbox")} }
-
-// Heartbeat is the liveness file Popo writes (plan §4.7).
-func (t Tree) Heartbeat() string { return path.Join(t.protocolDir(), "heartbeat") }
-
-// Blobs is the content-addressed store; State holds convenience copies.
-func (t Tree) Blobs() string { return path.Join(t.protocolDir(), "blobs") }
-func (t Tree) State() string { return path.Join(t.Root, "state") }
-
-// BlobRef is the $ROOT-relative path of a blob, as published in a response's
-// body_blob field — the agent reads it at $ROOT/<BlobRef>. Derived from Blobs() so
-// the published reference can never drift from where blobs are actually written.
-func (t Tree) BlobRef(name string) string {
-	return strings.TrimPrefix(path.Join(t.Blobs(), name), t.Root+"/")
-}
-
-// Skill holds the dropped NANA.md skill doc; Capabilities is Nana's self-report.
-func (t Tree) Skill() string        { return path.Join(t.Root, "skill") }
-func (t Tree) SkillFile() string    { return path.Join(t.Skill(), "NANA.md") }
-func (t Tree) Capabilities() string { return path.Join(t.protocolDir(), "capabilities.json") }
-
-// Maildir is one tmp/new/cur triple.
-type Maildir struct{ base string }
-
-func (m Maildir) Tmp() string { return path.Join(m.base, "tmp") }
-func (m Maildir) New() string { return path.Join(m.base, "new") }
-func (m Maildir) Cur() string { return path.Join(m.base, "cur") }
+var (
+	NewID       = wire.NewID
+	RequestName = wire.RequestName
+)
 
 // EnsureTree creates every directory the protocol needs (idempotent — mkdir -p).
 func EnsureTree(ctx context.Context, fs remotefs.FS, t Tree) error {
@@ -79,13 +51,6 @@ func Deliver(ctx context.Context, fs remotefs.FS, m Maildir, name string, data [
 func PickUp(ctx context.Context, fs remotefs.FS, m Maildir, name string) error {
 	return fs.Rename(ctx, path.Join(m.New(), name), path.Join(m.Cur(), name))
 }
-
-// NewID returns a fresh ULID. ULIDs sort lexically by creation time, so "oldest
-// queued" is a plain directory listing (plan §3).
-func NewID() string { return ulid.Make().String() }
-
-// RequestName is the filename for a request/response with the given id.
-func RequestName(id string) string { return id + ".json" }
 
 // ReadResponse reads and parses a response by filename from inbox/new.
 func ReadResponse(ctx context.Context, fs remotefs.FS, t Tree, name string) (*Response, error) {
