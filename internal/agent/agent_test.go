@@ -19,12 +19,14 @@ func TestLookupAndNames(t *testing.T) {
 }
 
 func TestLooksLikeAPIKey(t *testing.T) {
-	if !LooksLikeAPIKey("sk-ant-abc123") || !LooksLikeAPIKey("  sk-ant-xyz  ") {
+	// API keys (sk-ant-api…) must be rejected.
+	if !LooksLikeAPIKey("sk-ant-api03-abc123") || !LooksLikeAPIKey("  sk-ant-api03-xyz  ") {
 		t.Error("API keys not detected")
 	}
-	if LooksLikeAPIKey("sk-ant-oat01-...") {
-		// An OAuth token issued by `claude setup-token` is NOT an sk-ant- API key.
-		// (Guard against a future format change masking a real OAuth token.)
+	// Subscription OAuth tokens from `claude setup-token` (sk-ant-oat…) must be
+	// ACCEPTED — they share the sk-ant- prefix but are not API keys.
+	if LooksLikeAPIKey("sk-ant-oat01-abc123") {
+		t.Error("subscription OAuth token wrongly flagged as an API key")
 	}
 	if LooksLikeAPIKey("a-real-oauth-token") {
 		t.Error("OAuth token misidentified as API key")
@@ -72,6 +74,51 @@ func TestRenderEnv(t *testing.T) {
 	}
 	if !strings.Contains(got, "export PATH='/opt/iceclimber/agent/claude':\"$PATH\"") {
 		t.Errorf("agent dir not on PATH:\n%s", got)
+	}
+}
+
+func TestRenderRun(t *testing.T) {
+	got := renderRun(Claude, "/r/agent/claude", "/r/agent/claude/claude", "/r/skill/NANA.md")
+	for _, want := range []string{
+		"#!/bin/sh",
+		`. "$self/env.sh"`,        // sources auth/env when present
+		`nana='/r/skill/NANA.md'`, // references NANA.md
+		`exec '/r/agent/claude/claude' '--append-system-prompt' "$sp" "$@"`, // wired + passthrough
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("run script missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// An agent with no system-prompt flag still gets a launcher (no NANA wiring).
+func TestRenderRun_NoSystemPromptFlag(t *testing.T) {
+	d := Descriptor{Name: "x", DisplayName: "X", Bin: "x"}
+	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md")
+	// No system-prompt flag → no NANA wiring in the executed command (the header
+	// comment may still mention it; we assert the functional absence).
+	if strings.Contains(got, "append-system-prompt") || strings.Contains(got, "nana=") {
+		t.Errorf("agent without a system-prompt flag should not wire NANA into the exec:\n%s", got)
+	}
+	if !strings.Contains(got, `exec '/r/agent/x/x' "$@"`) {
+		t.Errorf("missing plain exec:\n%s", got)
+	}
+}
+
+func TestRenderDispatcher(t *testing.T) {
+	got := renderDispatcher("/r")
+	for _, want := range []string{
+		`agents='/r/agent'`,
+		`"$agents"/*/run`, // discovers installed agents
+		`[ -f "$agents/$1/run" ]; then sel="$1"; shift`, // explicit selection
+		`"$n" -eq 1`,                   // sole-default
+		`multiple agents installed`,    // ambiguity error
+		`[ "${1:-}" = "--" ] && shift`, // strips an explicit separator
+		`exec "$agents/$sel/run" "$@"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dispatcher missing %q:\n%s", want, got)
+		}
 	}
 }
 

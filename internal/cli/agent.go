@@ -92,10 +92,10 @@ func newAgentInstallCmd() *cobra.Command {
 			fmt.Fprintf(w, "  agent:  %s\n", res.Bin)
 			if res.AuthConfigured {
 				fmt.Fprintf(w, "  auth:   configured (%s) → %s\n", d.TokenEnv, res.EnvFile)
-				fmt.Fprintf(w, "  launch: sh -lc '. %s && %s -p \"…\"'\n", res.EnvFile, d.Bin)
 			} else {
 				fmt.Fprintf(w, "  auth:   skipped — set %s before running the agent\n", d.TokenEnv)
 			}
+			fmt.Fprintf(w, "  launch: %s   (run in the sandbox — starts the agent, authenticated + wired to NANA.md)\n", res.Launcher)
 			return nil
 		},
 	}

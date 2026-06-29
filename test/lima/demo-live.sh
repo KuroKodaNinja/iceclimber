@@ -34,10 +34,6 @@ rm -f "$HOME/.iceclimber/$DEMO/approvals.json" "$HOME/.iceclimber/$DEMO/pending.
 : > "$HOME/.iceclimber/$DEMO/agent.log" 2>/dev/null || true
 make -C "$REPO" demo-reset
 
-# 1b. Install the Claude agent + its subscription auth into the sandbox. The
-#     controller relays the agent binary in (no sandbox network needed).
-"$BIN" agent install claude --config "$CFG"
-
 # 2. Air-gap the sandbox. Restore egress on exit.
 cleanup() {
 	limactl shell "$DEMO" -- sudo sh -s down < "$HERE/demo-firewall.sh" >/dev/null 2>&1 || true
@@ -45,6 +41,10 @@ cleanup() {
 }
 trap cleanup EXIT
 limactl shell "$DEMO" -- sudo sh -s up < "$HERE/demo-firewall.sh"
+
+# 2b. Install the Claude agent AFTER the air-gap — proving the relay works with no
+#     sandbox network (the controller downloads the binary and pushes it in over SSH).
+"$BIN" agent install claude --config "$CFG"
 
 cat <<BANNER
 

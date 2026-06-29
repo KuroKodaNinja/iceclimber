@@ -55,6 +55,7 @@ type Result struct {
 	Bin            string `json:"bin"`      // absolute path to the agent binary in the sandbox
 	Dir            string `json:"dir"`      // <root>/agent/<name> — the agent's home, on PATH
 	EnvFile        string `json:"env_file"` // 0600 env file (empty if --skip-auth)
+	Launcher       string `json:"launcher"` // <root>/nana — run in the sandbox to start the agent
 	AuthConfigured bool   `json:"auth_configured"`
 }
 
@@ -103,6 +104,19 @@ func (i *Installer) Install(ctx context.Context, d Descriptor, token string) (Re
 		res.EnvFile = envFile
 		res.AuthConfigured = true
 	}
+
+	// The per-agent launcher + the generic `nana` dispatcher. NANA.md is dropped by
+	// bootstrap at <root>/skill/NANA.md; the launcher injects it as system context
+	// when present (and warns otherwise — install may precede bootstrap).
+	nanaPath := path.Join(i.cfg.Root, "skill", "NANA.md")
+	if err := i.writeExec(ctx, path.Join(dir, "run"), renderRun(d, dir, binPath, nanaPath)); err != nil {
+		return Result{}, fmt.Errorf("write agent launcher: %w", err)
+	}
+	launcher := path.Join(i.cfg.Root, "nana")
+	if err := i.writeExec(ctx, launcher, renderDispatcher(i.cfg.Root)); err != nil {
+		return Result{}, fmt.Errorf("write nana launcher: %w", err)
+	}
+	res.Launcher = launcher
 
 	if err := i.verify(ctx, binPath, d); err != nil {
 		return res, fmt.Errorf("installed %s failed to run: %w", d.Bin, err)
@@ -249,6 +263,17 @@ func (i *Installer) writeSecret(ctx context.Context, p, content string) error {
 		return err
 	}
 	return i.cfg.FS.Chmod(ctx, p, 0o600)
+}
+
+// writeExec writes an executable (0755) launcher script into the sandbox.
+func (i *Installer) writeExec(ctx context.Context, p, content string) error {
+	if err := i.cfg.FS.Mkdir(ctx, path.Dir(p)); err != nil {
+		return err
+	}
+	if err := i.cfg.FS.WriteFile(ctx, p, []byte(content)); err != nil {
+		return err
+	}
+	return i.cfg.FS.Chmod(ctx, p, 0o755)
 }
 
 func (i *Installer) verify(ctx context.Context, bin string, d Descriptor) error {

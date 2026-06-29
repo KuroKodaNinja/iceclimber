@@ -27,6 +27,11 @@ type Descriptor struct {
 	APIKeyEnv   string   // API-key env var to BLANK so it can't fall back to metered billing
 	Env         []EnvVar // extra runtime env written into the agent's env file
 	VersionArgs []string // args that print the version (used to verify the install)
+	// SystemPromptFlag is the harness flag that appends a string to the agent's
+	// system prompt; the `nana` launcher passes NANA.md's contents to it so the
+	// Popo contract is persistent context every turn. Empty = the harness has no
+	// such flag (nana then launches it without wiring NANA.md in).
+	SystemPromptFlag string
 }
 
 // Claude is the Claude Code agent. Its native binary is dynamically linked against
@@ -45,7 +50,8 @@ var Claude = Descriptor{
 		{Key: "USE_BUILTIN_RIPGREP", Value: "0"},
 		{Key: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", Value: "1"},
 	},
-	VersionArgs: []string{"--version"},
+	VersionArgs:      []string{"--version"},
+	SystemPromptFlag: "--append-system-prompt",
 }
 
 // registry holds the known agents. Add a Descriptor here to support a new agent.
@@ -113,7 +119,10 @@ func platformSuffix(os, arch, libc string) (string, error) {
 }
 
 // LooksLikeAPIKey reports whether s is an Anthropic API key, which must be rejected:
-// agents run on a subscription OAuth token only (never metered API billing).
+// agents run on a subscription OAuth token only (never metered API billing). API
+// keys are "sk-ant-api…"; subscription OAuth tokens from `claude setup-token` are
+// "sk-ant-oat…" — both share the "sk-ant-" prefix, so only the "-api" form is an
+// API key.
 func LooksLikeAPIKey(s string) bool {
-	return strings.HasPrefix(strings.TrimSpace(s), "sk-ant-")
+	return strings.HasPrefix(strings.TrimSpace(s), "sk-ant-api")
 }

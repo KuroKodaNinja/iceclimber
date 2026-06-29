@@ -24,18 +24,19 @@ limactl shell "$DEMO" -- mkdir -p "$ROOT/work"
 sed "s#{{ROOT}}#$ROOT#g" "$HERE/../demo/TASK.md" \
 	| limactl shell "$DEMO" -- sh -c "cat > '$ROOT/work/TASK.md'"
 
-envfile="$ROOT/agent/claude/env.sh"
-if ! limactl shell "$DEMO" -- test -f "$envfile"; then
+nana="$ROOT/nana"
+if ! limactl shell "$DEMO" -- test -x "$nana"; then
 	echo "agent not installed — run 'iceclimber agent install claude' first (see DEMO.md)" >&2
 	exit 1
 fi
 
-echo ">>> launching Claude in $DEMO (subscription auth from $envfile; API key emptied; YOLO)"
+echo ">>> launching Claude in $DEMO via the nana launcher (subscription auth; API key emptied; YOLO)"
 echo ">>> watch Popo's 'serve' in your other terminal service its requests."
 
-# --verbose streams the agent's tool calls so the operator can watch it work.
-prompt="Read the file TASK.md in your current directory and complete the task it
-describes, exactly. Start by reading the NANA.md path it points you to."
+# TASK.md uses absolute {{ROOT}}/work paths, so no cwd dependency. The nana launcher
+# sources the agent's env (token, API key emptied) and injects NANA.md as the agent's
+# system context, so the prompt only needs to hand over the task.
+prompt="Read $ROOT/work/TASK.md and complete the task it describes, exactly."
 
 # Persist the agent's stream so `iceclimber logs --agent-log` can show the [NANA]
 # side (it still streams to this terminal). Append so both demo-live passes land
@@ -43,10 +44,10 @@ describes, exactly. Start by reading the NANA.md path it points you to."
 agentlog="$HOME/.iceclimber/$DEMO/agent.log"
 mkdir -p "$(dirname "$agentlog")"
 
-# Sourcing the iceclimber-written env file sets the subscription token, empties
-# ANTHROPIC_API_KEY (never fall back to metered billing), and puts the runtime node
-# on PATH. --max-turns bounds a runaway agent; the three-language task is more Popo
-# round-trips than one language, so give it room.
+# nana wraps the agent: it picks the sole installed agent (claude), sets up auth +
+# NANA.md, and passes these flags through to it. --verbose streams the agent's tool
+# calls; --max-turns bounds a runaway agent (the three-language task is more Popo
+# round-trips than one language, so give it room).
 limactl shell "$DEMO" -- \
-	bash -lc ". '$envfile' && cd '$ROOT/work' && claude -p \"$prompt\" --dangerously-skip-permissions --verbose --max-turns 150" \
+	"$nana" -p "$prompt" --dangerously-skip-permissions --verbose --max-turns 150 \
 	| tee -a "$agentlog"

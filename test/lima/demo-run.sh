@@ -32,12 +32,6 @@ root="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"
 bash "$HERE/gen-config.sh" "$DEMO" "$CFG" "$root"
 "$BIN" bootstrap --config "$CFG"
 
-# 1b. Install the Claude agent into the sandbox and configure its subscription auth.
-#     The controller downloads the agent binary for the sandbox's platform and relays
-#     it in (no sandbox network needed — works air-gapped), so placement vs. the
-#     firewall doesn't matter. The token comes from CLAUDE_CODE_OAUTH_TOKEN (above).
-"$BIN" agent install claude --config "$CFG"
-
 # 2. Pre-approve the fetch host (operator-owned allow rule) so the unattended
 #    agent isn't held at the gate.
 approvals="$HOME/.iceclimber/$DEMO/approvals.json"
@@ -51,6 +45,11 @@ cleanup() {
 }
 trap cleanup EXIT
 limactl shell "$DEMO" -- sudo sh -s up < "$HERE/demo-firewall.sh"
+
+# 3b. Install the Claude agent AFTER the air-gap — this proves the relay works with
+#     NO sandbox network: the controller downloads the agent binary for the sandbox's
+#     platform on its own network and pushes it in over SSH. Token from the env.
+"$BIN" agent install claude --config "$CFG"
 
 # 4. Popo serves in the background — the only thing the sandbox can reach besides
 #    its own API. --yes: unattended, never prompt (egress is pre-approved above).

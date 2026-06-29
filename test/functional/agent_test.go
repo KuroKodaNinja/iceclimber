@@ -53,6 +53,19 @@ func TestAgentInstallClaude(t *testing.T) {
 	if !strings.Contains(body, "CLAUDE_CODE_OAUTH_TOKEN=") || !strings.Contains(body, "ANTHROPIC_API_KEY=\n") {
 		t.Errorf("env file missing token export or blanked API key")
 	}
+
+	// The nana launcher + per-agent run script must be installed and executable.
+	for _, p := range []string{root + "/nana", root + "/agent/claude/run"} {
+		perms := strings.Fields(limaSh(t, "ls -l "+p))
+		if len(perms) == 0 || perms[0][0] != '-' || !strings.Contains(perms[0], "x") {
+			t.Errorf("%s missing or not executable: %v", p, perms)
+		}
+	}
+	// `nana` with no agent arg resolves the sole installed agent and passes args
+	// through to it — here `--version` runs the relayed binary, NANA.md wiring and all.
+	if v := limaSh(t, remoteQuote(root+"/nana")+" --version 2>&1"); !strings.Contains(v, ".") {
+		t.Errorf("nana --version = %q, want a version string", strings.TrimSpace(v))
+	}
 }
 
 // TestAgentInstallRejectsAPIKey proves the command refuses an API-key token.
