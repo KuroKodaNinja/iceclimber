@@ -70,9 +70,26 @@ ssh:
 ```
 
 Host keys are verified against `known_hosts` — the SSH transport is secure by
-default.
+default, with no insecure skips.
 
-### 2. Bootstrap
+### 2. Trust the host key
+
+First contact with a sandbox needs its SSH host key on record. Instead of an
+out-of-band `ssh-keyscan` (awkward for short-lived, ephemeral sandboxes), do it
+from within iceclimber:
+
+```sh
+./iceclimber trust                       # shows the fingerprint, asks to confirm
+./iceclimber trust --fingerprint SHA256:… # automation: record only if it matches
+./iceclimber trust --replace             # the key rotated (rebuilt/reused address)
+```
+
+`trust` fetches the key the sandbox offers, prints its SHA256 fingerprint, and
+records it in `known_hosts` — never silently: on a terminal you confirm, and
+unattended runs must pass `--fingerprint` (verify) or `--yes` (trust the network).
+The bare-`iceclimber` console also offers this as a modal on first connect.
+
+### 3. Bootstrap
 
 ```sh
 ./iceclimber bootstrap
@@ -82,7 +99,7 @@ Fingerprints the sandbox (OS/arch/libc), picks a writable install root, creates 
 protocol tree, runs a `ping`/`pong` smoke test, and drops `NANA.md`. Then wire that
 skill doc into your agent's instructions (see the Nana side).
 
-### 3. Serve — the console, or headless
+### 4. Serve — the console, or headless
 
 Bare **`iceclimber`** launches the interactive **console**: it serves the sandbox,
 streams live activity, and surfaces every approval as a modal you answer in-place —

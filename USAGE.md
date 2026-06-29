@@ -29,8 +29,17 @@ with **you approving each step**. The agent (**Nana**) just reads and writes fil
 make build                       # → ./iceclimber
 ./iceclimber init                # scaffolds iceclimber.yaml in the current dir
 # edit iceclimber.yaml: ssh.host / ssh.user / ssh.port / ssh.identity_file, sandbox_id
+./iceclimber trust               # record the sandbox's SSH host key (see below)
 ./iceclimber probe               # read-only: connectivity + sandbox fingerprint (os/arch/libc, install root)
 ```
+
+`trust` records the box's SSH host key in `known_hosts` so iceclimber will connect —
+the in-CLI replacement for an out-of-band `ssh-keyscan`, which is the awkward step
+for ephemeral sandboxes. It prints the key's SHA256 fingerprint and asks you to
+confirm; for automation pass `--fingerprint SHA256:…` (record only on a match) or
+`--yes`, and `--replace` when a rebuilt box reuses an address with a new key. The
+bare-`iceclimber` console also offers this as a modal on first connect. (Keys are
+never trusted silently — that's the security floor.)
 
 `probe` changes nothing — it just confirms Popo can reach the box and reports where
 it would install. Fix any connection issues here before going further.

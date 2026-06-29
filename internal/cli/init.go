@@ -17,7 +17,7 @@ ssh:
   # Path to a private key. If omitted, ssh-agent (SSH_AUTH_SOCK) is used.
   identity_file: ~/.ssh/id_ed25519
   # Host-key file to verify against. If omitted, ~/.ssh/known_hosts is used.
-  # Unknown hosts are rejected — record the key first (ssh once, or ssh-keyscan).
+  # Unknown hosts are rejected — record the key first with: iceclimber trust
   known_hosts: ""
 
 # Where the iceclimber tree lives in the sandbox. Leave empty to let bootstrap

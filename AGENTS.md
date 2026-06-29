@@ -141,6 +141,12 @@ true air-gap. Remaining work: incremental polish + the v2 backlog (sub-agent/
 `web.research`, Tier 2 build, true fleet multiplexing — plan §0). The `ExecFS`
 bulk-transfer shipped (decision #55): runtime trees push in one `tar -xf -` exec,
 so all languages install over either transport (no SFTP-only constraint).
+`iceclimber trust` records a sandbox's SSH host key in-CLI (decision #56) — the
+ssh-keyscan replacement for ephemeral boxes; keys are never trusted silently
+(terminal confirm, or `--fingerprint`/`--yes` for automation), and the console
+offers it as a first-connect modal. Host-key primitives live in
+`internal/remote/hostkey.go` (`FetchHostKey`/`CheckHostKey`/`RecordHostKey`); an
+unknown/changed key surfaces as a typed `remote.HostKeyError`.
 
 - **Phase 1 — done.** CLI skeleton + `probe` (fingerprint OS/arch/libc/root
   viability), verified end-to-end against Alpine.

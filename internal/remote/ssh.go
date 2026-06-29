@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"strconv"
 
 	"github.com/pkg/sftp"
@@ -62,6 +61,10 @@ func Dial(ctx context.Context, cfg DialConfig) (*SSHRunner, error) {
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, clientCfg)
 	if err != nil {
 		conn.Close()
+		var ke *knownhosts.KeyError
+		if errors.As(err, &ke) {
+			return nil, &HostKeyError{Host: cfg.Host, Port: port, Mismatch: len(ke.Want) > 0, err: err}
+		}
 		return nil, fmt.Errorf("ssh handshake %s: %w", addr, err)
 	}
 	return &SSHRunner{client: ssh.NewClient(sshConn, chans, reqs)}, nil
@@ -150,16 +153,16 @@ func authMethods(identityFile string) ([]ssh.AuthMethod, error) {
 // default ~/.ssh/known_hosts when path is empty. An unknown host is a hard
 // error: hosts are never trusted on first sight (no InsecureIgnoreHostKey).
 func knownHostsCallback(path string) (ssh.HostKeyCallback, error) {
-	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("locate home dir: %w", err)
-		}
-		path = filepath.Join(home, ".ssh", "known_hosts")
+	path, err := ResolveKnownHosts(path)
+	if err != nil {
+		return nil, err
 	}
 	cb, err := knownhosts.New(path)
 	if err != nil {
-		return nil, fmt.Errorf("load known_hosts (%s): %w — connect once with plain ssh (or ssh-keyscan) to record the host key first", path, err)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("known_hosts (%s) does not exist — run `iceclimber trust` to record the sandbox's host key first", path)
+		}
+		return nil, fmt.Errorf("load known_hosts (%s): %w — run `iceclimber trust` to record the host key", path, err)
 	}
 	return cb, nil
 }

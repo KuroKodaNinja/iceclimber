@@ -507,6 +507,14 @@ func splitSpecs(s string) []string {
 // tears down the connection.
 func runConsole(parent context.Context, cfg *config.Config, transport, agentLog string) error {
 	sess, err := openSession(parent, cfg, transport)
+	if hke := (*remote.HostKeyError)(nil); errors.As(err, &hke) {
+		// First contact with an untrusted (often ephemeral) sandbox: offer to
+		// record the host key from within the console, then reconnect once.
+		if tErr := trustHostInteractive(parent, cfg, hke); tErr != nil {
+			return tErr
+		}
+		sess, err = openSession(parent, cfg, transport)
+	}
 	if err != nil {
 		return err
 	}
@@ -559,4 +567,32 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 	cancel() // stop serving; any pending approval fails safe via done
 	return err
+}
+
+// trustHostInteractive fetches the sandbox's offered host key, shows its
+// fingerprint in a modal, and (on accept) records it in known_hosts — the
+// in-console equivalent of `iceclimber trust`. Declining is a hard stop: the
+// security floor is never lowered silently.
+func trustHostInteractive(ctx context.Context, cfg *config.Config, hke *remote.HostKeyError) error {
+	key, err := remote.FetchHostKey(ctx, remote.DialConfig{
+		Host: cfg.SSH.Host, Port: cfg.SSH.Port, User: cfg.SSH.User, IdentityFile: cfg.SSH.IdentityFile,
+	})
+	if err != nil {
+		return fmt.Errorf("fetch host key for %s: %w", cfg.SandboxID, err)
+	}
+	info := tui.HostKeyInfo{
+		SandboxID:   cfg.SandboxID,
+		Address:     fmt.Sprintf("%s:%d", cfg.SSH.Host, portOr22(cfg.SSH.Port)),
+		KeyType:     key.Type(),
+		Fingerprint: remote.Fingerprint(key),
+		Mismatch:    hke.Mismatch,
+	}
+	out, err := tea.NewProgram(tui.NewTrustPrompt(info), tea.WithAltScreen(), tea.WithContext(ctx)).Run()
+	if err != nil {
+		return err
+	}
+	if tp, ok := out.(tui.TrustPrompt); !ok || !tp.Accepted() {
+		return fmt.Errorf("host key for %s not trusted; aborting", cfg.SandboxID)
+	}
+	return remote.RecordHostKey(cfg.SSH.KnownHosts, cfg.SSH.Host, cfg.SSH.Port, key, hke.Mismatch)
 }
