@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -112,9 +113,14 @@ func (o *consoleOps) RunBootstrap() tea.Cmd {
 	}
 }
 
-// PollStatus reads sandbox status over SSH and emits a StatusMsg.
+// PollStatus reads sandbox status over SSH and emits a StatusMsg. A failed probe
+// of the install root means the sandbox is unreachable (SSH dropped) — report it so
+// the panel shows an error rather than empty/stale fields.
 func (o *consoleOps) PollStatus() tea.Cmd {
 	return func() tea.Msg {
+		if _, err := o.sess.fs.List(o.ctx, o.sess.tree.Root); err != nil {
+			return tui.StatusMsg{Sandbox: o.sess.sandboxID, Err: err.Error()}
+		}
 		s := collectStatus(o.ctx, o.sess)
 		hb := "none yet"
 		if s.HeartbeatSeq != "" {
@@ -490,6 +496,15 @@ func splitSpecs(s string) []string {
 // runConsole opens a session, runs the dispatcher in the background, and presents
 // the interactive console — serving the sandbox and handling approvals inline.
 // Returns when the operator quits.
+//
+// Lifecycle: one session is shared by the background Serve loop and the operator
+// actions (consoleOps). The dispatcher serves one request at a time and operator
+// actions run as Bubble Tea cmds; both only ever read/write the sandbox over the
+// SSH/SFTP transport, which is safe for concurrent use, and a single human drives
+// the operator side — so they don't race in practice. On quit, the tea program
+// returns, `cancel()` stops the Serve loop, and a pending approval blocked in the
+// asker fails safe to deny via the done channel (ctx.Done); `sess.Close()` (deferred)
+// tears down the connection.
 func runConsole(parent context.Context, cfg *config.Config, transport, agentLog string) error {
 	sess, err := openSession(parent, cfg, transport)
 	if err != nil {
@@ -523,7 +538,21 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	})
 
 	// Serve in the background; the console drives approvals over the event channel.
-	go func() { _ = disp.Serve(ctx, 2*time.Second) }()
+	// If Serve dies unexpectedly (e.g. the SSH link drops) the console would look
+	// alive but stop receiving events — surface that as a visible activity line.
+	go func() {
+		if err := disp.Serve(ctx, 2*time.Second); err != nil && !errors.Is(err, context.Canceled) {
+			ev := activity.Event{
+				TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindOperated,
+				Type: "serve", Status: "failed", Detail: "serving stopped: " + err.Error(),
+			}
+			_ = act.Append(ev)
+			select {
+			case events <- ev:
+			default:
+			}
+		}
+	}()
 
 	ops := &consoleOps{ctx: ctx, sess: sess, act: act, events: events}
 	model := tui.NewConsole(cfg.SandboxID, events, agentLog, ops)

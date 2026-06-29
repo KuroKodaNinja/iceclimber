@@ -85,6 +85,7 @@ type StatusSnapshot struct {
 	Queue     string // "1 awaiting · 0 unread"
 	Runtimes  []string
 	Caps      string // "" if the agent hasn't reported
+	Err       string // set when the sandbox is unreachable (SSH dropped); panel shows it
 }
 
 // StatusMsg delivers a fresh StatusSnapshot to the console.
@@ -125,7 +126,8 @@ type Console struct {
 	panel     string // "" | "status" | "egress" — an open read/manage panel
 	status    *StatusSnapshot
 	egress    EgressSnapshot
-	cursor    int // selected row in the egress panel
+	cursor    int    // selected row in the egress panel
+	panelErr  string // last egress action error, shown in the panel ("" = none)
 	width     int
 	height    int
 
@@ -165,6 +167,10 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			c.form = c.form.WithWidth(formWidth(c.width)).WithHeight(formHeight(c.height))
 		}
 	case tea.KeyMsg:
+		// Input precedence is intentional: an approval modal preempts everything —
+		// a held operation (the dispatcher blocked, waiting) is urgent, so it must be
+		// answered before a form/panel resumes. A modal can arrive over an open form
+		// or panel; answering it returns control to that form/panel unchanged.
 		if c.modal != nil {
 			// A held operation must be answered — only y/a/n/d apply.
 			if ch, ok := modalKey(msg.String()); ok {
@@ -195,12 +201,12 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "s":
 			if c.ops != nil {
-				c.panel = "status"
+				c.panel, c.status = "status", nil
 				return c, c.ops.PollStatus()
 			}
 		case "e":
 			if c.ops != nil {
-				c.panel, c.cursor, c.egress = "egress", 0, c.ops.Egress()
+				c.panel, c.cursor, c.panelErr, c.egress = "egress", 0, "", c.ops.Egress()
 				return c, nil
 			}
 		}
@@ -259,26 +265,36 @@ func (c Console) updatePanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "a", "d":
 			if p, ok := c.selectedPending(); ok {
+				var err error
 				if msg.String() == "a" {
-					_ = c.ops.ApprovePending(p.ID)
+					err = c.ops.ApprovePending(p.ID)
 				} else {
-					_ = c.ops.DenyPending(p.ID)
+					err = c.ops.DenyPending(p.ID)
 				}
+				c.panelErr = errText(err)
 				c.egress = c.ops.Egress()
 				c.clampCursor()
 			}
 		case "f":
 			if r, ok := c.selectedRule(); ok {
-				_ = c.ops.ForgetRule(r.Kind, r.Pattern)
+				c.panelErr = errText(c.ops.ForgetRule(r.Kind, r.Pattern))
 				c.egress = c.ops.Egress()
 				c.clampCursor()
 			}
 		case "r":
+			c.panelErr = ""
 			c.egress = c.ops.Egress()
 			c.clampCursor()
 		}
 	}
 	return c, nil
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // selectedPending / selectedRule resolve the cursor against the combined list
@@ -299,7 +315,12 @@ func (c Console) selectedRule() (EgressRule, bool) {
 }
 
 func (c *Console) clampCursor() {
-	if n := c.egress.rows(); c.cursor >= n {
+	n := c.egress.rows()
+	if n == 0 {
+		c.cursor = 0 // nothing to select; no row highlights (lists render empty)
+		return
+	}
+	if c.cursor >= n {
 		c.cursor = n - 1
 	}
 	if c.cursor < 0 {
@@ -315,7 +336,7 @@ func (c Console) View() string {
 	case "status":
 		return statusView(c.width, c.height, c.sandboxID, c.status)
 	case "egress":
-		return egressView(c.width, c.height, c.egress, c.cursor)
+		return egressView(c.width, c.height, c.egress, c.cursor, c.panelErr)
 	}
 	if c.form != nil {
 		return formView(c.width, c.height, c.formTitle(), c.form.View())

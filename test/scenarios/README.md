@@ -16,7 +16,7 @@ Gated by the `scenario` build tag, so they never run under `make test` or
   piece, so each scenario directory stays self-contained.
 - `<language>/` — one self-contained scenario per language: its app source, its
   test, and its **own `README.md`** with the operating notes. Currently:
-  [`node/`](node/).
+  [`python/`](python/), [`node/`](node/), [`java/`](java/).
 
 ## Running
 

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -27,6 +28,40 @@ func (f *fakeOps) Egress() EgressSnapshot       { return EgressSnapshot{} }
 func (f *fakeOps) ApprovePending(string) error  { return nil }
 func (f *fakeOps) DenyPending(string) error     { return nil }
 func (f *fakeOps) ForgetRule(_, _ string) error { return nil }
+
+// errOps fails egress actions and serves a fixed snapshot, for error-surfacing.
+type errOps struct {
+	fakeOps
+	eg EgressSnapshot
+}
+
+func (e *errOps) Egress() EgressSnapshot       { return e.eg }
+func (e *errOps) ForgetRule(_, _ string) error { return errors.New("disk full") }
+func (e *errOps) ApprovePending(string) error  { return errors.New("write failed") }
+
+// A failed egress action must be shown to the operator, not swallowed.
+func TestConsole_EgressActionErrorSurfaced(t *testing.T) {
+	ops := &errOps{eg: EgressSnapshot{Rules: []EgressRule{{Kind: "allow", Pattern: "https://x/*"}}}}
+	c := NewConsole("sbx", make(chan tea.Msg), "", ops)
+	c.panel, c.egress, c.cursor = "egress", ops.eg, 0
+
+	updated, _ := c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	c2 := updated.(Console)
+	if c2.panelErr == "" {
+		t.Fatal("a failed forget should surface an error in the panel, not be swallowed")
+	}
+	if !strings.Contains(c2.View(), "disk full") {
+		t.Errorf("egress view should render the error:\n%s", c2.View())
+	}
+}
+
+// The status panel must show an unreachable sandbox, not a stale/blank snapshot.
+func TestStatusViewShowsError(t *testing.T) {
+	out := statusView(80, 24, "sbx", &StatusSnapshot{Err: "connection refused"})
+	if !strings.Contains(out, "unreachable") || !strings.Contains(out, "connection refused") {
+		t.Errorf("status view should show the connection error:\n%s", out)
+	}
+}
 
 func TestConsole_ActivityEvent(t *testing.T) {
 	c := NewConsole("sbx", make(chan tea.Msg, 4), "", nil)

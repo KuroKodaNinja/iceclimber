@@ -204,9 +204,13 @@ func formView(w, h int, title, body string) string {
 func statusView(w, h int, sandboxID string, s *StatusSnapshot) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s · sandbox %s\n\n", titleStyle.Render("Status"), sandboxID)
-	if s == nil {
+	switch {
+	case s == nil:
 		b.WriteString(dimStyle.Render("polling…"))
-	} else {
+	case s.Err != "":
+		b.WriteString(errStyle.Render("✗ unreachable: "+s.Err) + "\n" +
+			dimStyle.Render("the sandbox isn't responding (SSH dropped?)"))
+	default:
 		fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("heartbeat"), s.Heartbeat)
 		fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("queue    "), s.Queue)
 		fmt.Fprintf(&b, "  %s ", dimStyle.Render("runtimes "))
@@ -226,10 +230,14 @@ func statusView(w, h int, sandboxID string, s *StatusSnapshot) string {
 }
 
 // egressView renders the operator's egress rules + pending held requests, with the
-// cursor on the selected row and the actions that apply to it.
-func egressView(w, h int, e EgressSnapshot, cursor int) string {
+// cursor on the selected row and the actions that apply to it. panelErr (if any) is
+// the last action's failure, shown so a failed approve/deny/forget isn't silent.
+func egressView(w, h int, e EgressSnapshot, cursor int, panelErr string) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Egress") + dimStyle.Render("  (controller-side rules + held requests)") + "\n\n")
+	if panelErr != "" {
+		b.WriteString(errStyle.Render("✗ "+panelErr) + "\n\n")
+	}
 	row := 0
 	line := func(sel bool, s string, st lipgloss.Style) {
 		marker := "  "
