@@ -22,6 +22,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
+	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 	"github.com/KuroKodaNinja/iceclimber/internal/tui"
 )
 
@@ -562,11 +563,84 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 		}
 	}()
 
+	// With no explicit --agent-log, auto-tail the sandbox's per-agent session.log(s)
+	// so the [NANA] pane shows the agent's stream with no Popo-side flag.
+	if agentLog == "" {
+		go tailAgentSessions(ctx, sess, events)
+	}
+
 	ops := &consoleOps{ctx: ctx, sess: sess, act: act, events: events}
 	model := tui.NewConsole(cfg.SandboxID, events, agentLog, ops)
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 	cancel() // stop serving; any pending approval fails safe via done
 	return err
+}
+
+// tailAgentSessions polls the sandbox's per-agent session.log files (written by the
+// nana launcher in headless mode) and pushes new lines to the console's [NANA] pane
+// — so the operator sees the agent's stream with no --agent-log flag. Each agent
+// dir's log is read whole and the new suffix emitted (offset-tracked; a shrink means
+// the log was rotated/truncated, so we restart). Best-effort: a missing log is just
+// skipped, and a slow/full UI never blocks (non-blocking send).
+func tailAgentSessions(ctx context.Context, sess *session, events chan<- tea.Msg) {
+	base := path.Join(sess.tree.Root, "agent")
+	offsets := map[string]int{}
+	t := time.NewTicker(1500 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			for _, ln := range pollAgentLogs(ctx, sess.fs, base, offsets) {
+				select {
+				case events <- ln:
+				default: // never block serving/UI on a slow channel
+				}
+			}
+		}
+	}
+}
+
+// pollAgentLogs reads the per-agent session.log files under base and returns the
+// lines that appeared since the last call, advancing offsets in place. A log shorter
+// than its offset was rotated/truncated → restart from the top. Lines are prefixed
+// with the agent name when more than one agent is installed. Missing logs / a missing
+// base are skipped (nil).
+func pollAgentLogs(ctx context.Context, fs remotefs.FS, base string, offsets map[string]int) []tui.AgentLine {
+	names, err := fs.List(ctx, base)
+	if err != nil {
+		return nil
+	}
+	multi := len(names) > 1
+	var out []tui.AgentLine
+	for _, name := range names {
+		logp := path.Join(base, name, "session.log")
+		data, err := fs.ReadFile(ctx, logp)
+		if err != nil {
+			continue
+		}
+		off := offsets[logp]
+		if len(data) < off {
+			off = 0
+		}
+		if len(data) <= off {
+			offsets[logp] = len(data)
+			continue
+		}
+		chunk := string(data[off:])
+		offsets[logp] = len(data)
+		for _, line := range strings.Split(strings.TrimRight(chunk, "\n"), "\n") {
+			if line == "" {
+				continue
+			}
+			if multi {
+				line = "[" + name + "] " + line
+			}
+			out = append(out, tui.AgentLine{Text: line})
+		}
+	}
+	return out
 }
 
 // trustHostInteractive fetches the sandbox's offered host key, shows its

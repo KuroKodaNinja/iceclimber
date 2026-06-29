@@ -9,9 +9,11 @@ import (
 )
 
 // renderRun builds an agent's per-agent launcher script (<root>/agent/<name>/run).
-// It sources the agent's env (token, runtime env) when present, then execs the
-// agent binary with NANA.md injected as persistent system context and any operator
-// args appended. All paths are absolute, so it runs from any working directory.
+// It sources the agent's env (token, runtime env) when present, prepends NANA.md as
+// persistent system context, then launches the agent with any operator args. On an
+// interactive terminal it execs the agent clean (so its TUI keeps its tty); when
+// stdout is not a tty (headless/-p runs) it mirrors the stream to session.log so the
+// operator console can show it without a --agent-log flag. All paths are absolute.
 func renderRun(d Descriptor, dir, binPath, nanaPath string) string {
 	var b strings.Builder
 	wired := "wired to NANA.md"
@@ -25,14 +27,24 @@ func renderRun(d Descriptor, dir, binPath, nanaPath string) string {
 	fmt.Fprintf(&b, "self=%s\n", remote.ShellQuote(dir))
 	fmt.Fprintf(&b, "[ -f \"$self/env.sh\" ] && . \"$self/env.sh\"\n")
 	if d.SystemPromptFlag != "" {
+		// Prepend the system-prompt args (NANA.md contents) ahead of the operator's
+		// args, when NANA.md is present.
 		fmt.Fprintf(&b, "nana=%s\n", remote.ShellQuote(nanaPath))
 		fmt.Fprintf(&b, "if [ -f \"$nana\" ]; then\n")
-		fmt.Fprintf(&b, "  sp=\"$(cat \"$nana\")\"\n")
-		fmt.Fprintf(&b, "  exec %s %s \"$sp\" \"$@\"\n", remote.ShellQuote(binPath), remote.ShellQuote(d.SystemPromptFlag))
+		fmt.Fprintf(&b, "  set -- %s \"$(cat \"$nana\")\" \"$@\"\n", remote.ShellQuote(d.SystemPromptFlag))
+		fmt.Fprintf(&b, "else\n")
+		fmt.Fprintf(&b, "  echo \"nana: NANA.md not found at $nana — launching without the Popo contract; run 'iceclimber bootstrap'\" >&2\n")
 		fmt.Fprintf(&b, "fi\n")
-		fmt.Fprintf(&b, "echo \"nana: NANA.md not found at $nana — launching without the Popo contract; run 'iceclimber bootstrap'\" >&2\n")
 	}
-	fmt.Fprintf(&b, "exec %s \"$@\"\n", remote.ShellQuote(binPath))
+	fmt.Fprintf(&b, "bin=%s\n", remote.ShellQuote(binPath))
+	fmt.Fprintf(&b, "if [ -t 1 ]; then\n")
+	fmt.Fprintf(&b, "  exec \"$bin\" \"$@\"\n") // interactive: keep the agent's tty
+	fmt.Fprintf(&b, "else\n")
+	// Headless: mirror stdout+stderr to session.log so the console can tail it.
+	fmt.Fprintf(&b, "  log=\"$self/session.log\"\n")
+	fmt.Fprintf(&b, "  printf '\\n=== nana session %%s ===\\n' \"$(date 2>/dev/null || echo)\" >>\"$log\" 2>/dev/null || true\n")
+	fmt.Fprintf(&b, "  \"$bin\" \"$@\" 2>&1 | tee -a \"$log\"\n")
+	fmt.Fprintf(&b, "fi\n")
 	return b.String()
 }
 

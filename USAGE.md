@@ -105,8 +105,13 @@ the default.)
 ```
 
 Bare `iceclimber` opens a split-pane cockpit — `[POPO]` is what the controller does,
-`[NANA]` is the sandbox's own voice. Start your agent on its task inside the sandbox;
-as it asks Popo for things, you'll get an inline approval modal for each:
+`[NANA]` is the sandbox's own voice. **You don't pass `--agent-log`** — when you run
+the agent headless via `nana` (e.g. `nana -p "…"`, or any non-tty run), it mirrors
+its stream to a sandbox session log, and the console auto-discovers and tails it, so
+the agent's narration shows up in `[NANA]` on its own. (Interactive `nana` sessions
+run on their own terminal and aren't mirrored; `--agent-log <file>` still works as an
+explicit override, e.g. for a host-captured log.) As the agent asks Popo for things,
+you'll get an inline approval modal for each:
 
 ```
   ╭─────────────────────────────────────────────

@@ -83,7 +83,12 @@ func TestRenderRun(t *testing.T) {
 		"#!/bin/sh",
 		`. "$self/env.sh"`,        // sources auth/env when present
 		`nana='/r/skill/NANA.md'`, // references NANA.md
-		`exec '/r/agent/claude/claude' '--append-system-prompt' "$sp" "$@"`, // wired + passthrough
+		`set -- '--append-system-prompt' "$(cat "$nana")" "$@"`, // NANA as system context, then passthrough
+		`bin='/r/agent/claude/claude'`,
+		`if [ -t 1 ]; then`, // tty-gated capture
+		`exec "$bin" "$@"`,  // interactive: clean tty
+		`| tee -a "$log"`,   // headless: mirror to session.log
+		`log="$self/session.log"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("run script missing %q:\n%s", want, got)
@@ -91,17 +96,16 @@ func TestRenderRun(t *testing.T) {
 	}
 }
 
-// An agent with no system-prompt flag still gets a launcher (no NANA wiring).
+// An agent with no system-prompt flag still gets a launcher (no NANA wiring), and
+// still gets the tty-gated session.log capture.
 func TestRenderRun_NoSystemPromptFlag(t *testing.T) {
 	d := Descriptor{Name: "x", DisplayName: "X", Bin: "x"}
 	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md")
-	// No system-prompt flag → no NANA wiring in the executed command (the header
-	// comment may still mention it; we assert the functional absence).
 	if strings.Contains(got, "append-system-prompt") || strings.Contains(got, "nana=") {
-		t.Errorf("agent without a system-prompt flag should not wire NANA into the exec:\n%s", got)
+		t.Errorf("agent without a system-prompt flag should not wire NANA in:\n%s", got)
 	}
-	if !strings.Contains(got, `exec '/r/agent/x/x' "$@"`) {
-		t.Errorf("missing plain exec:\n%s", got)
+	if !strings.Contains(got, `exec "$bin" "$@"`) || !strings.Contains(got, `| tee -a "$log"`) {
+		t.Errorf("missing launch/capture branches:\n%s", got)
 	}
 }
 

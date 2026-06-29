@@ -107,6 +107,17 @@ func TestFlow_DashboardChrome(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 }
 
+func TestFlow_NanaPaneHintThenAgentStream(t *testing.T) {
+	tm := startConsole(t, newRecordOps())
+	// With no agent output yet, the [NANA] pane shows the actionable hint…
+	waitText(t, tm, "$ROOT/nana")
+	// …and a streamed agent line (auto-tailed session.log) lands in the pane.
+	tm.Send(AgentLine{Text: "nana fetched comic.json"})
+	waitText(t, tm, "nana fetched comic.json")
+	tm.Quit()
+	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+}
+
 func TestFlow_MenuHiddenWithoutOps(t *testing.T) {
 	tm := startConsole(t, nil) // no OpRunner ⇒ no management menu
 	waitText(t, tm, "q quit")

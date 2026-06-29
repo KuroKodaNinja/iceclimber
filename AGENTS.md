@@ -174,6 +174,12 @@ a per-agent `run` script that sources the env and launches the harness with `NAN
 as persistent system context (`--append-system-prompt`) plus passthrough args. The
 agent-specific launch recipe is baked from the `Descriptor` at install time, so the
 sandbox scripts stay generic. The demo dogfoods it (`demo-agent.sh` → `$ROOT/nana`).
+Run headless (no tty), `nana` mirrors the agent's stream to `$ROOT/agent/<name>/session.log`;
+the **console auto-discovers and tails those logs over the transport** (`pollAgentLogs`
+→ `tui.AgentLine`), so `[NANA]` shows the agent with **no `--agent-log` flag** (decision
+#60). Interactive `nana` runs keep their tty (not mirrored); `--agent-log` stays an
+explicit override. Auto-discovery lives in the console (it has the live SSH session);
+`iceclimber tui`/`logs` are passive attach views and stay `--agent-log`-based.
 
 - **Phase 1 — done.** CLI skeleton + `probe` (fingerprint OS/arch/libc/root
   viability), verified end-to-end against Alpine.

@@ -140,9 +140,9 @@ func nanaPane(w, h int, hasNana bool, lines []string) string {
 	title := titleStyle.Render("[NANA] sandbox")
 	var content string
 	if len(lines) == 0 {
-		hint := "(sandbox echoes appear here)"
+		hint := "(no agent session yet — run $ROOT/nana in the sandbox)"
 		if hasNana {
-			hint = "(waiting for agent output)"
+			hint = "(waiting for agent output…)"
 		}
 		content = title + "\n" + dimStyle.Render(hint)
 	} else {

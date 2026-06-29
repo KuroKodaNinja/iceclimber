@@ -66,6 +66,14 @@ func TestAgentInstallClaude(t *testing.T) {
 	if v := limaSh(t, remoteQuote(root+"/nana")+" --version 2>&1"); !strings.Contains(v, ".") {
 		t.Errorf("nana --version = %q, want a version string", strings.TrimSpace(v))
 	}
+
+	// Run headless (no tty), nana mirrors the agent's stream to session.log so the
+	// console can auto-tail it with no --agent-log. limactl shell (no -t) gives no
+	// tty, so the capture branch fires.
+	sessionLog := root + "/agent/claude/session.log"
+	if out := limaSh(t, "cat "+sessionLog+" 2>/dev/null"); !strings.Contains(out, ".") {
+		t.Errorf("session.log = %q, want the agent's version output captured for the [NANA] pane", strings.TrimSpace(out))
+	}
 }
 
 // TestAgentInstallRejectsAPIKey proves the command refuses an API-key token.
