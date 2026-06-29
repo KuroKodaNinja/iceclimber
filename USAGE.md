@@ -82,8 +82,21 @@ export CLAUDE_CODE_OAUTH_TOKEN=...        # subscription token (claude setup-tok
 The controller downloads the Claude Code binary **for the sandbox's platform** and
 relays it in (no sandbox network needed — it works on a fully air-gapped box), then
 writes its **subscription** token to a 0600 env file (API key refused — never
-metered billing). It prints a `launch:` line — `sh -lc '. <env> && claude -p "…"'` —
-for running the agent. `./iceclimber agent list` shows the available agents.
+metered billing) and drops a **`nana` launcher** at the tree root.
+`./iceclimber agent list` shows the available agents.
+
+**Starting the agent — `$ROOT/nana`.** Run it *inside the sandbox* from any
+directory; it sets up the environment (auth token, `ANTHROPIC_API_KEY` blanked) and
+launches the agent with `NANA.md` already loaded as its system context, so it knows
+how to reach Popo from turn one. Extra flags pass straight through to the agent:
+
+```sh
+$HOME/.iceclimber/nana                     # interactive session, wired to NANA.md
+$HOME/.iceclimber/nana -p "build me a ..."  # headless; flags after the name go to the agent
+```
+
+(With more than one agent installed, name it: `nana claude [-- args]`. With one, it's
+the default.)
 
 ## 4. Run the console and let the agent work
 

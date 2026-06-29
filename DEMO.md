@@ -87,8 +87,11 @@ with a prompt before each operation the agent requests.
 make demo-agent
 ```
 
-The agent reads `NANA.md` and asks Popo for what it needs. Back in **Terminal A**
-you'll be prompted to approve each step, with context:
+`make demo-agent` starts Claude through the sandbox's **`nana` launcher**
+(`$ROOT/nana`, written by `agent install`) — the same wrapper a real operator uses:
+it sets up auth and loads `NANA.md` as the agent's system context. The agent then
+asks Popo for what it needs. Back in **Terminal A** you'll be prompted to approve
+each step, with context:
 
 ```
   ╭─────────────────────────────────────────────

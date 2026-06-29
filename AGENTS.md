@@ -22,6 +22,19 @@ no `InsecureIgnoreHostKey`).
 
 ## Working agreement
 
+- **Dogfood every change in a test — against the contract, not the implementation.**
+  No change ships without a test that exercises it the way a real consumer uses it
+  (the operator, the agent following `NANA.md`, or the demo), and that asserts
+  against the **documented contract / an independent source of truth** — never just
+  round-trips the implementation's own assumptions. A test that mirrors the code's
+  internals can be *self-consistent with the bug* and prove nothing. **Cautionary
+  case (#59):** `web.fetch` wrote response blobs to `$ROOT/blobs` while `NANA.md`
+  (correctly) told the agent to read `$ROOT/protocol/blobs`; the functional test
+  read the blob via `path.Join(root, body_blob)` — the same wrong path the writer
+  used — so it passed for months while a real agent couldn't find the file. The fix
+  was to assert against the spec'd location and tie writer + published reference to
+  one canonical accessor (`Tree.Blobs()`/`BlobRef`). When a doc/spec names a path,
+  flag, or field, a test must check the code matches the doc.
 - **Tight v1, parked v2.** Ship the minimum that works; park sophisticated ideas
   as v2 with a named re-entry trigger (plan §0). Push back on speculative scope
   rather than build it.
@@ -154,7 +167,13 @@ the self-contained native binary in** (via `remotefs.PushTarGz`), so it works on
 fully air-gapped sandbox — no on-target npm, no Node. It writes a 0600 auth env
 file: subscription token only — an API key is refused, `ANTHROPIC_API_KEY` is
 blanked, the token is never logged. New agents are just another `agent.Descriptor`
-(npm-prefix + platform-suffix mapping + binary path + token/env).
+(npm-prefix + platform-suffix mapping + binary path + token/env). It also writes a
+**`$ROOT/nana` launcher** (operator runs it *in* the sandbox from any dir): a generic
+dispatcher picks the agent (the sole one, or `nana <agent>` when several) and execs
+a per-agent `run` script that sources the env and launches the harness with `NANA.md`
+as persistent system context (`--append-system-prompt`) plus passthrough args. The
+agent-specific launch recipe is baked from the `Descriptor` at install time, so the
+sandbox scripts stay generic. The demo dogfoods it (`demo-agent.sh` → `$ROOT/nana`).
 
 - **Phase 1 — done.** CLI skeleton + `probe` (fingerprint OS/arch/libc/root
   viability), verified end-to-end against Alpine.
