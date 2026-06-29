@@ -91,9 +91,11 @@ and Java**. Use this checklist (Python/Node/Java are the worked examples; decisi
    real dependency through **both tiers**, and **compiles/runs a program that uses
    it**; **TUI flow test(s)** (teatest) for the new form path; and a **self-contained
    scenario** in `test/scenarios/<lang>/` that builds and runs a real app.
-7. **Skill doc:** add the new verbs to the embedded `internal/skill/NANA.md` — the
-   sandbox agent learns its available actions there; an undocumented verb is invisible
-   to it.
+7. **Client + skill docs:** teach the `popo` client the verb — extend the `verbs`
+   table + `buildParams` (and `printResult` if the result shape is new) in `cmd/popo`
+   (that's the agent's `popo help`) — and add it to the verb table in
+   `internal/skill/PROTOCOL.md` (the raw-protocol/file-I/O-only reference). NANA.md
+   itself stays minimal and points at `popo help`, so it needs no per-verb edit.
 8. **Acceptance demo:** refresh `test/demo/` so the air-gapped agent exercises the new
    language, and re-run `make demo` (see the working agreement).
 9. **Docs:** README (commands + verbs), this file's language bullet, and the plan
@@ -132,8 +134,9 @@ demo-console` wires it for the demo VM). Subcommands stay for scripting/CI;
 (CI, pipes) auto-falls back to that unattended serve loop, so command-line operation
 keeps working with the TUI present.
 
-Watch a *headless* run unfold with `iceclimber logs -f` (Popo's `[POPO]` activity;
-add `--agent-log <file>` for the sandbox `[NANA]` side) — or `iceclimber tui` for a
+Watch a *headless* run unfold with `iceclimber logs -f` (Popo's `[POPO]` activity +
+the sandbox `[NANA]` stream — both with no flag; a serving Popo bridges the agent
+stream to the controller `agent.log` the views default to) — or `iceclimber tui` for a
 live split-pane dashboard over the same activity JSONL (the **attach** view, vs the
 console's **embed** view). `make demo-logs` / `make demo-tui` wire both for the demo
 VM. `serve` prints the same per-request feed on its stdout.

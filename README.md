@@ -29,14 +29,15 @@ One Go binary, two roles, named after the Ice Climbers:
   │  • installs Python │    open ports —      │   inbox/   ← Popo answers │
   │  • relays packages │    just files)       │ <root>/runtimes/python/.. │
   │  • gated web.fetch │                      │ <root>/skill/NANA.md      │
-  │  • asks you to OK  │                      │  (a Claude agent reads it)│
+  │  • asks you to OK  │                      │ <root>/popo  ← the client │
   └────────────────────┘                      └───────────────────────────┘
 ```
 
-The agent and Popo communicate through a **maildir-style** request/response tree on
-the sandbox filesystem (`tmp`/`new`/`cur`, atomic rename delivery). No listener, no
-egress, no extra tooling required inside the sandbox — only the ability to read and
-write files, plus exec to *run* what gets installed.
+The agent talks to Popo with the **`popo` client** (relayed to `<root>/popo` at
+bootstrap): `popo <verb> …` over a **maildir-style** request/response tree on the
+sandbox filesystem (`tmp`/`new`/`cur`, atomic rename delivery). No listener, no egress,
+no extra tooling required inside the sandbox. A harness that can't execute `popo` can
+drive the same tree with only file read/write (see `<root>/skill/PROTOCOL.md`).
 
 ---
 
@@ -96,8 +97,9 @@ The bare-`iceclimber` console also offers this as a modal on first connect.
 ```
 
 Fingerprints the sandbox (OS/arch/libc), picks a writable install root, creates the
-protocol tree, runs a `ping`/`pong` smoke test, and drops `NANA.md`. Then wire that
-skill doc into your agent's instructions (see the Nana side).
+protocol tree, runs a `ping`/`pong` smoke test, drops `NANA.md` + `PROTOCOL.md`, and
+relays the `popo` client to `<root>/popo`. Then wire `NANA.md` into your agent's
+instructions (see the Nana side).
 
 ### 4. Serve — the console, or headless
 
@@ -141,8 +143,8 @@ operation the agent requests, with context, and you approve inline:
 | Command | What it does |
 |---|---|
 | `status` | Liveness (heartbeat), queue depth, installed runtimes, the agent's capabilities |
-| `logs -f [--agent-log <file>]` | Tail Popo's activity (`[POPO]`) merged with the agent's stream (`[NANA]`) |
-| `tui [--agent-log <file>]` | A live split-pane `[POPO]`/`[NANA]` dashboard (`--snapshot` for one static frame) |
+| `logs -f` | Tail Popo's activity (`[POPO]`) merged with the agent's stream (`[NANA]`, bridged automatically; `--agent-log <file>` overrides) |
+| `tui` | A live split-pane `[POPO]`/`[NANA]` dashboard (`[NANA]` bridged automatically; `--snapshot` for one static frame) |
 | `pending` / `approve <id>` / `deny <id>` | Async egress approval (when not serving on a TTY) |
 | `install python <minor>` · `install pip <pkg> --python <minor>` | Provision Python directly, without the agent |
 | `install node <version>` · `install npm <pkg> --node <version>` | Provision Node/npm directly |
@@ -150,30 +152,34 @@ operation the agent requests, with context, and you approve inline:
 | `install maven <group:artifact:version> --java <version>` | Resolve JVM deps into a classpath (Coursier) |
 | `agent install [claude]` · `agent list` | Relay a coding agent (Claude Code) into the sandbox + configure its subscription token; drops a `$ROOT/nana` launcher to start it (auth + NANA.md wired in) |
 | `web fetch <url>` | Run a fetch yourself (same gating) |
-| `skill print` / `skill path` | The `NANA.md` contract |
+| `skill print` / `skill path` | The `NANA.md` contract (`--protocol` for the raw `PROTOCOL.md`) |
 
 ---
 
 ## Nana side (the sandbox agent)
 
-Nana needs only **file read/write** (plus exec to run installed binaries). The full
-contract is `NANA.md`, dropped into `<root>/skill/NANA.md` at bootstrap and printable
-with `iceclimber skill print`. In short, the agent:
+Nana's contract is **`NANA.md`** — a short skill doc dropped into `<root>/skill/NANA.md`
+at bootstrap (printable with `iceclimber skill print`). It tells the agent to talk to
+Popo with the **`popo` client**, which `bootstrap` also relays into `<root>/popo`:
 
-1. **First action** — writes `protocol/capabilities.json` = `{"has_exec":true,"has_file_write":true}`.
-2. **Requests** — builds an envelope `{schema_version, id, type, created_at, params}`,
-   writes it to `outbox/tmp/<id>.json`, then **renames** into `outbox/new/` (never
-   writes `new/` directly).
-3. **Responses** — polls `inbox/new/<id>.json` (same id) with backoff; reads the result.
-4. **Liveness** — judges "is Popo alive" on the heartbeat **counter advancing**, not
-   its timestamp (no clock sync needed).
-5. **Absolute paths** — runs installed binaries by the path the result returns (e.g.
-   `runtimes/python/<ver>/bin/python3`), never relying on `PATH`/rc files.
+- **`popo help`** lists the actions; **`popo <verb> …`** (e.g. `popo python.install
+  3.12`, `popo web.fetch <url>`) builds the request, delivers it, waits, and prints a
+  clean result. The agent never hand-writes the protocol or parses JSON.
+- **Run installed runtimes by the absolute path `popo` prints** (e.g. `<path> -c
+  "print(1)"`), never by bare name.
+- **Approvals:** if `popo` exits 2, Popo needs the operator to approve something —
+  the agent relays the message and retries.
 
-**To make a real Claude agent be Nana:** give it the output of `iceclimber skill
-print` as part of its instructions and let it operate inside the sandbox. Any agent
-that can read and write files can be Nana — Claude is just the one we drop in. To
-learn the protocol by hand first, see [`test/PLAYGROUND.md`](test/PLAYGROUND.md).
+**File-I/O-only fallback.** A harness that *can't execute* `popo` can still drive the
+bridge with nothing but file read/write — the raw maildir protocol (envelope →
+`outbox/tmp` → rename to `outbox/new`, poll `inbox/new`, heartbeat liveness) lives in
+`<root>/skill/PROTOCOL.md` (`iceclimber skill print --protocol`). The agent picks `popo`
+when it can exec, the file protocol when it can't.
+
+**To make a real Claude agent be Nana:** wire `NANA.md` into its instructions and let
+it operate in the sandbox — or just run **`iceclimber agent install claude`**, which
+relays Claude in and drops a `nana` launcher that starts it with NANA.md as its system
+context. To learn the protocol by hand, see [`test/PLAYGROUND.md`](test/PLAYGROUND.md).
 
 ### What Nana can ask Popo for
 

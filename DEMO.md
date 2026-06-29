@@ -165,9 +165,10 @@ make demo-down            # stop + delete the VM
 
 - **The air-gap is real** — step 2's `pip install` / `curl` failures are the proof.
   Everything the agent accomplishes, it accomplishes *only* via Popo.
-- **The agent never sees SSH or the maildir internals** — it follows `NANA.md`'s
-  abstract file read/write/exec actions. Any agent that can read and write files
-  could be Nana; Claude is just the one we dropped in.
+- **The agent never sees SSH or the maildir internals** — it follows `NANA.md` and
+  just runs the `popo` client (`popo <verb> …`). An agent that can't exec could drive
+  the same bridge with file read/write alone (PROTOCOL.md); Claude is just the one we
+  dropped in.
 - **Egress stays gated even for the agent** — the controller venue is a deliberate
   approval checkpoint, not an open tunnel. You are the one who lets the comic out.
 - **Subscription, not API** — `iceclimber agent install claude` refuses an API

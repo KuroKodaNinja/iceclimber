@@ -174,7 +174,8 @@ end" reference.
   pre-approve them for an unattended run. The full air-gapped walkthrough — a real
   agent building apps with zero sandbox internet — is in [DEMO.md](DEMO.md).
 - **Watch what's happening** in the console's `[POPO]`/`[NANA]` panes, or with
-  `iceclimber logs -f --agent-log <file>`.
+  `iceclimber logs -f` / `iceclimber tui` (the `[NANA]` agent stream is bridged
+  automatically — no `--agent-log` needed).
 
 ## Where things live in the sandbox
 

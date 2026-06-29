@@ -91,8 +91,9 @@ $ICECLIMBER_ROOT/
     blobs/
       <sha256>        # content-addressed: wheels, fetch bodies, python tarball contents
     heartbeat         # Popo writes current timestamp as CONTENT (not mtime — see §6)
-    capabilities.json # Nana self-reports its toolset, once, as its first action
+    capabilities.json # optional: Nana may self-report its toolset (informational; §4.6)
     .popo.lock        # held by `serve` for the duration of the session
+  popo                # the sandbox client (relayed at bootstrap; `popo <verb>` — #61)
   runtimes/
     python/
       3.12.6-x86_64-glibc/
@@ -101,7 +102,8 @@ $ICECLIMBER_ROOT/
     manifest.json     # convenience copy; Popo's local copy is authoritative
     pip.conf          # generated at bootstrap, index-url -> internal mirror if configured
   skill/
-    NANA.md
+    NANA.md           # minimal contract (defaults the agent to `popo`)
+    PROTOCOL.md       # raw file protocol — the file-I/O-only fallback (no-exec harnesses)
 ```
 
 Request/response filenames are `<ulid>.json` — ULIDs sort lexically by creation time, so "what's oldest in the queue" is a plain directory listing, no per-file parsing required.
@@ -404,11 +406,13 @@ iceclimber                               # (no subcommand) → the operator cons
   deny <id> --reason "..." [--sandbox ID]
 
   cache list | prune | gc                # (stub; v2)
-  skill print | path
+  skill print [--protocol] | path [--protocol]   # NANA.md / PROTOCOL.md
   config show | validate
 
-  nana request <type> --params <json>    # optional sandbox-side convenience binary
-  nana capabilities                      # optional sandbox-side convenience binary
+  # Sandbox-side (relayed at bootstrap, run by the agent INSIDE the sandbox — not iceclimber subcommands):
+  #   $ROOT/popo <verb> [args]             # the client: build+deliver+poll+parse a request (#61)
+  #   $ROOT/popo help                      # list verbs/usage
+  #   $ROOT/nana [agent] [-- args]         # the launcher: start an installed agent, NANA.md as system context (#58)
 
   version
 ```
@@ -427,7 +431,7 @@ These are named explicitly so they don't get silently assumed during implementat
 
 **Still open *for v1* (must be designed before/within the build):**
 
-- ~~**`NANA.md` content**~~ — **resolved (phase 7):** authored in `internal/skill/NANA.md` (embedded), covering abstract file/exec actions, the maildir request/response flow, counter-based heartbeat liveness (§4.7), the absolute-path contract, all four verbs, and the capability self-report. Dropped at bootstrap; `skill print` surfaces it.
+- ~~**`NANA.md` content**~~ — **resolved (phase 7), reworked (#61):** the skill doc is now **minimal** (`internal/skill/NANA.md`, embedded) — it defaults the agent to the `popo` client (`popo help`/`popo <verb>`) and the absolute-path contract. The full raw protocol (maildir flow, counter-based heartbeat liveness §4.7, optional capability self-report, and the eight-verb table) moved to `internal/skill/PROTOCOL.md` as the file-I/O-only fallback. Both are dropped at bootstrap; `skill print [--protocol]` surfaces them.
 - ~~**Audit log schema**~~ — **resolved (phase 6a, §6 floor):** controller-side JSONL, `{ts, id, type, url, method, venue, status_code, body_size, body_sha256, outcome}`. Phase 6b extends entries with fetch **rewrites** (original + rewritten URL) and **approval** outcomes (auto-allowed / one-shot / persisted / denied), per §6.1.
 - ~~**Approval persistence format**~~ — **resolved (phase 6b):** `internal/egress/store.go` persists allow/deny rules to `approvals.json` (`AddAllow`/`AddDeny`), host-scoped by default with custom globs via `--remember`; deny rules checked before allow (#31–#32). Rule expiry isn't implemented (rules persist until removed) — revisit only if demand appears.
 
