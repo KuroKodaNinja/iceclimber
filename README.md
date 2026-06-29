@@ -6,8 +6,11 @@ A capable agent dropped into a locked-down box — a corp VM, a CI runner, a
 hardened container — often can't do the basics: no Python, no package installs, no
 outbound network. iceclimber bridges that gap over nothing but an **SSH/SFTP**
 link. A controller you run *outside* the sandbox provisions language runtimes
-(Python, Node.js), packages, and web data on the agent's behalf — and **you** stay
-in the loop, approving each operation.
+(**Python, JavaScript/Node, Java**), packages, and web data on the agent's behalf —
+and **you** stay in the loop, approving each operation.
+
+> **Want to build something with it?** → **[USAGE.md](USAGE.md)** is the
+> start-to-finish guide: point Popo at a box, wire your agent, and let it build.
 
 One Go binary, two roles, named after the Ice Climbers:
 
@@ -201,6 +204,8 @@ learn the protocol by hand first, see [`test/PLAYGROUND.md`](test/PLAYGROUND.md)
 
 ## Documentation
 
+- [`USAGE.md`](USAGE.md) — **start here to build apps**: point Popo at a sandbox,
+  wire your agent, run the console, approve as it builds.
 - [`DEMO.md`](DEMO.md) — the air-gapped real-agent acceptance demo.
 - [`test/PLAYGROUND.md`](test/PLAYGROUND.md) — drive the protocol by hand.
 - [`test/scenarios/`](test/scenarios/) — per-language "build a real app" scenarios.
@@ -212,12 +217,14 @@ learn the protocol by hand first, see [`test/PLAYGROUND.md`](test/PLAYGROUND.md)
 
 [MIT](LICENSE).
 
-**Status:** v1 is complete — `probe`, the maildir protocol, `python.install`,
-`pip.install` (mirror + relay), gated `web.fetch`, supervised `serve` — all verified
-end to end against a real Alpine/musl sandbox and a real Claude agent under a true
-network air-gap. Since then, three increments have shipped: **Node/npm** (a second
-language), the **observability TUI**, and the **TUI-first operator console** (bare
-`iceclimber` — serve embedded with inline modal approvals). Sophisticated extensions
-(sub-agent `web.research`, a Tier 2 build environment, multi-sandbox fleet
-multiplexing) are parked as demand-driven work (see the plan's §0 and decision #46
-for the console roadmap).
+**Status:** v1 plus a run of increments are complete and verified end to end against
+a real Alpine/musl sandbox — including a real Claude agent under a true network
+air-gap. What's shipped: the maildir protocol + gated `web.fetch`; **three languages**
+— **Python** (pip), **JavaScript/Node** (npm), and **Java** (Maven/Coursier) — each
+with runtime install + packages over **Tier 0 (mirror)** and **Tier 1 (relay)**; and
+the **TUI-first operator console** (bare `iceclimber`: serve embedded, inline
+approvals, install/bootstrap forms, a live status panel, and egress-rule management).
+The [acceptance demo](DEMO.md) re-proves the premise across all three languages. Next
+up is **multi-sandbox** (a fleet list/switcher); other extensions (sub-agent
+`web.research`, a Tier 2 build environment) are parked as demand-driven work (plan §0;
+decisions #46–#54).
