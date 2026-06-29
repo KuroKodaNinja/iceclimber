@@ -21,6 +21,10 @@ cd "$REPO"
 BIN="$REPO/iceclimber"
 CFG="$REPO/.demo/config.yaml"
 [ -x "$BIN" ] || { echo "build the binary first: make build" >&2; exit 1; }
+# The agent install (below) needs the subscription token. Load it from the
+# gitignored stash if it isn't already in the environment.
+[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "$REPO/.demo/token.env" ] && . "$REPO/.demo/token.env"
+: "${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or stash it in .demo/token.env — subscription, NOT an API key}"
 
 # 1. Stage the tree + a fresh, ungated egress gate + a clean maildir.
 root="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"
@@ -29,6 +33,10 @@ bash "$HERE/gen-config.sh" "$DEMO" "$CFG" "$root"
 rm -f "$HOME/.iceclimber/$DEMO/approvals.json" "$HOME/.iceclimber/$DEMO/pending.json"
 : > "$HOME/.iceclimber/$DEMO/agent.log" 2>/dev/null || true
 make -C "$REPO" demo-reset
+
+# 1b. Install the Claude agent + its subscription auth into the sandbox. The
+#     controller relays the agent binary in (no sandbox network needed).
+"$BIN" agent install claude --config "$CFG"
 
 # 2. Air-gap the sandbox. Restore egress on exit.
 cleanup() {

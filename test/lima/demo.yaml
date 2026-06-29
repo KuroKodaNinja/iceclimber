@@ -22,8 +22,8 @@ base:
 # Apple Virtualization.framework. Fall back to "qemu" if vz misbehaves.
 vmType: vz
 
-# Heavier than the functional box: it carries node + Claude Code + a ~210 MB
-# python-build-standalone runtime + wheels.
+# Heavier than the functional box: it carries the relayed-in Claude Code binary
+# (~220 MB) + a ~210 MB python-build-standalone runtime + wheels.
 cpus: 2
 memory: 4GiB
 disk: 8GiB
@@ -36,36 +36,32 @@ containerd:
 # in), exactly like the functional box.
 mounts: []
 
-# First-boot provisioning, network still open. Installs the agent and its musl
-# prerequisites; the air-gap is applied afterwards by demo-firewall.sh.
+# First-boot provisioning, network still open. Installs only the agent's musl
+# prerequisites that iceclimber does NOT provide; Node + the Claude Code CLI itself
+# are installed by `iceclimber agent install claude` (see demo-run.sh / demo-live.sh),
+# which relays the agent binary in from the controller (no sandbox network needed).
 provision:
 - mode: system
   script: |
     #!/bin/sh
     set -eux
     apk update
-    # Agent prerequisites:
-    #   nodejs/npm        — Claude Code is a Node CLI
-    #   libgcc/libstdc++  — musl needs these for the native bits
-    #   ripgrep           — system rg; we set USE_BUILTIN_RIPGREP=0 (the bundled
-    #                       rg is glibc-built and won't run on musl)
+    # Agent prerequisites NOT provided by iceclimber:
+    #   libgcc/libstdc++  — musl needs these for the agent's native binary
+    #   ripgrep           — system rg; the agent env sets USE_BUILTIN_RIPGREP=0
+    #                       (the bundled rg is glibc-built and won't run on musl)
     #   bash              — the agent's shell tool needs a real bash (Alpine is
     #                       busybox-only by default)
     #   curl/ca-certs     — fetch probes + TLS roots
     #   iptables/ip6tables/sudo — the air-gap firewall (applied later)
+    # (Node + npm + Claude Code are installed by `iceclimber agent install claude`.)
     apk add \
-      nodejs npm libgcc libstdc++ ripgrep bash git curl ca-certificates \
+      libgcc libstdc++ ripgrep bash git curl ca-certificates \
       iptables ip6tables sudo
-    npm install -g @anthropic-ai/claude-code
-    # Persist the agent env for every login shell.
-    cat > /etc/profile.d/iceclimber-demo.sh <<'EOF'
-    export USE_BUILTIN_RIPGREP=0
-    export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-    EOF
 - mode: system
   script: |
     #!/bin/sh
-    # Smoke-check the install so a broken provision fails `make demo-up` loudly.
+    # Smoke-check the prereqs so a broken provision fails `make demo-up` loudly.
     set -eux
-    node --version
-    claude --version
+    rg --version
+    bash --version

@@ -147,6 +147,14 @@ ssh-keyscan replacement for ephemeral boxes; keys are never trusted silently
 offers it as a first-connect modal. Host-key primitives live in
 `internal/remote/hostkey.go` (`FetchHostKey`/`CheckHostKey`/`RecordHostKey`); an
 unknown/changed key surfaces as a typed `remote.HostKeyError`.
+`iceclimber agent install [claude]` installs a coding agent into the sandbox
+(decision #57): `internal/agent` downloads the agent's **per-platform** package
+(e.g. `@anthropic-ai/claude-code-linux-arm64-musl`) on the controller and **relays
+the self-contained native binary in** (via `remotefs.PushTarGz`), so it works on a
+fully air-gapped sandbox — no on-target npm, no Node. It writes a 0600 auth env
+file: subscription token only — an API key is refused, `ANTHROPIC_API_KEY` is
+blanked, the token is never logged. New agents are just another `agent.Descriptor`
+(npm-prefix + platform-suffix mapping + binary path + token/env).
 
 - **Phase 1 — done.** CLI skeleton + `probe` (fingerprint OS/arch/libc/root
   viability), verified end-to-end against Alpine.

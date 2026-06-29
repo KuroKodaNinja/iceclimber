@@ -148,6 +148,7 @@ operation the agent requests, with context, and you approve inline:
 | `install node <version>` · `install npm <pkg> --node <version>` | Provision Node/npm directly |
 | `install java <version>` | Provision a Temurin JDK (javac bundled) directly |
 | `install maven <group:artifact:version> --java <version>` | Resolve JVM deps into a classpath (Coursier) |
+| `agent install [claude]` · `agent list` | Install a coding agent (Claude Code) into the sandbox + configure its subscription token |
 | `web fetch <url>` | Run a fetch yourself (same gating) |
 | `skill print` / `skill path` | The `NANA.md` contract |
 

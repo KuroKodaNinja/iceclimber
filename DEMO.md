@@ -37,14 +37,23 @@ Two ways to run it:
   echo 'export CLAUDE_CODE_OAUTH_TOKEN=<token>' > .demo/token.env
   ```
 
-  > A live agent run consumes your subscription usage. The harness always launches
-  > the agent with `ANTHROPIC_API_KEY` emptied, so it can't silently bill the API.
+  > A live agent run consumes your subscription usage. `iceclimber agent install
+  > claude` writes the token into the sandbox with `ANTHROPIC_API_KEY` emptied, so
+  > the agent can't silently bill the API.
+
+The agent itself is installed by the official command —
+**`iceclimber agent install claude`** — which downloads the Claude Code binary for
+the sandbox's platform on the controller, relays it into the sandbox (no sandbox
+network needed — it works air-gapped), and writes its subscription auth to a 0600
+env file. The demo runs this for you (inline in `make demo`/`make demo-live`, or as
+`make demo-agent-install` in the manual flow).
 
 ---
 
 ## Live walkthrough
 
-Boot the VM once (the first boot installs node + Claude Code, so it's slow):
+Boot the VM once (provisions the agent's musl prereqs — the Claude CLI itself is
+installed later by `iceclimber agent install claude`):
 
 ```sh
 make demo-up
@@ -158,8 +167,10 @@ make demo-down            # stop + delete the VM
   could be Nana; Claude is just the one we dropped in.
 - **Egress stays gated even for the agent** — the controller venue is a deliberate
   approval checkpoint, not an open tunnel. You are the one who lets the comic out.
-- **Subscription, not API** — `make demo-agent` refuses to run without
-  `CLAUDE_CODE_OAUTH_TOKEN`, and empties `ANTHROPIC_API_KEY`.
+- **Subscription, not API** — `iceclimber agent install claude` refuses an API
+  key (and refuses to run without `CLAUDE_CODE_OAUTH_TOKEN`), and writes the token
+  into the sandbox with `ANTHROPIC_API_KEY` emptied so it can't fall back to metered
+  billing.
 
 ---
 
@@ -170,8 +181,9 @@ export CLAUDE_CODE_OAUTH_TOKEN=...   # subscription token, as above
 make demo                            # demo-up + the //go:build demo acceptance test
 ```
 
-`make demo` does the whole sequence headless — boot, bootstrap, **pre-approve**
-the fetch host (no human in the loop), air-gap, serve, run the agent, and assert
-the program's output — then exits non-zero on any failure. It's opt-in (the `demo`
+`make demo` does the whole sequence headless — boot, bootstrap, **install the
+Claude agent** (`iceclimber agent install claude`, while the network is open),
+**pre-approve** the fetch host (no human in the loop), air-gap, serve, run the
+agent, and assert the program's output — then exits non-zero on any failure. It's opt-in (the `demo`
 build tag, never part of `make test`) and needs a host with Lima/`vz` and the
 `CLAUDE_CODE_OAUTH_TOKEN` secret. This is the gate to run in CI.

@@ -32,6 +32,12 @@ root="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"
 bash "$HERE/gen-config.sh" "$DEMO" "$CFG" "$root"
 "$BIN" bootstrap --config "$CFG"
 
+# 1b. Install the Claude agent into the sandbox and configure its subscription auth.
+#     The controller downloads the agent binary for the sandbox's platform and relays
+#     it in (no sandbox network needed — works air-gapped), so placement vs. the
+#     firewall doesn't matter. The token comes from CLAUDE_CODE_OAUTH_TOKEN (above).
+"$BIN" agent install claude --config "$CFG"
+
 # 2. Pre-approve the fetch host (operator-owned allow rule) so the unattended
 #    agent isn't held at the gate.
 approvals="$HOME/.iceclimber/$DEMO/approvals.json"

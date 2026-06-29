@@ -72,6 +72,19 @@ For a Claude Code agent in the sandbox, put a line like this in its system promp
 (`./iceclimber skill print` shows the exact contract; `skill path` prints where it
 lives in the sandbox.)
 
+**Don't have an agent in the sandbox yet?** iceclimber can install one for you:
+
+```sh
+export CLAUDE_CODE_OAUTH_TOKEN=...        # subscription token (claude setup-token)
+./iceclimber agent install claude         # relays the Claude Code binary in + configures auth
+```
+
+The controller downloads the Claude Code binary **for the sandbox's platform** and
+relays it in (no sandbox network needed — it works on a fully air-gapped box), then
+writes its **subscription** token to a 0600 env file (API key refused — never
+metered billing). It prints a `launch:` line — `sh -lc '. <env> && claude -p "…"'` —
+for running the agent. `./iceclimber agent list` shows the available agents.
+
 ## 4. Run the console and let the agent work
 
 ```sh

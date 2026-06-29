@@ -1,25 +1,20 @@
 #!/usr/bin/env bash
 # Launch the Claude agent inside the (air-gapped) demo sandbox to perform the
-# acceptance task. Authenticates with the operator's **subscription** token,
-# never the metered API.
+# acceptance task. The agent CLI and its subscription auth were installed earlier by
+# `iceclimber agent install claude` (the controller relays the agent binary in);
+# this just sources the 0600 env file iceclimber wrote (which carries the token and
+# empties the API key) and runs the agent.
 #
 # Usage: test/lima/demo-agent.sh [instance-name]
 # Prereqs:
-#   - The demo VM is up (make demo-up), bootstrapped, and air-gapped
-#     (make demo-firewall); Popo is serving (./iceclimber serve ...).
-#   - CLAUDE_CODE_OAUTH_TOKEN is set on the host. Mint it once with
-#       claude setup-token
-#     This bills your Claude subscription (Pro/Max), not the API.
+#   - The demo VM is up (make demo-up), bootstrapped, the agent installed
+#     (`iceclimber agent install claude`), and air-gapped (make demo-firewall);
+#     Popo is serving (./iceclimber serve ...).
 set -euo pipefail
 
 DEMO="${1:-iceclimber-demo}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-
-# Local convenience: load the subscription token from a gitignored file if the
-# operator stashed it there and it isn't already in the environment.
-[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "$REPO/.demo/token.env" ] && . "$REPO/.demo/token.env"
-: "${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or stash it in .demo/token.env — subscription, NOT an API key}"
 
 ROOT="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"
 
@@ -29,10 +24,15 @@ limactl shell "$DEMO" -- mkdir -p "$ROOT/work"
 sed "s#{{ROOT}}#$ROOT#g" "$HERE/../demo/TASK.md" \
 	| limactl shell "$DEMO" -- sh -c "cat > '$ROOT/work/TASK.md'"
 
-echo ">>> launching Claude in $DEMO (subscription auth; API key emptied; YOLO)"
+envfile="$ROOT/agent/claude/env.sh"
+if ! limactl shell "$DEMO" -- test -f "$envfile"; then
+	echo "agent not installed — run 'iceclimber agent install claude' first (see DEMO.md)" >&2
+	exit 1
+fi
+
+echo ">>> launching Claude in $DEMO (subscription auth from $envfile; API key emptied; YOLO)"
 echo ">>> watch Popo's 'serve' in your other terminal service its requests."
 
-# ANTHROPIC_API_KEY= ensures we can never silently fall back to metered billing.
 # --verbose streams the agent's tool calls so the operator can watch it work.
 prompt="Read the file TASK.md in your current directory and complete the task it
 describes, exactly. Start by reading the NANA.md path it points you to."
@@ -43,9 +43,10 @@ describes, exactly. Start by reading the NANA.md path it points you to."
 agentlog="$HOME/.iceclimber/$DEMO/agent.log"
 mkdir -p "$(dirname "$agentlog")"
 
-# --max-turns bounds a runaway agent (belt-and-suspenders for CI). The
-# three-language task is more Popo round-trips than one language, so give it room.
+# Sourcing the iceclimber-written env file sets the subscription token, empties
+# ANTHROPIC_API_KEY (never fall back to metered billing), and puts the runtime node
+# on PATH. --max-turns bounds a runaway agent; the three-language task is more Popo
+# round-trips than one language, so give it room.
 limactl shell "$DEMO" -- \
-	env CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" ANTHROPIC_API_KEY= \
-	bash -lc "cd '$ROOT/work' && claude -p \"$prompt\" --dangerously-skip-permissions --verbose --max-turns 150" \
+	bash -lc ". '$envfile' && cd '$ROOT/work' && claude -p \"$prompt\" --dangerously-skip-permissions --verbose --max-turns 150" \
 	| tee -a "$agentlog"

@@ -87,8 +87,9 @@ demo: build demo-up
 demo-live: build demo-up
 	@bash test/lima/demo-live.sh $(DEMO)
 
-# Boot + provision the demo VM (Alpine + Claude Code). First boot installs node,
-# the agent, and its musl deps while the network is still open.
+# Boot + provision the demo VM (Alpine). First boot installs only the agent's musl
+# prereqs (ripgrep/bash/libstdc++/…); the Claude Code binary itself is relayed in by
+# `iceclimber agent install claude`.
 demo-up:
 	@limactl list --quiet 2>/dev/null | grep -qx $(DEMO) \
 		&& echo "demo '$(DEMO)' already exists; starting if stopped" \
@@ -127,8 +128,16 @@ demo-config:
 demo-bootstrap: build demo-config
 	./$(BIN) bootstrap --config $(DEMO_CFG)
 
-# Launch the agent in the (air-gapped) demo VM. Needs CLAUDE_CODE_OAUTH_TOKEN
-# (subscription) and Popo serving in another terminal. See DEMO.md.
+# Install the Claude agent + subscription auth into the demo VM. The controller
+# relays the agent binary in (no sandbox network needed — works air-gapped). Needs
+# CLAUDE_CODE_OAUTH_TOKEN set (subscription; sourced from .demo/token.env if present).
+# demo-live/demo do it inline; this target is for the manual step-by-step flow.
+demo-agent-install: build
+	@[ -n "$$CLAUDE_CODE_OAUTH_TOKEN" ] || { [ -f .demo/token.env ] && . .demo/token.env; }; \
+	 CLAUDE_CODE_OAUTH_TOKEN="$$CLAUDE_CODE_OAUTH_TOKEN" ./$(BIN) agent install claude --config $(DEMO_CFG)
+
+# Launch the agent in the (air-gapped) demo VM. The agent + its subscription auth
+# were installed by demo-agent-install; this sources that env file. See DEMO.md.
 demo-agent:
 	@bash test/lima/demo-agent.sh $(DEMO)
 

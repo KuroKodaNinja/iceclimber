@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"github.com/KuroKodaNinja/iceclimber/internal/agent"
 	"github.com/KuroKodaNinja/iceclimber/internal/audit"
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/maven"
@@ -35,6 +36,22 @@ func newNodeInstaller(sess *session) *node.Installer {
 		Arch:     sess.fp.Arch,
 		Libc:     sess.fp.Libc.Family,
 		CacheDir: sess.cacheDir,
+	})
+}
+
+// newAgentInstaller builds the agent installer (Claude Code, …) from an open
+// session. The agent's native binary is relayed in from the controller, so it only
+// needs the platform fingerprint, the cache, and the controller's npm registry.
+func newAgentInstaller(sess *session) *agent.Installer {
+	return agent.NewInstaller(agent.Config{
+		FS:       sess.fs,
+		Runner:   sess.runner,
+		Root:     sess.tree.Root,
+		OS:       sess.fp.OS,
+		Arch:     sess.fp.Arch,
+		Libc:     sess.fp.Libc.Family,
+		CacheDir: sess.cacheDir,
+		Registry: sess.npm.ControllerRegistry,
 	})
 }
 
