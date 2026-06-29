@@ -31,6 +31,12 @@ type Descriptor struct {
 	// nana captures the session to session.log when one is present (or stdout is not
 	// a tty) — never for an interactive run, whose TUI needs the tty untouched.
 	PrintFlags []string
+	// StreamArgs are the flags that make the harness emit a parseable per-turn event
+	// stream (Claude: --output-format stream-json --verbose). On a headless run with
+	// no explicit --output-format, nana injects these (plus a print flag if absent) so
+	// the operator console's [NANA] pane shows the agent's narration + tool calls, not
+	// just its final answer. Empty = the harness has no such stream mode.
+	StreamArgs []string
 	// SystemPromptFlag is the harness flag that appends a string to the agent's
 	// system prompt; the `nana` launcher passes NANA.md's contents to it so the
 	// Popo contract is persistent context every turn. Empty = the harness has no
@@ -56,6 +62,7 @@ var Claude = Descriptor{
 	},
 	VersionArgs:      []string{"--version"},
 	PrintFlags:       []string{"-p", "--print"},
+	StreamArgs:       []string{"--output-format", "stream-json", "--verbose"},
 	SystemPromptFlag: "--append-system-prompt",
 }
 

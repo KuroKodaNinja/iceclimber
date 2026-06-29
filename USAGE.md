@@ -115,11 +115,11 @@ console tails it — so the agent's narration shows up in `[NANA]` on its own. T
 holds for **`iceclimber tui`** and **`iceclimber logs -f`** (also no flag — they
 default to the same bridged log), so whichever view you prefer shows Nana. (Interactive
 `nana` sessions run on their own terminal and aren't mirrored; `--agent-log <file>`
-remains an explicit override.) To see the agent's **tool calls** in `[NANA]` (not just
-its final summary), run it with `--output-format stream-json --verbose`
-(`nana -p "…" --output-format stream-json --verbose`) — the bridge renders those
-events into readable `→ Bash: …` lines. As the agent asks Popo for things, you'll get
-an inline approval modal for each:
+remains an explicit override.) A headless `nana -p` run shows the agent's **tool calls**
+in `[NANA]` automatically — nana injects `--output-format stream-json --verbose` for you,
+and the bridge renders those events into readable `→ Bash: …` lines (pass your own
+`--output-format` to override, e.g. plain text). As the agent asks Popo for things,
+you'll get an inline approval modal for each:
 
 ```
   ╭─────────────────────────────────────────────

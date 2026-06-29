@@ -54,6 +54,40 @@ no `InsecureIgnoreHostKey`).
 - **Commits.** Conventional Commits, atomic and self-contained — each commit
   builds and passes tests on its own. See `.agents/git/commits`.
 
+### Pre-commit/push procedure (definition of done)
+
+Run this every time, before staging — committing and pushing is the *last* step,
+never the first:
+
+1. **Assess the work & clean up.** Re-read the diff as a whole. Remove dangling
+   things the change orphaned — dead code, stale glue/fixtures, superseded demo
+   wiring, leftover scaffolding, commented-out blocks. Nothing the change made
+   obsolete should survive.
+2. **Exercise every operating mode the change touches.** Confirm each still works,
+   not just the one you developed against:
+   - **headless / non-interactive** *and* **TUI/console** operation;
+   - **popo-binary** *and* **no-popo (file-I/O-only / `PROTOCOL.md`)** modes;
+   - any other flow this change can reach (CLI subcommands, both transports
+     sftp/exec, supervised vs `--yes`, etc.).
+3. **Cover any untested flow end to end.** If a use case or flow above lacks a full
+   E2E/functional test (or a `teatest` flow for TUI behaviour), **write it now** —
+   per "Dogfood every change" and "Test as we build". A mode without a test isn't
+   validated, it's assumed.
+4. **Sync all documentation.** README, USAGE, AGENTS, DEMO, and the plan's decision
+   log must match what we actually wrote — flags, paths, behaviour, and a new
+   decision entry where one is warranted. When a doc names a path/flag/field, a test
+   should pin it (#59).
+5. **Validate green — everything, no matter what.** Before any push, run the
+   **complete** suite, not a subset chosen by what the change "touched": `make test`
+   (unit, `-race`), the functional suites (`make e2e` / `make test-functional` /
+   `make tui-functional`), **and** the acceptance demo
+   (`set -a; . .demo/token.env; set +a; make demo` — it silently skips without the
+   token, so confirm it actually ran). No skipping the demo because a change "looks
+   unrelated"; the gate to GitHub is the whole thing passing.
+6. **Only then commit & push.** Stage files explicitly (never `git add -A`; keep
+   `.claude/` untracked), atomic Conventional Commits, no AI-attribution trailer
+   unless explicitly asked.
+
 ## Adding a language
 
 A language is only "done" when it has **the same treatment as Python, JavaScript,
@@ -185,8 +219,13 @@ Run headless (a print flag like `-p`, or non-tty), `nana` mirrors the agent's st
 (`bridgeAgentLog`→`pollAgentLogs` runs in the console *and* headless `serve`, since both
 hold the SSH session), and the console, `tui`, and `logs` all **default `--agent-log` to
 that file** (`agentLogPath`) — so `[NANA]` shows the agent with **no flag** (decision #60).
-`--agent-log` stays an explicit override. The demo dogfoods the whole path
-(`demo-agent.sh` → `$ROOT/nana -p`, `make demo-logs/tui/console` pass no flag).
+`--agent-log` stays an explicit override. On a **print run** (a `-p` flag present) with
+no explicit `--output-format`, the `run` script auto-injects the descriptor's
+`StreamArgs` (`--output-format stream-json --verbose`) so `[NANA]` shows tool calls, not
+just the final summary — gated on `-p` so `--version`/diagnostics stay clean and a
+caller's own `--output-format` always wins (decision #63). The demo dogfoods the whole
+path (`demo-agent.sh` → `$ROOT/nana -p` with **no** stream flags, relying on injection;
+`make demo-logs/tui/console` pass no flag).
 
 The agent talks to Popo through the **`popo` client** (`cmd/popo`, decision #61), not
 by hand-crafting the maildir protocol: `popo <verb> …` builds/delivers/polls/parses

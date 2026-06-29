@@ -89,15 +89,30 @@ func TestRenderRun(t *testing.T) {
 		`nana='/r/skill/NANA.md'`, // references NANA.md
 		`set -- '--append-system-prompt' "$(cat "$nana")" "$@"`, // NANA as system context, then passthrough
 		`bin='/r/agent/claude/claude'`,
-		`[ -t 1 ] || headless=1`,                 // capture when not a tty…
-		`case "$a" in -p|--print) headless=1 ;;`, // …or a print flag is present
+		`[ -t 1 ] || headless=1`, // capture when not a tty…
+		`case "$a" in -p|--print) headless=1; printrun=1 ;;`, // …or a print flag is present
 		`if [ "$headless" = 1 ]; then`,
+		// a print run with no --output-format → inject the parseable stream so [NANA]
+		// shows tool calls, not just the final answer (gated on -p, so --version is clean).
+		`if [ "$printrun" = 1 ]; then`,
+		`--output-format|--output-format=*) have_fmt=1 ;;`,
+		`[ "$have_fmt" = 0 ] && set -- '--output-format' 'stream-json' '--verbose' "$@"`,
 		`| tee -a "$log"`,  // headless: mirror to session.log
 		`exec "$bin" "$@"`, // interactive: clean tty
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("run script missing %q:\n%s", want, got)
 		}
+	}
+}
+
+// TestRenderRun_NoStreamArgs: an agent without StreamArgs gets no stream-injection
+// block (only agents that declare a parseable stream mode opt in).
+func TestRenderRun_NoStreamArgs(t *testing.T) {
+	d := Descriptor{Name: "x", DisplayName: "X", Bin: "x", PrintFlags: []string{"-p"}, SystemPromptFlag: "--sys"}
+	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md")
+	if strings.Contains(got, "have_fmt") || strings.Contains(got, "output-format") {
+		t.Errorf("agent without StreamArgs should not inject a stream block:\n%s", got)
 	}
 }
 

@@ -32,9 +32,23 @@ func renderRun(d Descriptor, dir, binPath, nanaPath string) string {
 	// print flag is present. An interactive run (tty, no print flag) is never tee'd —
 	// its TUI needs the tty.
 	fmt.Fprintf(&b, "headless=0\n")
+	fmt.Fprintf(&b, "printrun=0\n")
 	fmt.Fprintf(&b, "[ -t 1 ] || headless=1\n")
 	if len(d.PrintFlags) > 0 {
-		fmt.Fprintf(&b, "for a in \"$@\"; do case \"$a\" in %s) headless=1 ;; esac; done\n", strings.Join(d.PrintFlags, "|"))
+		fmt.Fprintf(&b, "for a in \"$@\"; do case \"$a\" in %s) headless=1; printrun=1 ;; esac; done\n", strings.Join(d.PrintFlags, "|"))
+	}
+
+	// On a print run (a non-interactive task, -p present) with no explicit
+	// --output-format, inject the parseable event stream so the bridged [NANA] pane
+	// shows the agent's narration + tool calls — not just its final answer. Gated on
+	// the print flag (not bare headlessness) so diagnostics like `--version` and a
+	// caller's own --output-format are left exactly as given; -p makes stream-json valid.
+	if len(d.StreamArgs) > 0 {
+		fmt.Fprintf(&b, "if [ \"$printrun\" = 1 ]; then\n")
+		fmt.Fprintf(&b, "  have_fmt=0\n")
+		fmt.Fprintf(&b, "  for a in \"$@\"; do case \"$a\" in --output-format|--output-format=*) have_fmt=1 ;; esac; done\n")
+		fmt.Fprintf(&b, "  [ \"$have_fmt\" = 0 ] && set -- %s \"$@\"\n", shellQuoteArgs(d.StreamArgs))
+		fmt.Fprintf(&b, "fi\n")
 	}
 
 	if d.SystemPromptFlag != "" {
@@ -56,6 +70,16 @@ func renderRun(d Descriptor, dir, binPath, nanaPath string) string {
 	fmt.Fprintf(&b, "  exec \"$bin\" \"$@\"\n") // interactive: keep the agent's tty
 	fmt.Fprintf(&b, "fi\n")
 	return b.String()
+}
+
+// shellQuoteArgs renders args as a space-joined, individually-quoted argument list
+// for a `set --` line.
+func shellQuoteArgs(args []string) string {
+	q := make([]string, len(args))
+	for i, a := range args {
+		q[i] = remote.ShellQuote(a)
+	}
+	return strings.Join(q, " ")
 }
 
 // renderDispatcher builds the <root>/nana launcher. It discovers installed agents

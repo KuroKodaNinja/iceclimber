@@ -39,13 +39,14 @@ echo ">>> watch Popo's 'serve' in your other terminal service its requests."
 prompt="Read $ROOT/work/TASK.md and complete the task it describes, exactly."
 
 # nana wraps the agent: it picks the sole installed agent (claude), sets up auth +
-# NANA.md, and passes these flags through to it. With -p (headless), nana mirrors the
-# stream to the sandbox session.log, which the serving Popo bridges to the controller
-# so `iceclimber logs`/`tui`/the console show it with no --agent-log.
-#   --output-format stream-json (+ --verbose): emit one JSON event per turn so the
-#     bridge can render the agent's tool calls into the [NANA] pane (not just the final
-#     summary). The bridge formats these; raw runs without it still pass through.
+# NANA.md, and passes these flags through to it. With -p (a headless print run), nana
+# auto-injects `--output-format stream-json --verbose` (so each turn emits one JSON
+# event the bridge renders into [NANA] tool calls, not just the final summary) and
+# mirrors the stream to the sandbox session.log, which the serving Popo bridges to the
+# controller so `iceclimber logs`/`tui`/the console show it with no --agent-log. We pass
+# no --output-format here on purpose — dogfooding that injection. (A caller's own
+# --output-format always wins.)
 #   --max-turns bounds a runaway agent (the three-language task is more Popo round-trips
 #     than one language, so give it room).
 limactl shell "$DEMO" -- \
-	"$nana" -p "$prompt" --dangerously-skip-permissions --output-format stream-json --verbose --max-turns 150
+	"$nana" -p "$prompt" --dangerously-skip-permissions --max-turns 150
