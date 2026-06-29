@@ -319,24 +319,28 @@ func TestFlow_InstallJava(t *testing.T) {
 	finalConsole(t, tm)
 }
 
-func TestFlow_InstallRequiresPackages(t *testing.T) {
+// TestFlow_InstallRuntimeOnly: packages are optional — the agent decides what to
+// install, not the operator. Submitting the form with a blank packages field must
+// install just the runtime (empty Pkgs), not block on a validation error.
+func TestFlow_InstallRuntimeOnly(t *testing.T) {
 	ops := newRecordOps()
 	tm := startConsole(t, ops)
 	press(tm, "i")
 	waitText(t, tm, "language")
-	send(tm, tea.KeyEnter) // advance to packages
+	send(tm, tea.KeyEnter) // accept Python (default), advance to packages
 	waitText(t, tm, "requests / figlet")
-	send(tm, tea.KeyEnter)                        // submit with no packages
-	waitText(t, tm, "enter at least one package") // validation error shows
+	send(tm, tea.KeyEnter) // packages blank ⇒ advance to version
+	waitText(t, tm, "3.12 / 24")
+	send(tm, tea.KeyEnter) // version blank ⇒ submit
 	select {
 	case r := <-ops.install:
-		t.Fatalf("blank packages must not install; got %+v", r)
-	case <-time.After(300 * time.Millisecond):
+		if r.Lang != "python" || r.Pkgs != "" || r.Version != "" {
+			t.Fatalf("request = %+v, want {python <blank> <blank>} (runtime-only)", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runtime-only install never fired")
 	}
-	c := finalConsole(t, tm)
-	if c.form == nil {
-		t.Error("form should stay open on a validation error")
-	}
+	finalConsole(t, tm)
 }
 
 func TestFlow_InstallAbort(t *testing.T) {

@@ -399,17 +399,19 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 
 func (c *Console) installForm() *huh.Form {
 	c.st = &formState{lang: "python"}
-	// Two languages, packages-first: the operator names the tools they want; the
-	// runtime is installed for them as needed (a bare runtime is a CLI concern).
+	// Pick a runtime; packages are optional. The agent — not the operator — decides
+	// what to install while it writes code, so an operator install is usually just
+	// the bare runtime. Naming packages here is a convenience, never a requirement.
 	return huh.NewForm(huh.NewGroup(
 		huh.NewSelect[string]().Title("language").Value(&c.st.lang).Options(
 			huh.NewOption("Python", "python"),
 			huh.NewOption("JavaScript", "javascript"),
 			huh.NewOption("Java", "java"),
 		),
-		huh.NewInput().Title("packages").
+		huh.NewInput().Title("packages (optional)").
+			Description("Blank installs just the runtime — the agent installs packages as it needs them.").
 			Placeholder("e.g. requests / figlet cli-table3 / com.google.guava:guava:33.0.0-jre").
-			Value(&c.st.pkgs).Validate(required("at least one package")),
+			Value(&c.st.pkgs),
 		huh.NewInput().Title("version (optional)").
 			Description("Blank uses the recommended default — Python 3.12 · JavaScript 24 · Java 21.").
 			Placeholder("3.12 / 24 / 21").Value(&c.st.version),

@@ -120,8 +120,10 @@ in [`test/scenarios/`](test/scenarios/), each self-contained with its own README
 Bare **`iceclimber`** launches the **operator console**: it serves the sandbox,
 streams live `[POPO]`/`[NANA]` activity, surfaces each approval as an inline modal,
 and lets you manage the sandbox from within — `i` opens an install form (pick
-**Python**, **JavaScript**, or **Java** and the packages, via huh; the runtime is installed for
-you, the package manager pip/npm and tier are derived, version optional), `b`
+**Python**, **JavaScript**, or **Java**, via huh; the runtime is installed for
+you, the package manager pip/npm and tier are derived; packages and version are
+optional — blank installs just the runtime, since the agent installs packages as
+its code needs them), `b`
 re-provisions (bootstrap), `s` shows a live status panel (heartbeat/queue/runtimes/
 capabilities), `e` manages egress rules (approve/deny/forget), `q` quits. Each
 operator action is **verified in the

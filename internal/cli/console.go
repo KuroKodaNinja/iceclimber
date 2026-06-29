@@ -219,6 +219,9 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		if err != nil {
 			return opResult{typ: "python.install", err: err, echoes: echoes}
 		}
+		if len(specs) == 0 { // runtime-only: the agent installs packages as it needs them
+			return opResult{typ: "python.install", detail: "python " + ver, echoes: echoes}
+		}
 		pkgs := parseSpecs(specs)
 		out, err := pip.Run(o.ctx, pipDeps(o.sess), ver, pkgs, "auto")
 		if err != nil {
@@ -233,6 +236,9 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		if err != nil {
 			return opResult{typ: "node.install", err: err, echoes: echoes}
 		}
+		if len(specs) == 0 { // runtime-only: the agent installs packages as it needs them
+			return opResult{typ: "node.install", detail: "node " + ver, echoes: echoes}
+		}
 		pkgs := parseNpmSpecs(specs)
 		out, err := npm.Run(o.ctx, npmDeps(o.sess), ver, pkgs, "auto")
 		if err != nil {
@@ -244,6 +250,9 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		echoes, err := o.ensureJava(ver)
 		if err != nil {
 			return opResult{typ: "java.install", err: err, echoes: echoes}
+		}
+		if len(specs) == 0 { // runtime-only: the agent resolves dependencies as it needs them
+			return opResult{typ: "java.install", detail: "java " + ver, echoes: echoes}
 		}
 		coords, err := parseCoords(specs)
 		if err != nil {

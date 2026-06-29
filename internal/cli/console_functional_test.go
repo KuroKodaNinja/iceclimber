@@ -114,6 +114,32 @@ func TestConsoleOps_PythonFlow(t *testing.T) {
 	}
 }
 
+// TestConsoleOps_RuntimeOnly: an install with no packages installs just the runtime
+// — the common operator case (the agent installs packages as its code needs them).
+// It must operate `python.install` (not pip.install) and Nana echoes the runtime,
+// with no package install attempted.
+func TestConsoleOps_RuntimeOnly(t *testing.T) {
+	sess := consoleSession(t)
+	defer sess.Close()
+	if err := provision(context.Background(), sess); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	ops, events := newTestOps(t, sess)
+
+	evs := runOp(t, ops.RunInstall(tui.InstallRequest{Lang: "python"}), events) // no Pkgs
+	if !operatedOK(evs, "python.install") {
+		t.Errorf("runtime-only install should operate python.install; events=%+v", evs)
+	}
+	for _, e := range evs {
+		if e.Kind == activity.KindOperated && e.Type == "pip.install" {
+			t.Errorf("runtime-only install must not run pip.install; events=%+v", evs)
+		}
+	}
+	if !nanaConfirms(evs, "Python") && !nanaConfirms(evs, "python") {
+		t.Errorf("Nana should echo the Python runtime version; events=%+v", evs)
+	}
+}
+
 // TestConsoleOps_JavaScriptFlow: the JavaScript flow installs an npm package
 // (auto-installing Node) and Nana echoes it present.
 func TestConsoleOps_JavaScriptFlow(t *testing.T) {

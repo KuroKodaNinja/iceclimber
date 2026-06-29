@@ -108,8 +108,8 @@ streams live activity, and surfaces every approval as a modal you answer in-plac
 a split-pane `[POPO]`/`[NANA]` cockpit (`[POPO]` = what the controller did, `[NANA]`
 = the sandbox's own voice — the agent's stream plus sandbox-verified confirmations).
 You can also drive the sandbox from inside it: **`i`** opens an install form (pick
-**Python**, **JavaScript**, or **Java** and the packages you want — the runtime is installed for
-you, version optional), **`b`** re-provisions (bootstrap), **`s`** shows live status,
+**Python**, **JavaScript**, or **Java** — the runtime is installed for you; packages and
+version are optional, since the agent installs packages as its code needs them), **`b`** re-provisions (bootstrap), **`s`** shows live status,
 **`e`** manages egress rules (approve/deny/forget), **`q`** quits. Each
 operator install is **confirmed in the sandbox** (the interpreter's own version
 banner, a package presence check) and echoed into `[NANA]`.
