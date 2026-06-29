@@ -638,10 +638,14 @@ func pollAgentLogs(ctx context.Context, fs remotefs.FS, base string, offsets map
 			if line == "" {
 				continue
 			}
-			if multi {
-				line = "[" + name + "] " + line
+			// Render stream-json tool-call events into readable lines (plain text
+			// passes through); one event can yield several pane lines or none.
+			for _, fl := range formatAgentLine(line) {
+				if multi {
+					fl = "[" + name + "] " + fl
+				}
+				out = append(out, fl)
 			}
-			out = append(out, line)
 		}
 	}
 	return out

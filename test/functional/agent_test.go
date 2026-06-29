@@ -88,8 +88,11 @@ func TestAgentLogBridge(t *testing.T) {
 	cfg := writeConfigRoot(t, sb, root)
 	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
 
-	// Stand in for a headless nana run: a session.log under the agent dir.
-	limaSh(t, "mkdir -p "+root+"/agent/claude && printf 'nana: hello popo\\n' > "+root+"/agent/claude/session.log")
+	// Stand in for a headless nana run: a plain line plus a claude stream-json
+	// tool-call event in the session.log. The bridge should pass the plain line
+	// through and render the stream-json into a readable "→ Bash: …" pane line.
+	streamEvent := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"popo python.install 3.12"}}]}}`
+	limaSh(t, "mkdir -p "+root+"/agent/claude && { printf 'nana: hello popo\\n'; printf '%s\\n' "+remoteQuote(streamEvent)+"; } > "+root+"/agent/claude/session.log")
 
 	// agentLogPath default is ~/.iceclimber/<sandbox_id>/agent.log.
 	agentLog := filepath.Join(os.Getenv("HOME"), ".iceclimber", sandboxName, "agent.log")
@@ -101,11 +104,13 @@ func TestAgentLogBridge(t *testing.T) {
 	}
 	defer func() { _ = serve.Process.Kill(); _, _ = serve.Process.Wait() }()
 
-	// The bridge polls every 1.5s; give it a generous window.
+	// The bridge polls every 1.5s; give it a generous window. Success = the plain
+	// line AND the formatted tool-call line both reached the controller agent.log.
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
-		if b, _ := os.ReadFile(agentLog); strings.Contains(string(b), "nana: hello popo") {
-			return // bridged through to the controller — success
+		b, _ := os.ReadFile(agentLog)
+		if strings.Contains(string(b), "nana: hello popo") && strings.Contains(string(b), "→ Bash: popo python.install 3.12") {
+			return // bridged + stream-json formatted — success
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
