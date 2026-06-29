@@ -28,10 +28,21 @@ import (
 type recordOps struct {
 	install   chan InstallRequest
 	bootstrap chan struct{}
+	status    StatusSnapshot
+	egress    EgressSnapshot
+	forgot    chan EgressRule
+	approved  chan string
+	denied    chan string
 }
 
 func newRecordOps() *recordOps {
-	return &recordOps{install: make(chan InstallRequest, 1), bootstrap: make(chan struct{}, 1)}
+	return &recordOps{
+		install:   make(chan InstallRequest, 1),
+		bootstrap: make(chan struct{}, 1),
+		forgot:    make(chan EgressRule, 4),
+		approved:  make(chan string, 4),
+		denied:    make(chan string, 4),
+	}
 }
 
 func (o *recordOps) RunInstall(r InstallRequest) tea.Cmd {
@@ -39,6 +50,14 @@ func (o *recordOps) RunInstall(r InstallRequest) tea.Cmd {
 }
 func (o *recordOps) RunBootstrap() tea.Cmd {
 	return func() tea.Msg { o.bootstrap <- struct{}{}; return OpResultMsg{} }
+}
+func (o *recordOps) PollStatus() tea.Cmd            { return func() tea.Msg { return StatusMsg(o.status) } }
+func (o *recordOps) Egress() EgressSnapshot         { return o.egress }
+func (o *recordOps) ApprovePending(id string) error { o.approved <- id; return nil }
+func (o *recordOps) DenyPending(id string) error    { o.denied <- id; return nil }
+func (o *recordOps) ForgetRule(kind, pattern string) error {
+	o.forgot <- EgressRule{Kind: kind, Pattern: pattern}
+	return nil
 }
 
 func startConsole(t *testing.T, ops OpRunner) *teatest.TestModel {
@@ -355,6 +374,11 @@ func (o *gateOps) RunInstall(InstallRequest) tea.Cmd {
 func (o *gateOps) RunBootstrap() tea.Cmd {
 	return func() tea.Msg { <-o.release; return OpResultMsg{} }
 }
+func (o *gateOps) PollStatus() tea.Cmd          { return nil }
+func (o *gateOps) Egress() EgressSnapshot       { return EgressSnapshot{} }
+func (o *gateOps) ApprovePending(string) error  { return nil }
+func (o *gateOps) DenyPending(string) error     { return nil }
+func (o *gateOps) ForgetRule(_, _ string) error { return nil }
 
 func TestFlow_RunningIndicator(t *testing.T) {
 	ops := &gateOps{release: make(chan struct{})}
@@ -389,4 +413,64 @@ func TestFlow_QuitCtrlC(t *testing.T) {
 	waitText(t, tm, "q quit")
 	send(tm, tea.KeyCtrlC)
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+}
+
+// --- Status + egress panels (Phase 2b) --------------------------------------
+
+func TestFlow_StatusPanel(t *testing.T) {
+	ops := newRecordOps()
+	ops.status = StatusSnapshot{
+		Sandbox: "sbx", Heartbeat: "seq 42 · ~3s ago", Queue: "1 awaiting · 0 unread",
+		Runtimes: []string{"python 3.12.13-aarch64-musl"}, Caps: "has_exec=true, has_file_write=true",
+	}
+	tm := startConsole(t, ops)
+	waitText(t, tm, "i install")
+	press(tm, "s")
+	waitAll(t, tm, "Status", "seq 42", "python 3.12.13", "has_exec=true")
+	send(tm, tea.KeyEsc) // close
+	c := finalConsole(t, tm)
+	if c.panel != "" {
+		t.Errorf("esc should close the status panel; panel=%q", c.panel)
+	}
+}
+
+func TestFlow_EgressPanel(t *testing.T) {
+	ops := newRecordOps()
+	ops.egress = EgressSnapshot{
+		Pending: []EgressPending{{ID: "01J", Host: "api.x.com", URL: "https://api.x.com/data"}},
+		Rules:   []EgressRule{{Kind: "allow", Pattern: "https://xkcd.com/*"}},
+	}
+	tm := startConsole(t, ops)
+	waitText(t, tm, "i install")
+	press(tm, "e")
+	waitAll(t, tm, "Egress", "api.x.com", "xkcd.com")
+
+	// Row 0 is the pending entry — approve it.
+	press(tm, "a")
+	select {
+	case id := <-ops.approved:
+		if id != "01J" {
+			t.Errorf("approved %q, want 01J", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("approve was not called")
+	}
+
+	// Move to the rule row and forget it.
+	send(tm, tea.KeyDown)
+	press(tm, "f")
+	select {
+	case r := <-ops.forgot:
+		if r.Kind != "allow" || r.Pattern != "https://xkcd.com/*" {
+			t.Errorf("forgot %+v, want allow https://xkcd.com/*", r)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("forget was not called")
+	}
+
+	send(tm, tea.KeyEsc)
+	c := finalConsole(t, tm)
+	if c.panel != "" {
+		t.Errorf("esc should close the egress panel; panel=%q", c.panel)
+	}
 }

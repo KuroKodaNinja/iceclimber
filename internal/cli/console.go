@@ -11,6 +11,7 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/egress"
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/maven"
 	"github.com/KuroKodaNinja/iceclimber/internal/node"
@@ -109,6 +110,91 @@ func (o *consoleOps) RunBootstrap() tea.Cmd {
 		}
 		return tui.OpResultMsg{}
 	}
+}
+
+// PollStatus reads sandbox status over SSH and emits a StatusMsg.
+func (o *consoleOps) PollStatus() tea.Cmd {
+	return func() tea.Msg {
+		s := collectStatus(o.ctx, o.sess)
+		hb := "none yet"
+		if s.HeartbeatSeq != "" {
+			hb = "seq " + s.HeartbeatSeq
+			if s.HeartbeatAge != "" {
+				hb += " · ~" + s.HeartbeatAge + " ago"
+			}
+		}
+		return tui.StatusMsg{
+			Sandbox:   o.sess.sandboxID,
+			Heartbeat: hb,
+			Queue:     fmt.Sprintf("%d awaiting · %d unread", s.QueueOut, s.QueueIn),
+			Runtimes:  s.Runtimes,
+			Caps:      s.Caps,
+		}
+	}
+}
+
+func (o *consoleOps) store() *egress.Store {
+	if o.sess.policy == nil {
+		return nil
+	}
+	return o.sess.policy.Store()
+}
+
+// Egress reads the operator's persisted rules + pending held requests (local files).
+func (o *consoleOps) Egress() tui.EgressSnapshot {
+	st := o.store()
+	if st == nil {
+		return tui.EgressSnapshot{}
+	}
+	var snap tui.EgressSnapshot
+	for _, p := range st.Pending() {
+		snap.Pending = append(snap.Pending, tui.EgressPending{ID: p.ID, Host: p.Host, URL: p.URL})
+	}
+	for _, a := range st.Allow() {
+		snap.Rules = append(snap.Rules, tui.EgressRule{Kind: "allow", Pattern: a})
+	}
+	for _, d := range st.Deny() {
+		snap.Rules = append(snap.Rules, tui.EgressRule{Kind: "deny", Pattern: d})
+	}
+	return snap
+}
+
+// ApprovePending resolves a held request by allowing its host and dropping it from
+// pending (mirrors `iceclimber approve`); DenyPending denies the host instead.
+func (o *consoleOps) ApprovePending(id string) error {
+	st := o.store()
+	if st == nil {
+		return nil
+	}
+	entry, ok, err := st.RemovePending(id)
+	if err != nil || !ok {
+		return err
+	}
+	return st.AddAllow(egress.HostGlob(entry.URL))
+}
+
+func (o *consoleOps) DenyPending(id string) error {
+	st := o.store()
+	if st == nil {
+		return nil
+	}
+	entry, ok, err := st.RemovePending(id)
+	if err != nil || !ok {
+		return err
+	}
+	return st.AddDeny(egress.HostGlob(entry.URL))
+}
+
+// ForgetRule removes a persisted allow/deny rule.
+func (o *consoleOps) ForgetRule(kind, pattern string) error {
+	st := o.store()
+	if st == nil {
+		return nil
+	}
+	if kind == "deny" {
+		return st.RemoveDeny(pattern)
+	}
+	return st.RemoveAllow(pattern)
 }
 
 // doInstall ensures the language runtime exists (installing it at the requested

@@ -22,6 +22,11 @@ func (f *fakeOps) RunInstall(r InstallRequest) tea.Cmd {
 func (f *fakeOps) RunBootstrap() tea.Cmd {
 	return func() tea.Msg { f.bootstrap = true; return OpResultMsg{} }
 }
+func (f *fakeOps) PollStatus() tea.Cmd          { return func() tea.Msg { return StatusMsg{} } }
+func (f *fakeOps) Egress() EgressSnapshot       { return EgressSnapshot{} }
+func (f *fakeOps) ApprovePending(string) error  { return nil }
+func (f *fakeOps) DenyPending(string) error     { return nil }
+func (f *fakeOps) ForgetRule(_, _ string) error { return nil }
 
 func TestConsole_ActivityEvent(t *testing.T) {
 	c := NewConsole("sbx", make(chan tea.Msg, 4), "", nil)

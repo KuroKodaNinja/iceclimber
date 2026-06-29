@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"path"
 	"strings"
 	"time"
@@ -32,19 +31,81 @@ func newStatusCmd() *cobra.Command {
 			}
 			defer sess.Close()
 
+			s := collectStatus(ctx, sess)
 			w := cmd.OutOrStdout()
 			fmt.Fprintf(w, "sandbox:   %s  (%s, transport %s)\n", cfg.SandboxID, sess.tree.Root, sess.transport)
-			printHeartbeat(ctx, w, sess)
-			fmt.Fprintf(w, "queue:     %d awaiting service, %d responses unread\n",
-				listCount(ctx, sess, sess.tree.Outbox().New()),
-				listCount(ctx, sess, sess.tree.Inbox().New()))
-			printRuntimes(ctx, w, sess)
-			printCapabilities(ctx, w, sess)
+			if s.HeartbeatSeq == "" {
+				fmt.Fprintln(w, "heartbeat: none yet — run `iceclimber serve`")
+			} else {
+				age := ""
+				if s.HeartbeatAge != "" {
+					age = fmt.Sprintf("  (~%s ago, controller clock)", s.HeartbeatAge)
+				}
+				fmt.Fprintf(w, "heartbeat: seq %s%s\n", s.HeartbeatSeq, age)
+			}
+			fmt.Fprintf(w, "queue:     %d awaiting service, %d responses unread\n", s.QueueOut, s.QueueIn)
+			if len(s.Runtimes) == 0 {
+				fmt.Fprintln(w, "runtimes:  none installed")
+			} else {
+				fmt.Fprintf(w, "runtimes:  %s\n", strings.Join(s.Runtimes, ", "))
+			}
+			if s.Caps != "" {
+				fmt.Fprintf(w, "agent:     %s\n", s.Caps)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	return cmd
+}
+
+// statusSnapshot is the sandbox status gathered from the protocol tree. Shared by
+// the `status` command and the console's live status panel.
+type statusSnapshot struct {
+	HeartbeatSeq string
+	HeartbeatAge string // e.g. "3s" ("" if no parseable timestamp)
+	QueueOut     int    // requests awaiting service
+	QueueIn      int    // responses unread
+	Runtimes     []string
+	Caps         string // "has_exec=true, has_file_write=true" or "" if not reported
+}
+
+// collectStatus reads liveness, queue depth, installed runtimes (all languages),
+// and the agent's capabilities from the sandbox.
+func collectStatus(ctx context.Context, sess *session) statusSnapshot {
+	var s statusSnapshot
+	if data, err := sess.fs.ReadFile(ctx, sess.tree.Heartbeat()); err == nil {
+		fields := strings.Fields(strings.TrimSpace(string(data)))
+		if len(fields) >= 1 {
+			s.HeartbeatSeq = fields[0]
+		}
+		if len(fields) >= 2 {
+			if t, perr := time.Parse(time.RFC3339, fields[1]); perr == nil {
+				s.HeartbeatAge = time.Since(t).Round(time.Second).String()
+			}
+		}
+	}
+	s.QueueOut = listCount(ctx, sess, sess.tree.Outbox().New())
+	s.QueueIn = listCount(ctx, sess, sess.tree.Inbox().New())
+	for _, lang := range []string{"python", "node", "java"} {
+		names, err := sess.fs.List(ctx, path.Join(sess.tree.Root, "runtimes", lang))
+		if err != nil {
+			continue
+		}
+		for _, n := range names {
+			s.Runtimes = append(s.Runtimes, lang+" "+n)
+		}
+	}
+	if data, err := sess.fs.ReadFile(ctx, sess.tree.Capabilities()); err == nil {
+		var c struct {
+			HasExec      bool `json:"has_exec"`
+			HasFileWrite bool `json:"has_file_write"`
+		}
+		if json.Unmarshal(data, &c) == nil {
+			s.Caps = fmt.Sprintf("has_exec=%v, has_file_write=%v", c.HasExec, c.HasFileWrite)
+		}
+	}
+	return s
 }
 
 func listCount(ctx context.Context, sess *session, dir string) int {
@@ -53,52 +114,4 @@ func listCount(ctx context.Context, sess *session, dir string) int {
 		return 0
 	}
 	return len(names)
-}
-
-// printHeartbeat shows Popo's liveness signal. A single status can't watch the
-// seq advance, so it reports the current seq + a rough age (controller clock —
-// the agent should judge liveness on seq advancement, not this timestamp).
-func printHeartbeat(ctx context.Context, w io.Writer, sess *session) {
-	data, err := sess.fs.ReadFile(ctx, sess.tree.Heartbeat())
-	if err != nil {
-		fmt.Fprintln(w, "heartbeat: none yet — run `iceclimber serve`")
-		return
-	}
-	fields := strings.Fields(strings.TrimSpace(string(data)))
-	seq, ts := "?", ""
-	if len(fields) >= 1 {
-		seq = fields[0]
-	}
-	if len(fields) >= 2 {
-		ts = fields[1]
-	}
-	age := ""
-	if t, perr := time.Parse(time.RFC3339, ts); perr == nil {
-		age = fmt.Sprintf("  (~%s ago, controller clock)", time.Since(t).Round(time.Second))
-	}
-	fmt.Fprintf(w, "heartbeat: seq %s at %s%s\n", seq, ts, age)
-}
-
-func printRuntimes(ctx context.Context, w io.Writer, sess *session) {
-	names, err := sess.fs.List(ctx, path.Join(sess.tree.Root, "runtimes", "python"))
-	if err != nil || len(names) == 0 {
-		fmt.Fprintln(w, "python:    none installed")
-		return
-	}
-	fmt.Fprintf(w, "python:    %s\n", strings.Join(names, ", "))
-}
-
-func printCapabilities(ctx context.Context, w io.Writer, sess *session) {
-	data, err := sess.fs.ReadFile(ctx, sess.tree.Capabilities())
-	if err != nil {
-		return // absent is normal — Nana hasn't reported, and Popo doesn't require it
-	}
-	var c struct {
-		HasExec      bool `json:"has_exec"`
-		HasFileWrite bool `json:"has_file_write"`
-	}
-	if json.Unmarshal(data, &c) != nil {
-		return
-	}
-	fmt.Fprintf(w, "agent:     capabilities reported (has_exec=%v, has_file_write=%v)\n", c.HasExec, c.HasFileWrite)
 }

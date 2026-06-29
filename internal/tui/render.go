@@ -114,7 +114,7 @@ func footer(w int, hasOps bool, running string) string {
 	}
 	keys := "q quit"
 	if hasOps {
-		keys = "i install   b bootstrap   ·   q quit"
+		keys = "i install   b bootstrap   s status   e egress   ·   q quit"
 	}
 	return dimStyle.Width(w).Render(" [POPO] Popo's activity   [NANA] the sandbox's voice   ·   " + keys)
 }
@@ -197,6 +197,80 @@ func formView(w, h int, title, body string) string {
 		Padding(1, 2).
 		MaxWidth(w - 4).
 		Render(content)
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box)
+}
+
+// statusView renders the live sandbox status panel (read-only; `r` refreshes).
+func statusView(w, h int, sandboxID string, s *StatusSnapshot) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s · sandbox %s\n\n", titleStyle.Render("Status"), sandboxID)
+	if s == nil {
+		b.WriteString(dimStyle.Render("polling…"))
+	} else {
+		fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("heartbeat"), s.Heartbeat)
+		fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("queue    "), s.Queue)
+		fmt.Fprintf(&b, "  %s ", dimStyle.Render("runtimes "))
+		if len(s.Runtimes) == 0 {
+			b.WriteString(dimStyle.Render("none installed"))
+		} else {
+			b.WriteString(strings.Join(s.Runtimes, "\n             "))
+		}
+		caps := s.Caps
+		if caps == "" {
+			caps = dimStyle.Render("(not reported)")
+		}
+		fmt.Fprintf(&b, "\n  %s %s\n", dimStyle.Render("agent    "), caps)
+	}
+	b.WriteString("\n" + dimStyle.Render("[r] refresh   [esc] close"))
+	return panelBox(cPopo, w, h, "Status", b.String())
+}
+
+// egressView renders the operator's egress rules + pending held requests, with the
+// cursor on the selected row and the actions that apply to it.
+func egressView(w, h int, e EgressSnapshot, cursor int) string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Egress") + dimStyle.Render("  (controller-side rules + held requests)") + "\n\n")
+	row := 0
+	line := func(sel bool, s string, st lipgloss.Style) {
+		marker := "  "
+		if sel {
+			marker = titleStyle.Render("▸ ")
+			st = st.Bold(true)
+		}
+		b.WriteString(marker + st.Render(s) + "\n")
+	}
+	b.WriteString(dimStyle.Render(" pending (held for approval)") + "\n")
+	if len(e.Pending) == 0 {
+		b.WriteString(dimStyle.Render("   none") + "\n")
+	}
+	for _, p := range e.Pending {
+		line(row == cursor, p.Host+"  "+truncate(p.URL, 48), warnStyle)
+		row++
+	}
+	b.WriteString("\n" + dimStyle.Render(" rules") + "\n")
+	if len(e.Rules) == 0 {
+		b.WriteString(dimStyle.Render("   none") + "\n")
+	}
+	for _, r := range e.Rules {
+		st := okStyle
+		if r.Kind == "deny" {
+			st = errStyle
+		}
+		line(row == cursor, fmt.Sprintf("%-5s %s", r.Kind, r.Pattern), st)
+		row++
+	}
+	b.WriteString("\n" + dimStyle.Render("↑/↓ select   [a] approve · [d] deny (pending)   [f] forget (rule)   [r] refresh   [esc] close"))
+	return panelBox(cPopo, w, h, "Egress", b.String())
+}
+
+// panelBox frames a centred panel over a blank screen (shared by status/egress).
+func panelBox(border lipgloss.Color, w, h int, _ /*title*/, body string) string {
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(border).
+		Padding(1, 2).
+		MaxWidth(w - 4).
+		Render(body)
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box)
 }
 

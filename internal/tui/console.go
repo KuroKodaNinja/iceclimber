@@ -67,7 +67,40 @@ type OpResultMsg struct{}
 type OpRunner interface {
 	RunInstall(InstallRequest) tea.Cmd
 	RunBootstrap() tea.Cmd
+	// PollStatus returns a cmd that reads sandbox status (SSH) and emits a StatusMsg.
+	PollStatus() tea.Cmd
+	// Egress reads the operator's persisted rules + pending held requests (local).
+	Egress() EgressSnapshot
+	// ApprovePending / DenyPending resolve a held request (add a host allow/deny rule
+	// and drop it from pending); ForgetRule removes a persisted rule. All local.
+	ApprovePending(id string) error
+	DenyPending(id string) error
+	ForgetRule(kind, pattern string) error
 }
+
+// StatusSnapshot is the sandbox status shown in the console's status panel.
+type StatusSnapshot struct {
+	Sandbox   string
+	Heartbeat string // "seq 42 · ~3s ago" or "none yet"
+	Queue     string // "1 awaiting · 0 unread"
+	Runtimes  []string
+	Caps      string // "" if the agent hasn't reported
+}
+
+// StatusMsg delivers a fresh StatusSnapshot to the console.
+type StatusMsg StatusSnapshot
+
+// EgressRule is one persisted allow/deny rule; EgressPending is one held request.
+type EgressRule struct{ Kind, Pattern string } // Kind: "allow" | "deny"
+type EgressPending struct{ ID, Host, URL string }
+
+// EgressSnapshot is the operator's egress state (pending first, then rules).
+type EgressSnapshot struct {
+	Pending []EgressPending
+	Rules   []EgressRule
+}
+
+func (e EgressSnapshot) rows() int { return len(e.Pending) + len(e.Rules) }
 
 // Console is the embed-serve operator console: it renders the live activity feed
 // ([POPO]) and the agent stream ([NANA]), surfaces approval modals fed from the
@@ -89,6 +122,10 @@ type Console struct {
 	form      *huh.Form
 	formKind  string // "install" | "bootstrap" while a form is open
 	running   string // label of an in-flight operator action ("" = idle)
+	panel     string // "" | "status" | "egress" — an open read/manage panel
+	status    *StatusSnapshot
+	egress    EgressSnapshot
+	cursor    int // selected row in the egress panel
 	width     int
 	height    int
 
@@ -139,6 +176,9 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if c.form != nil {
 			return c.updateForm(msg)
 		}
+		if c.panel != "" {
+			return c.updatePanel(msg)
+		}
 		if c.running != "" {
 			return c, nil // ignore input while an operator action is in flight
 		}
@@ -153,7 +193,21 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if c.ops != nil {
 				return c.openForm("bootstrap")
 			}
+		case "s":
+			if c.ops != nil {
+				c.panel = "status"
+				return c, c.ops.PollStatus()
+			}
+		case "e":
+			if c.ops != nil {
+				c.panel, c.cursor, c.egress = "egress", 0, c.ops.Egress()
+				return c, nil
+			}
 		}
+	case StatusMsg:
+		s := StatusSnapshot(msg)
+		c.status = &s
+		return c, nil
 	case activity.Event:
 		c.applyEvent(msg)
 		return c, c.waitEvent()
@@ -179,9 +233,89 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return c, nil
 }
 
+// updatePanel handles keys while a read/manage panel (status / egress) is open.
+func (c Console) updatePanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "esc":
+		c.panel, c.status = "", nil
+		return c, nil
+	case "ctrl+c":
+		return c, tea.Quit
+	}
+	switch c.panel {
+	case "status":
+		if msg.String() == "r" {
+			return c, c.ops.PollStatus() // manual refresh
+		}
+	case "egress":
+		switch msg.String() {
+		case "up", "k":
+			if c.cursor > 0 {
+				c.cursor--
+			}
+		case "down", "j":
+			if c.cursor < c.egress.rows()-1 {
+				c.cursor++
+			}
+		case "a", "d":
+			if p, ok := c.selectedPending(); ok {
+				if msg.String() == "a" {
+					_ = c.ops.ApprovePending(p.ID)
+				} else {
+					_ = c.ops.DenyPending(p.ID)
+				}
+				c.egress = c.ops.Egress()
+				c.clampCursor()
+			}
+		case "f":
+			if r, ok := c.selectedRule(); ok {
+				_ = c.ops.ForgetRule(r.Kind, r.Pattern)
+				c.egress = c.ops.Egress()
+				c.clampCursor()
+			}
+		case "r":
+			c.egress = c.ops.Egress()
+			c.clampCursor()
+		}
+	}
+	return c, nil
+}
+
+// selectedPending / selectedRule resolve the cursor against the combined list
+// (pending entries first, then rules).
+func (c Console) selectedPending() (EgressPending, bool) {
+	if c.cursor >= 0 && c.cursor < len(c.egress.Pending) {
+		return c.egress.Pending[c.cursor], true
+	}
+	return EgressPending{}, false
+}
+
+func (c Console) selectedRule() (EgressRule, bool) {
+	i := c.cursor - len(c.egress.Pending)
+	if i >= 0 && i < len(c.egress.Rules) {
+		return c.egress.Rules[i], true
+	}
+	return EgressRule{}, false
+}
+
+func (c *Console) clampCursor() {
+	if n := c.egress.rows(); c.cursor >= n {
+		c.cursor = n - 1
+	}
+	if c.cursor < 0 {
+		c.cursor = 0
+	}
+}
+
 func (c Console) View() string {
 	if c.modal != nil {
 		return modalView(c.width, c.height, c.modal)
+	}
+	switch c.panel {
+	case "status":
+		return statusView(c.width, c.height, c.sandboxID, c.status)
+	case "egress":
+		return egressView(c.width, c.height, c.egress, c.cursor)
 	}
 	if c.form != nil {
 		return formView(c.width, c.height, c.formTitle(), c.form.View())

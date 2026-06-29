@@ -63,6 +63,20 @@ func (s *Store) AddDeny(pattern string) error {
 	return s.saveRules(r)
 }
 
+// RemoveAllow forgets an allow rule (no-op if absent).
+func (s *Store) RemoveAllow(pattern string) error {
+	r := s.loadRules()
+	r.Allow = removeStr(r.Allow, pattern)
+	return s.saveRules(r)
+}
+
+// RemoveDeny forgets a deny rule (no-op if absent).
+func (s *Store) RemoveDeny(pattern string) error {
+	r := s.loadRules()
+	r.Deny = removeStr(r.Deny, pattern)
+	return s.saveRules(r)
+}
+
 // Pending returns the held entries.
 func (s *Store) Pending() []PendingEntry {
 	var p []PendingEntry
@@ -115,6 +129,16 @@ func writeJSON(path string, v any) error {
 		return err
 	}
 	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+func removeStr(xs []string, x string) []string {
+	out := xs[:0:0]
+	for _, v := range xs {
+		if v != x {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func appendUnique(xs []string, x string) []string {

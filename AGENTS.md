@@ -97,7 +97,9 @@ streams live `[POPO]`/`[NANA]` activity, surfaces each approval as an inline mod
 and lets you manage the sandbox from within — `i` opens an install form (pick
 **Python**, **JavaScript**, or **Java** and the packages, via huh; the runtime is installed for
 you, the package manager pip/npm and tier are derived, version optional), `b`
-re-provisions (bootstrap), `q` quits. Each operator action is **verified in the
+re-provisions (bootstrap), `s` shows a live status panel (heartbeat/queue/runtimes/
+capabilities), `e` manages egress rules (approve/deny/forget), `q` quits. Each
+operator action is **verified in the
 sandbox** and
 echoed into `[NANA]` (the sandbox's voice: `python -V`/`node --version`, a package
 presence check, the bootstrap ping/pong) — so `[POPO]` shows what the controller did
