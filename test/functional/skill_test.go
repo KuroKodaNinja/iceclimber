@@ -36,7 +36,8 @@ func TestSkillAndStatus(t *testing.T) {
 	runIceclimber(t, "serve", "--once", "--config", cfg, "--transport", "sftp")
 
 	out := string(runIceclimber(t, "status", "--config", cfg, "--transport", "sftp"))
-	for _, want := range []string{"heartbeat: seq", "python:    3.12", "has_exec=true"} {
+	// status lists installed runtimes for all languages under one "runtimes:" line.
+	for _, want := range []string{"heartbeat: seq", "runtimes:  python 3.12", "has_exec=true"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status missing %q:\n%s", want, out)
 		}
