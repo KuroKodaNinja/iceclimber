@@ -5,7 +5,15 @@ package skill
 
 import _ "embed"
 
-// NanaMD is the embedded NANA.md content.
+// NanaMD is the embedded NANA.md content (the minimal, system-prompt-sized
+// contract — defaults the agent to the `popo` client).
 //
 //go:embed NANA.md
 var NanaMD string
+
+// ProtocolMD is the raw file-protocol reference, dropped alongside NANA.md. It is
+// the no-exec fallback (and the implementer's reference) — NOT injected into the
+// system prompt; the agent reads it only when it can't execute `popo`.
+//
+//go:embed PROTOCOL.md
+var ProtocolMD string

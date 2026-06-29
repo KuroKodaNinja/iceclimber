@@ -56,11 +56,14 @@ through), `<root>/runtimes/`, and writes the agent's instruction sheet to
 
 ## 3. Wire your agent to NANA.md  ← the crucial step
 
-The agent learns to use Popo from **one file**: `<root>/skill/NANA.md`. It documents
-the request/response format and every action (install runtimes, install packages,
-fetch web data). **Add it to your agent's instructions so it reads it first** —
-otherwise the agent has no idea Popo exists and will just hit "no internet, no
-Python" walls.
+The agent learns to use Popo from **one short file**: `<root>/skill/NANA.md`. It tells
+the agent to talk to Popo with the **`popo` client** (`bootstrap` relays `popo` into
+`<root>/popo`): `popo help` lists the actions (install runtimes/packages, fetch web
+data) and `popo <verb> …` does the rest — the agent never hand-builds the protocol.
+**Add NANA.md to your agent's instructions so it reads it first** — otherwise the
+agent has no idea Popo exists and will just hit "no internet, no Python" walls. (A
+harness that can't execute `popo` falls back to the raw file protocol in
+`<root>/skill/PROTOCOL.md` — same bridge, file I/O only.)
 
 For a Claude Code agent in the sandbox, put a line like this in its system prompt or
 `CLAUDE.md`:

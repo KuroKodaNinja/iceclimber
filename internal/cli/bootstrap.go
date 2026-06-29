@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/popobin"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 	"github.com/KuroKodaNinja/iceclimber/internal/skill"
@@ -67,6 +68,12 @@ func provision(ctx context.Context, sess *session) error {
 	if err := sess.fs.WriteFile(ctx, sess.tree.SkillFile(), []byte(skill.NanaMD)); err != nil {
 		return fmt.Errorf("write NANA.md: %w", err)
 	}
+	if err := sess.fs.WriteFile(ctx, path.Join(sess.tree.Skill(), "PROTOCOL.md"), []byte(skill.ProtocolMD)); err != nil {
+		return fmt.Errorf("write PROTOCOL.md: %w", err)
+	}
+	if err := dropPopo(ctx, sess); err != nil {
+		return err
+	}
 	disp := protocol.NewDispatcher(sess.fs, sess.tree, buildRegistry(sess))
 	if err := disp.WriteHeartbeat(ctx); err != nil {
 		return err
@@ -75,6 +82,22 @@ func provision(ctx context.Context, sess *session) error {
 		return fmt.Errorf("smoke test failed: %w", err)
 	}
 	return nil
+}
+
+// dropPopo relays the in-sandbox `popo` client binary to $ROOT/popo for the
+// sandbox's platform. Best-effort: if no client is embedded for this platform (e.g.
+// built without `make`), the agent simply falls back to the raw file protocol
+// (PROTOCOL.md), so a missing client is not fatal.
+func dropPopo(ctx context.Context, sess *session) error {
+	bin, err := popobin.Binary(sess.fp.OS, sess.fp.Arch)
+	if err != nil {
+		return nil // no client for this platform; file-protocol fallback covers it
+	}
+	p := path.Join(sess.tree.Root, "popo")
+	if err := sess.fs.WriteFile(ctx, p, bin); err != nil {
+		return fmt.Errorf("write popo client: %w", err)
+	}
+	return sess.fs.Chmod(ctx, p, 0o755)
 }
 
 // writePipConf records the mirror in state/pip.conf so the agent's ad-hoc pip

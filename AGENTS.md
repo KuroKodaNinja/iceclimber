@@ -183,6 +183,19 @@ that file** (`agentLogPath`) — so `[NANA]` shows the agent with **no flag** (d
 `--agent-log` stays an explicit override. The demo dogfoods the whole path
 (`demo-agent.sh` → `$ROOT/nana -p`, `make demo-logs/tui/console` pass no flag).
 
+The agent talks to Popo through the **`popo` client** (`cmd/popo`, decision #61), not
+by hand-crafting the maildir protocol: `popo <verb> …` builds/delivers/polls/parses
+and prints a clean result. It reuses the leaf **`internal/wire`** package (envelope,
+`Tree`, `NewID` — no FS deps; `protocol` re-exports it via aliases) so client and
+dispatcher share one wire format. It's cross-compiled `CGO_ENABLED=0` (one static
+binary per GOARCH, musl+glibc), `go:embed`'d in `internal/popobin` (built by `make
+popo-bins`; the functional `TestMain` builds it too), and **bootstrap relays it to
+`$ROOT/popo`**. So **NANA.md is minimal** (system-prompt-sized: "run `popo help`,
+then `popo <verb>`") — the raw protocol lives in **PROTOCOL.md** (also dropped at
+bootstrap, not in the system prompt) as the **file-I/O-only fallback** for harnesses
+that can't exec. Adding a verb to `popo`: extend the `verbs` table + `buildParams`
+(and `printResult` if the result shape is new).
+
 - **Phase 1 — done.** CLI skeleton + `probe` (fingerprint OS/arch/libc/root
   viability), verified end-to-end against Alpine.
 - **Phase 2 — done.** Maildir protocol + dual `RemoteFS` (`internal/remotefs`:

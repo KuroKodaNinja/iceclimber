@@ -32,6 +32,19 @@ func buildBinary() (string, func(), error) {
 	if err != nil {
 		return "", nil, err
 	}
+	// Cross-compile the in-sandbox popo client so iceclimber embeds it (matches what
+	// `make build` does) — otherwise bootstrap can't drop popo on the VM.
+	for _, ga := range []string{"arm64", "amd64"} {
+		pb := exec.Command("go", "build", "-trimpath", "-ldflags=-s -w",
+			"-o", filepath.Join("internal", "popobin", "bin", "popo-linux-"+ga), "./cmd/popo")
+		pb.Dir = repoRoot()
+		pb.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+ga)
+		if out, err := pb.CombinedOutput(); err != nil {
+			os.RemoveAll(dir)
+			return "", nil, fmt.Errorf("build popo (%s): %v\n%s", ga, err, out)
+		}
+	}
+
 	bin := filepath.Join(dir, "iceclimber")
 	cmd := exec.Command("go", "build", "-o", bin, ".")
 	cmd.Dir = repoRoot()

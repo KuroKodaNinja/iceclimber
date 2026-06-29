@@ -98,7 +98,7 @@ func (i *Installer) Install(ctx context.Context, d Descriptor, token string) (Re
 
 	if token != "" {
 		envFile := path.Join(dir, "env.sh")
-		if err := i.writeSecret(ctx, envFile, renderEnv(d, token, dir)); err != nil {
+		if err := i.writeSecret(ctx, envFile, renderEnv(d, token, dir, i.cfg.Root)); err != nil {
 			return Result{}, fmt.Errorf("write agent env: %w", err)
 		}
 		res.EnvFile = envFile
@@ -239,9 +239,10 @@ func verifyIntegrity(file, integrity string) error {
 }
 
 // renderEnv builds the agent's env file: the subscription token, the API-key var
-// blanked (never fall back to metered billing), the agent's extra env, and the
-// agent's dir on PATH so its binary is runnable by name.
-func renderEnv(d Descriptor, token, dir string) string {
+// blanked (never fall back to metered billing), the agent's extra env, the agent's
+// dir AND $ROOT on PATH (so both the agent binary and the `popo` client are runnable
+// by name), and ICECLIMBER_ROOT so popo finds the tree.
+func renderEnv(d Descriptor, token, dir, root string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# iceclimber: %s agent environment (operator-written secret; chmod 600, do not commit).\n", d.DisplayName)
 	fmt.Fprintf(&b, "export %s=%s\n", d.TokenEnv, remote.ShellQuote(token))
@@ -251,7 +252,8 @@ func renderEnv(d Descriptor, token, dir string) string {
 	for _, e := range d.Env {
 		fmt.Fprintf(&b, "export %s=%s\n", e.Key, remote.ShellQuote(e.Value))
 	}
-	fmt.Fprintf(&b, "export PATH=%s:\"$PATH\"\n", remote.ShellQuote(dir))
+	fmt.Fprintf(&b, "export ICECLIMBER_ROOT=%s\n", remote.ShellQuote(root))
+	fmt.Fprintf(&b, "export PATH=%s:%s:\"$PATH\"\n", remote.ShellQuote(dir), remote.ShellQuote(root))
 	return b.String()
 }
 

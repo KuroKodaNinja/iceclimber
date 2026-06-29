@@ -60,7 +60,7 @@ func TestPlatformPackage(t *testing.T) {
 }
 
 func TestRenderEnv(t *testing.T) {
-	got := renderEnv(Claude, "tok-secret-123", "/opt/iceclimber/agent/claude")
+	got := renderEnv(Claude, "tok-secret-123", "/opt/iceclimber/agent/claude", "/opt/iceclimber")
 
 	if !strings.Contains(got, "export CLAUDE_CODE_OAUTH_TOKEN='tok-secret-123'") {
 		t.Errorf("token not exported/quoted:\n%s", got)
@@ -72,8 +72,12 @@ func TestRenderEnv(t *testing.T) {
 	if !strings.Contains(got, "export USE_BUILTIN_RIPGREP='0'") {
 		t.Errorf("ripgrep workaround missing:\n%s", got)
 	}
-	if !strings.Contains(got, "export PATH='/opt/iceclimber/agent/claude':\"$PATH\"") {
-		t.Errorf("agent dir not on PATH:\n%s", got)
+	if !strings.Contains(got, "export ICECLIMBER_ROOT='/opt/iceclimber'") {
+		t.Errorf("ICECLIMBER_ROOT not exported:\n%s", got)
+	}
+	// Both the agent dir and $ROOT (where popo lives) on PATH.
+	if !strings.Contains(got, "export PATH='/opt/iceclimber/agent/claude':'/opt/iceclimber':\"$PATH\"") {
+		t.Errorf("agent dir + $ROOT not on PATH:\n%s", got)
 	}
 }
 
@@ -129,7 +133,7 @@ func TestRenderDispatcher(t *testing.T) {
 
 // A token with shell metacharacters must be quoted so it can't break the env file.
 func TestRenderEnv_QuotesNastyToken(t *testing.T) {
-	got := renderEnv(Claude, "a'b;rm -rf /", "/bin")
+	got := renderEnv(Claude, "a'b;rm -rf /", "/bin", "/r")
 	if strings.Contains(got, "rm -rf /\n") && !strings.Contains(got, `'a'\''b;rm -rf /'`) {
 		t.Errorf("token not safely quoted:\n%s", got)
 	}

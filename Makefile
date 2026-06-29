@@ -12,12 +12,21 @@ DEMO_TPL    := test/lima/demo.yaml
 DEMO_CFG    := .demo/config.yaml
 BIN         := iceclimber
 
-.PHONY: build fmt vet test test-functional tui-functional scenario e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
+.PHONY: build popo-bins fmt vet test test-functional tui-functional scenario e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
 	demo-up demo-down demo-status demo-firewall demo-firewall-down demo-shell \
 	demo demo-live demo-console demo-config demo-bootstrap demo-agent demo-verify demo-reset demo-logs demo-tui clean
 
-build:
+build: popo-bins
 	go build -o $(BIN) .
+
+# Cross-compile the in-sandbox `popo` client for the platforms we relay into
+# sandboxes. CGO_ENABLED=0 → a static binary with no libc linkage, so one build per
+# GOARCH runs on musl (Alpine) and glibc alike. iceclimber embeds these (internal/
+# popobin) and bootstrap relays the matching one in.
+popo-bins:
+	@mkdir -p internal/popobin/bin
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o internal/popobin/bin/popo-linux-arm64 ./cmd/popo
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o internal/popobin/bin/popo-linux-amd64 ./cmd/popo
 
 fmt:
 	gofmt -w .

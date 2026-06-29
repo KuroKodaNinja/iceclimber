@@ -14,3 +14,4 @@
 
 # Local symlink to the global washu guidance kit (machine-specific)
 /.agents
+/internal/popobin/bin/popo-*

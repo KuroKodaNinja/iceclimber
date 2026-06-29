@@ -4,18 +4,13 @@ packages**. You cannot `pip install`, `npm install`, `curl`, or download anythin
 directly — those will fail.
 
 What you *do* have is **Popo**, a controller running outside the sandbox that will
-provision things for you on request. You talk to Popo by reading and writing files
-in a maildir-style protocol tree. The full contract — how to format a request,
-where to drop it, how to read the response, how to check Popo is alive, and every
-available action — is documented here:
-
-    {{ROOT}}/skill/NANA.md
-
-**Read that file first** and follow it exactly. It is the source of truth for the
-request/response format and the actions: `ping`, `web.fetch`, `python.install`,
-`pip.install`, `node.install`, `npm.install`, `java.install`, `maven.install`.
-(The operator may approve requests interactively, so a response can take a few
-seconds — keep polling.)
+provision things for you on request. You talk to Popo with the **`popo`** client
+(it's on your `PATH`). Run **`popo help`** to see the verbs and their usage —
+`popo python.install 3.12`, `popo pip.install --python 3.12 <pkg>`, `popo web.fetch
+<url>`, and the Node/Java equivalents. `popo <verb>` blocks until Popo answers and
+prints the result; run installed runtimes by the absolute path it prints. (The
+operator may approve a request interactively, so a command can take a few seconds;
+if `popo` exits 2 it's asking for approval — wait and retry.)
 
 ## Your task
 
