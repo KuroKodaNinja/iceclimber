@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 	"github.com/oklog/ulid/v2"
@@ -28,6 +29,13 @@ func (t Tree) Heartbeat() string { return path.Join(t.protocolDir(), "heartbeat"
 // Blobs is the content-addressed store; State holds convenience copies.
 func (t Tree) Blobs() string { return path.Join(t.protocolDir(), "blobs") }
 func (t Tree) State() string { return path.Join(t.Root, "state") }
+
+// BlobRef is the $ROOT-relative path of a blob, as published in a response's
+// body_blob field — the agent reads it at $ROOT/<BlobRef>. Derived from Blobs() so
+// the published reference can never drift from where blobs are actually written.
+func (t Tree) BlobRef(name string) string {
+	return strings.TrimPrefix(path.Join(t.Blobs(), name), t.Root+"/")
+}
 
 // Skill holds the dropped NANA.md skill doc; Capabilities is Nana's self-report.
 func (t Tree) Skill() string        { return path.Join(t.Root, "skill") }

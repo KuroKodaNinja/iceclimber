@@ -17,6 +17,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 	"github.com/oklog/ulid/v2"
@@ -73,7 +74,8 @@ func (f *Fetcher) Fetch(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 
-	blobsDir := path.Join(f.root, "blobs")
+	tree := protocol.Tree{Root: f.root}
+	blobsDir := tree.Blobs() // canonical $ROOT/protocol/blobs (the path NANA.md documents)
 	if err := f.fs.Mkdir(ctx, blobsDir); err != nil {
 		return Result{}, fmt.Errorf("ensure blobs dir: %w", err)
 	}
@@ -106,7 +108,8 @@ func (f *Fetcher) Fetch(ctx context.Context, req Request) (Result, error) {
 		if err := f.fs.Rename(ctx, bodyFile, path.Join(blobsDir, blobName)); err != nil {
 			return Result{}, fmt.Errorf("store blob: %w", err)
 		}
-		out.BodyBlob = "blobs/" + blobName
+		out.BodyBlob = tree.BlobRef(blobName) // $ROOT-relative: protocol/blobs/<sha>
+
 	} else {
 		out.Encoding, out.BodyInline = enc, inline
 	}

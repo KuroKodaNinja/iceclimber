@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 )
 
@@ -62,14 +63,15 @@ func controllerFetch(ctx context.Context, fs remotefs.FS, root, method string, r
 		BodySHA256: sha,
 	}
 	if blobName != "" {
-		blobsDir := path.Join(root, "blobs")
+		tree := protocol.Tree{Root: root}
+		blobsDir := tree.Blobs() // canonical $ROOT/protocol/blobs (the path NANA.md documents)
 		if err := fs.Mkdir(ctx, blobsDir); err != nil {
 			return Result{}, fmt.Errorf("ensure blobs dir: %w", err)
 		}
 		if err := fs.WriteFile(ctx, path.Join(blobsDir, blobName), body); err != nil {
 			return Result{}, fmt.Errorf("push blob to sandbox: %w", err)
 		}
-		out.BodyBlob = "blobs/" + blobName
+		out.BodyBlob = tree.BlobRef(blobName) // $ROOT-relative: protocol/blobs/<sha>
 	} else {
 		out.Encoding, out.BodyInline = enc, inline
 	}

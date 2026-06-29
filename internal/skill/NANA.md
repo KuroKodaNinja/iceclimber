@@ -198,7 +198,7 @@ result: {
   "venue": "sandbox-exec",        // or "controller"
   "encoding": "utf8",             // or "base64" for non-text inline bodies
   "body_inline": "...",           //  small bodies, inline
-  "body_blob": "blobs/<sha256>"   //  large bodies — read $ROOT/protocol/blobs/<sha256>
+  "body_blob": "protocol/blobs/<sha256>"  //  large bodies — a $ROOT-relative path; read it at $ROOT/<body_blob>
 }
 ```
 A fetch that must go out through Popo's own network may come back
