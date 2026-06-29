@@ -13,6 +13,23 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 )
 
+// startServe runs `iceclimber serve --yes` in the background under a PRIVATE HOME, so
+// its controller-side state (activity.jsonl, agent.log) lands in a temp dir instead of
+// polluting the operator's real ~/.iceclimber. Returns the cmd (killed at test end) and
+// the agent.log path under that HOME. The runtime cache is os.TempDir-based, so a temp
+// HOME doesn't force re-downloads.
+func startServe(t *testing.T, cfg string) (*exec.Cmd, string) {
+	t.Helper()
+	home := t.TempDir()
+	cmd := exec.Command(iceclimberBin, "serve", "--yes", "--config", cfg, "--transport", "sftp")
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start serve: %v", err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
+	return cmd, filepath.Join(home, ".iceclimber", sandboxName, "agent.log")
+}
+
 // TestAgentInstallClaude installs the Claude Code agent into the sandbox via the
 // official command: the controller downloads the agent's package for the SANDBOX's
 // platform and relays the native binary in (no on-target install — the air-gap
@@ -94,15 +111,9 @@ func TestAgentLogBridge(t *testing.T) {
 	streamEvent := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"popo python.install 3.12"}}]}}`
 	limaSh(t, "mkdir -p "+root+"/agent/claude && { printf 'nana: hello popo\\n'; printf '%s\\n' "+remoteQuote(streamEvent)+"; } > "+root+"/agent/claude/session.log")
 
-	// agentLogPath default is ~/.iceclimber/<sandbox_id>/agent.log.
-	agentLog := filepath.Join(os.Getenv("HOME"), ".iceclimber", sandboxName, "agent.log")
-	_ = os.Remove(agentLog)
-
-	serve := exec.Command(iceclimberBin, "serve", "--yes", "--config", cfg, "--transport", "sftp")
-	if err := serve.Start(); err != nil {
-		t.Fatalf("start serve: %v", err)
-	}
-	defer func() { _ = serve.Process.Kill(); _, _ = serve.Process.Wait() }()
+	// Run serve under a private HOME so its controller-side agent.log lands in a temp
+	// dir, not the operator's real ~/.iceclimber.
+	_, agentLog := startServe(t, cfg)
 
 	// The bridge polls every 1.5s; give it a generous window. Success = the plain
 	// line AND the formatted tool-call line both reached the controller agent.log.
@@ -116,6 +127,43 @@ func TestAgentLogBridge(t *testing.T) {
 	}
 	b, _ := os.ReadFile(agentLog)
 	t.Fatalf("serve did not bridge the sandbox session.log to %s; have: %q", agentLog, b)
+}
+
+// TestServeResetsStaleAgentLog is the regression guard for the "stale [NANA]" bug: a
+// new serving session must start the controller-side agent.log fresh, so it never
+// shows a previous run's (or a leftover test's) agent stream as if it were live.
+func TestServeResetsStaleAgentLog(t *testing.T) {
+	sb := requireSandbox(t)
+	root := "/tmp/iceclimber-reset-" + protocol.NewID()
+	cfg := writeConfigRoot(t, sb, root)
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
+
+	// Seed a stale agent.log under a private HOME, as a prior session would have left.
+	home := t.TempDir()
+	agentLog := filepath.Join(home, ".iceclimber", sandboxName, "agent.log")
+	if err := os.MkdirAll(filepath.Dir(agentLog), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agentLog, []byte("STALE: install Python sent to popo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	serve := exec.Command(iceclimberBin, "serve", "--yes", "--config", cfg, "--transport", "sftp")
+	serve.Env = append(os.Environ(), "HOME="+home)
+	if err := serve.Start(); err != nil {
+		t.Fatalf("start serve: %v", err)
+	}
+	defer func() { _ = serve.Process.Kill(); _, _ = serve.Process.Wait() }()
+
+	// serve resets agent.log at startup; the stale line must disappear quickly.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, _ := os.ReadFile(agentLog); !strings.Contains(string(b), "STALE") {
+			return // reset cleared the prior session's stream — success
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	t.Fatal("serve did not reset the stale agent.log — [NANA] would show a previous session's stream")
 }
 
 // TestAgentInstallRejectsAPIKey proves the command refuses an API-key token.

@@ -10,6 +10,23 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs/remotefstest"
 )
 
+// TestResetAgentLog: a serving session must start the bridged agent log fresh, so a
+// new session never shows a previous run's (or a test's) leftover [NANA] stream.
+func TestResetAgentLog(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sub", "agent.log") // nested dir is created
+	resetAgentLog(p)
+	if b, err := os.ReadFile(p); err != nil || len(b) != 0 {
+		t.Fatalf("reset should create an empty file: %v, %q", err, b)
+	}
+	if err := os.WriteFile(p, []byte("STALE from a previous session\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resetAgentLog(p)
+	if b, _ := os.ReadFile(p); len(b) != 0 {
+		t.Errorf("reset did not truncate stale content: %q", b)
+	}
+}
+
 // TestPollAgentLogs exercises the console's auto-discovery of agent session logs over
 // a real ExecFS (local runner): a single agent yields unprefixed lines, a second poll
 // returns only what was appended, a truncation restarts from the top, and a second

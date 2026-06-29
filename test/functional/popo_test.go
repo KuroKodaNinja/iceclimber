@@ -3,7 +3,6 @@
 package functional
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -31,11 +30,7 @@ func TestPopoClient(t *testing.T) {
 	}
 
 	// Serve in the background so the client has someone to talk to.
-	serve := exec.Command(iceclimberBin, "serve", "--yes", "--config", cfg, "--transport", "sftp")
-	if err := serve.Start(); err != nil {
-		t.Fatalf("start serve: %v", err)
-	}
-	defer func() { _ = serve.Process.Kill(); _, _ = serve.Process.Wait() }()
+	startServe(t, cfg) // background serve under a private HOME (no ~/.iceclimber pollution)
 
 	// `popo ping` — the client builds/delivers/polls/parses; prints a clean line.
 	if out := limaSh(t, root+"/popo ping 2>&1"); !strings.Contains(out, "bridge up") {
@@ -65,11 +60,7 @@ func TestRawFileProtocol(t *testing.T) {
 	cfg := writeConfigRoot(t, sb, root)
 	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
 
-	serve := exec.Command(iceclimberBin, "serve", "--yes", "--config", cfg, "--transport", "sftp")
-	if err := serve.Start(); err != nil {
-		t.Fatalf("start serve: %v", err)
-	}
-	defer func() { _ = serve.Process.Kill(); _, _ = serve.Process.Wait() }()
+	startServe(t, cfg) // background serve under a private HOME (no ~/.iceclimber pollution)
 
 	// Deliver a ping the raw way: write tmp, then rename into new — no popo binary.
 	id := "rawping"

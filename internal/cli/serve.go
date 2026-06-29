@@ -146,8 +146,11 @@ func withDispatcher(ctx context.Context, cfg *config.Config, transport string, d
 
 	// Bridge the sandbox's per-agent session.log(s) into the controller-side agent.log
 	// so `iceclimber logs`/`tui` (which default --agent-log there) show the agent's
-	// stream without a flag, just like the embedded-serve console.
-	go bridgeAgentLog(ctx, sess, agentLogPath(cfg))
+	// stream without a flag, just like the embedded-serve console. Reset it first so
+	// this serve session's [NANA] doesn't show a previous run's leftover stream.
+	agentLog := agentLogPath(cfg)
+	resetAgentLog(agentLog)
+	go bridgeAgentLog(ctx, sess, agentLog)
 
 	return fn(disp)
 }

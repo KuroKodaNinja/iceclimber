@@ -567,9 +567,12 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 
 	// With no explicit --agent-log, default to the controller-side agent.log and
 	// bridge the sandbox's agent stream into it, so [NANA] populates with no flag.
+	// Reset it first (synchronously, before the reader/bridge) so this session shows
+	// only its own agent stream — not a previous run's leftover output.
 	logPath := agentLog
 	if logPath == "" {
 		logPath = agentLogPath(cfg)
+		resetAgentLog(logPath)
 		go bridgeAgentLog(ctx, sess, logPath)
 	}
 
@@ -578,6 +581,19 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 	cancel() // stop serving; any pending approval fails safe via done
 	return err
+}
+
+// resetAgentLog truncates (creates empty) the controller-side agent log at the start
+// of a serving session, so the [NANA] views show only the current session's agent
+// stream — never a previous run's (or a test's) leftover output. Best-effort.
+func resetAgentLog(path string) {
+	if path == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(path, nil, 0o644)
 }
 
 // bridgeAgentLog copies new lines from the sandbox's per-agent session.log files
