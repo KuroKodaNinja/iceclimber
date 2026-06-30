@@ -773,7 +773,16 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Config, act *activity.Logger, events chan tea.Msg) *protocol.Dispatcher {
 	ap := newApprover(&tuiAsker{events: events, done: ctx.Done()}, cfg.SandboxID, act)
 	sess.approver = ap
-	reg := buildRegistry(sess)
+	// Agent-initiated installs report transfer progress to the console (#3), so a
+	// Nana-driven transfer lights up the in-flight serving indicator. Non-blocking; the
+	// transport label is this connection's (the dispatcher is rebuilt on reconnect).
+	pr := func(e progress.Event) {
+		select {
+		case events <- tui.ProgressMsg{Event: e, Transport: sess.transport}:
+		default:
+		}
+	}
+	reg := buildRegistry(sess, pr)
 	disp := protocol.NewDispatcher(sess.fs, sess.tree, reg)
 	disp.SetGate(ap.gate)
 	// Surface heartbeat liveness in the header (serving vs stale), independent of the

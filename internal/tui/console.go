@@ -204,7 +204,8 @@ type Console struct {
 	serving      string
 	servingID    string
 	servingStart time.Time
-	panel        string // "" | "status" | "egress" — an open read/manage panel
+	servingProg  *ProgressMsg // latest transfer sample for the in-flight request (agent #3)
+	panel        string       // "" | "status" | "egress" — an open read/manage panel
 	status       *StatusSnapshot
 	egress       EgressSnapshot
 	cursor       int    // selected row in the egress panel
@@ -335,17 +336,23 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.connState = msg.State
 		return c, c.waitEvent()
 	case ClearServingMsg:
-		c.serving, c.servingID = "", ""
+		c.serving, c.servingID, c.servingProg = "", "", nil
 		return c, c.waitEvent()
 	case HeartbeatMsg:
 		c.lastHeartbeat, c.heartbeatSeq = msg.At, msg.Seq
 		return c, c.waitEvent()
 	case ProgressMsg:
-		if msg.Phase != c.progPhase() {
-			c.progStart = time.Now() // new phase → reset the ETA clock
-		}
 		m := msg
-		c.prog = &m
+		// Route by what's in flight: an operator action owns the footer meter; otherwise
+		// an agent request's transfer drives the serving banner (#3).
+		if c.running != "" {
+			if msg.Phase != c.progPhase() {
+				c.progStart = time.Now() // new phase → reset the ETA clock
+			}
+			c.prog = &m
+		} else if c.serving != "" {
+			c.servingProg = &m
+		}
 		return c, c.waitEvent()
 	case spinner.TickMsg:
 		if c.running == "" && c.serving == "" {
@@ -483,7 +490,7 @@ func (c Console) View() string {
 	}
 	serving := ""
 	if c.serving != "" {
-		serving = servingLine(c.spin.View(), c.serving, time.Since(c.servingStart))
+		serving = c.renderServing()
 	}
 	hb := hbStatus{}
 	if !c.lastHeartbeat.IsZero() {
@@ -619,6 +626,34 @@ func (c Console) renderMeter() string {
 	return b.String()
 }
 
+// renderServing builds the pinned in-flight banner for the request being serviced:
+// the spinner + type + elapsed (servingLine), with a byte bar/%/ETA or (i/n) count
+// appended once a transfer sample for the agent request has arrived (#3).
+func (c Console) renderServing() string {
+	line := servingLine(c.spin.View(), c.serving, time.Since(c.servingStart))
+	p := c.servingProg
+	if p == nil {
+		return line
+	}
+	b := &strings.Builder{}
+	b.WriteString(line)
+	switch {
+	case p.Unit == progress.Bytes && p.Total > 0:
+		ratio := float64(p.Cur) / float64(p.Total)
+		fmt.Fprintf(b, "  %s %d%%  %s/%s", meterBar(ratio, 18), pct(ratio),
+			progress.HumanBytes(p.Cur), progress.HumanBytes(p.Total))
+		if eta := progress.ETA(p.Cur, p.Total, time.Since(c.servingStart)); eta != "" {
+			b.WriteString("  " + eta)
+		}
+	case p.Unit == progress.Items && p.Total > 0:
+		fmt.Fprintf(b, "  (%d/%d)", p.Cur, p.Total)
+	}
+	if p.Transport != "" {
+		b.WriteString(" · via " + p.Transport)
+	}
+	return b.String()
+}
+
 func (c *Console) installForm() *huh.Form {
 	c.st = &formState{lang: "python"}
 	// Pick a runtime; packages are optional. The agent — not the operator — decides
@@ -733,12 +768,12 @@ func (c *Console) applyEvent(e activity.Event) {
 		return
 	case activity.KindServiced:
 		c.served++
-		c.serving, c.servingID = "", "" // completed → clear in-progress
+		c.serving, c.servingID, c.servingProg = "", "", nil // completed → clear in-progress
 	case activity.KindApproved:
 		c.approved++
 	case activity.KindDenied:
 		c.denied++
-		c.serving, c.servingID = "", "" // denied → clear in-progress
+		c.serving, c.servingID, c.servingProg = "", "", nil // denied → clear in-progress
 	}
 	c.popoLines = append(c.popoLines, eventToLine(e))
 	if len(c.popoLines) > maxLines {

@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 )
 
 // fakeOps records what the console asked it to run.
@@ -140,6 +141,34 @@ func TestConsole_ServingIndicatorSetAndClear(t *testing.T) {
 	}
 	if c.served != 1 || len(c.popoLines) != 1 {
 		t.Errorf("after serviced: served=%d lines=%d, want 1/1", c.served, len(c.popoLines))
+	}
+}
+
+// TestConsole_ServingProgressBar: a transfer sample for an agent request (no operator
+// action running) drives the serving banner's byte bar (#3) — not the operator footer
+// meter — and is cleared when the request completes.
+func TestConsole_ServingProgressBar(t *testing.T) {
+	c := NewConsole("sbx", make(chan tea.Msg, 8), "", nil)
+	u, _ := c.Update(activity.Event{TS: "2026-06-28T18:00:00Z", Kind: activity.KindStarted, ID: "r1", Type: "python.install"})
+	c = u.(Console)
+
+	u, _ = c.Update(ProgressMsg{Event: progress.Event{Phase: "transferring", Cur: 5 << 20, Total: 10 << 20, Unit: progress.Bytes}, Transport: "sftp"})
+	c = u.(Console)
+	if c.servingProg == nil {
+		t.Fatal("a progress sample while serving should set servingProg")
+	}
+	if c.prog != nil {
+		t.Error("agent-request progress must not drive the operator footer meter")
+	}
+	if out := c.renderServing(); !strings.Contains(out, "50%") || !strings.Contains(out, "via sftp") {
+		t.Errorf("serving banner should show the transfer bar; got %q", out)
+	}
+
+	// Completion clears the transfer sample with the indicator.
+	u, _ = c.Update(activity.Event{TS: "2026-06-28T18:00:01Z", Kind: activity.KindServiced, ID: "r1", Type: "python.install", Status: "ok"})
+	c = u.(Console)
+	if c.servingProg != nil {
+		t.Error("serviced should clear servingProg")
 	}
 }
 

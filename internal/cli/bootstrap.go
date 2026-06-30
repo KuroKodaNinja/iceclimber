@@ -143,7 +143,7 @@ func provision(ctx context.Context, sess *session) error {
 	if err := dropPopo(ctx, sess); err != nil {
 		return err
 	}
-	disp := protocol.NewDispatcher(sess.fs, sess.tree, buildRegistry(sess))
+	disp := protocol.NewDispatcher(sess.fs, sess.tree, buildRegistry(sess, nil))
 	if err := disp.WriteHeartbeat(ctx); err != nil {
 		return err
 	}

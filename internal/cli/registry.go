@@ -140,18 +140,19 @@ func webfetchDeps(sess *session) webfetch.Deps {
 }
 
 // buildRegistry assembles the handler set Popo serves (the composition root —
-// this is where heavier handlers get their dependencies, §9).
-func buildRegistry(sess *session) protocol.Registry {
+// this is where heavier handlers get their dependencies, §9). pr (may be nil) is the
+// progress sink for agent-triggered installs: the console wires it so a Nana-initiated
+// transfer lights up the in-flight indicator (#3); headless serve / the bootstrap smoke
+// test pass nil (no render surface).
+func buildRegistry(sess *session, pr progress.Func) protocol.Registry {
 	return protocol.Registry{
-		// Agent-triggered installs go to a file response — no operator render
-		// surface — so progress is nil here (it's a console/CLI concern only).
 		"ping":           protocol.PingHandler(version),
-		"python.install": python.Handler(newInstaller(sess, nil)),
-		"pip.install":    pip.Handler(pipDeps(sess, nil)),
-		"node.install":   node.Handler(newNodeInstaller(sess, nil)),
-		"npm.install":    npm.Handler(npmDeps(sess, nil)),
-		"java.install":   java.Handler(newJavaInstaller(sess, nil)),
-		"maven.install":  maven.Handler(mavenDeps(sess, nil)),
+		"python.install": python.Handler(newInstaller(sess, pr)),
+		"pip.install":    pip.Handler(pipDeps(sess, pr)),
+		"node.install":   node.Handler(newNodeInstaller(sess, pr)),
+		"npm.install":    npm.Handler(npmDeps(sess, pr)),
+		"java.install":   java.Handler(newJavaInstaller(sess, pr)),
+		"maven.install":  maven.Handler(mavenDeps(sess, pr)),
 		"web.fetch":      webfetch.Handler(webfetchDeps(sess)),
 	}
 }

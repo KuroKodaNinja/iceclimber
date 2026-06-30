@@ -121,7 +121,9 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 		sess.approver = ap
 	}
 
-	reg := buildRegistry(sess)
+	// Headless serve has no live render surface — agent transfers report only their
+	// elapsed time (in the serviced line's duration), not a streaming byte meter.
+	reg := buildRegistry(sess, nil)
 	for _, v := range deny {
 		delete(reg, v)
 	}
