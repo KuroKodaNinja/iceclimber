@@ -147,7 +147,9 @@ and Java**. Use this checklist (Python/Node/Java are the worked examples; decisi
 5. **Console parity:** add the language to the install form's options; handle it in
    `consoleOps.doInstall` (ensure runtime → install packages); give it a recommended
    **default version**; emit the **Nana verification echo** (runtime version +
-   package presence, run *in* the sandbox).
+   package presence, run *in* the sandbox). Pass the threaded `progress.Func` so the
+   install reports live progress (decision #66) — the runtime installer reports byte
+   transfer; package managers report per-package/phase steps.
 6. **Tests — all of these:** unit tests for platform mapping + resolution parsing; a
    **functional test** (live musl/aarch64 VM) that installs the runtime, resolves a
    real dependency through **both tiers**, and **compiles/runs a program that uses
