@@ -31,6 +31,18 @@ func main() {
 	verb := args[0]
 	rest := args[1:]
 
+	// shellenv is local-only (no maildir round-trip): print an eval-able block so an
+	// interactive sandbox shell can run popo/nana by name. `eval "$(./popo shellenv)"`.
+	if verb == "shellenv" {
+		root, err := resolveRoot()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "popo: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Print(shellEnvBlock(root))
+		return
+	}
+
 	if _, ok := verbs[verb]; !ok {
 		fmt.Fprintf(os.Stderr, "popo: unknown verb %q (run `popo help`)\n", verb)
 		os.Exit(1)
@@ -65,6 +77,19 @@ var verbs = map[string]string{
 	"java.install":   "popo java.install <feature>             e.g. 21",
 	"maven.install":  "popo maven.install --java <feature> <group:artifact:version>...",
 	"web.fetch":      "popo web.fetch <url> [--method M] [--header K:V]... [--body STR]",
+	"shellenv":       "popo shellenv                           eval \"$(./popo shellenv)\" — popo/nana on PATH",
+}
+
+// shellEnvBlock renders the eval-able export block: ICECLIMBER_HOME + root on PATH
+// (so popo/nana resolve by name). Minimal by design — no secrets.
+func shellEnvBlock(root string) string {
+	return fmt.Sprintf("export ICECLIMBER_HOME=%s\nexport PATH=%s:\"$PATH\"\n", shellQuote(root), shellQuote(root))
+}
+
+// shellQuote wraps s in single quotes, escaping embedded single quotes — a tiny
+// local copy so popo stays a minimal static binary (no internal/remote import).
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // resolveRoot finds $ICECLIMBER_HOME: ICECLIMBER_HOME if set, else the directory popo lives in

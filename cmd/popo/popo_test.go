@@ -121,3 +121,22 @@ func TestRequestRoundTrip(t *testing.T) {
 		t.Fatalf("response = %+v, want ok with an id", resp)
 	}
 }
+
+func TestShellEnvBlock(t *testing.T) {
+	got := shellEnvBlock("/home/agent/.iceclimber")
+	want := "export ICECLIMBER_HOME='/home/agent/.iceclimber'\nexport PATH='/home/agent/.iceclimber':\"$PATH\"\n"
+	if got != want {
+		t.Errorf("shellEnvBlock:\n got %q\nwant %q", got, want)
+	}
+	// Single-quotes in the path are escaped so the block stays eval-safe.
+	if q := shellQuote("/a'b"); q != `'/a'\''b'` {
+		t.Errorf("shellQuote escape = %q", q)
+	}
+}
+
+func TestResolveRoot_EnvWins(t *testing.T) {
+	t.Setenv("ICECLIMBER_HOME", "/custom/root")
+	if r, err := resolveRoot(); err != nil || r != "/custom/root" {
+		t.Errorf("resolveRoot = %q, %v; want /custom/root", r, err)
+	}
+}
