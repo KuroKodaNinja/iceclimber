@@ -103,7 +103,10 @@ func waitAll(t *testing.T, tm *teatest.TestModel, subs ...string) {
 			}
 		}
 		return true
-	}, teatest.WithDuration(5*time.Second), teatest.WithCheckInterval(15*time.Millisecond))
+		// 15s (not 5s) of headroom: under `go test -race ./...` all packages run in
+		// parallel and teatest's huh-driven renders can lag on a contended CPU — a too-tight
+		// wait flakes there even though the flow is correct.
+	}, teatest.WithDuration(15*time.Second), teatest.WithCheckInterval(15*time.Millisecond))
 }
 
 func send(tm *teatest.TestModel, t tea.KeyType) { tm.Send(tea.KeyMsg{Type: t}) }
