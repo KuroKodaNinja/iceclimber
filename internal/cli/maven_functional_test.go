@@ -38,12 +38,12 @@ func TestMavenRelay(t *testing.T) {
 	if err := provision(ctx, sess); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
-	if _, err := newJavaInstaller(sess).Install(ctx, "21"); err != nil {
+	if _, err := newJavaInstaller(sess, nil).Install(ctx, "21"); err != nil {
 		t.Fatalf("install java: %v", err)
 	}
 
 	// Force the relay tier and resolve on the controller.
-	d := mavenDeps(sess)
+	d := mavenDeps(sess, nil)
 	d.ControllerJava = cjava
 	res, err := maven.Run(ctx, d, "21", []pkg.Spec{{Name: "com.google.guava:guava", Version: "33.0.0-jre"}}, "relay")
 	if err != nil {

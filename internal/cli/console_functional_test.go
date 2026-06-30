@@ -14,6 +14,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,56 @@ func operatedOK(evs []activity.Event, typ string) bool {
 		}
 	}
 	return false
+}
+
+// TestConsoleOps_InstallEmitsProgress proves the end-to-end progress wiring over the
+// real VM/transport: a runtime install into a FRESH root (so a transfer actually
+// happens, not an AlreadyInstalled short-circuit) pushes ProgressMsg samples on the
+// events channel, including a "transferring" phase tagged with the active transport.
+func TestConsoleOps_InstallEmitsProgress(t *testing.T) {
+	path := os.Getenv("ICECLIMBER_CONFIG")
+	if path == "" {
+		path = filepath.Join("..", "..", "iceclimber.yaml")
+	}
+	cfg, err := config.Load(path, "")
+	if err != nil {
+		t.Skipf("no usable config at %s (%v); run `make sandbox-up && make sandbox-config`", path, err)
+	}
+	cfg.RemoteRoot = fmt.Sprintf("/tmp/iceclimber-prog-%d", time.Now().UnixNano()) // fresh → forces a transfer
+	ctx := context.Background()
+	sess, err := openSession(ctx, cfg, "auto")
+	if err != nil {
+		t.Skipf("cannot reach sandbox (%v); run `make sandbox-up`", err)
+	}
+	defer sess.Close()
+	t.Cleanup(func() { _ = sess.fs.RemoveAll(ctx, cfg.RemoteRoot) })
+	if err := provision(ctx, sess); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	ops, events := newTestOps(t, sess)
+
+	// Runtime-only install (no packages) → resolve/download/transfer/verify.
+	if _, ok := ops.RunInstall(tui.InstallRequest{Lang: "python"})().(tui.OpResultMsg); !ok {
+		t.Fatal("install did not return OpResultMsg")
+	}
+
+	var sawTransfer bool
+	for {
+		select {
+		case m := <-events:
+			if pm, ok := m.(tui.ProgressMsg); ok && strings.HasPrefix(pm.Phase, "transferring") {
+				sawTransfer = true
+				if pm.Transport != sess.transport {
+					t.Errorf("ProgressMsg.Transport = %q, want the active transport %q", pm.Transport, sess.transport)
+				}
+			}
+		default:
+			if !sawTransfer {
+				t.Error("no 'transferring' ProgressMsg emitted during a fresh runtime install")
+			}
+			return
+		}
+	}
 }
 
 // TestConsoleOps_PythonFlow: the console's Python install flow installs the package
