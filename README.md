@@ -106,7 +106,9 @@ default iceclimber resolves it with `ssh -G` (honoring `Match`/`Include`, `User`
   `~/.ssh/config`; iceclimber reaches the sandbox **through it** by delegating the
   jump to the system `ssh` client (multi-hop and bastion 2FA included). There's no
   iceclimber-specific jump setting — it's abstracted into your ssh config. `trust`
-  and the console's first-connect modal also route through the jump.
+  and the console's first-connect modal also route through the jump. (The
+  **bastion's** own host key is verified by `ssh` per your `~/.ssh/config` policy —
+  iceclimber only enforces the *target* key — so trust your bastions there as usual.)
 - **Password / keyboard-interactive** — opt in with `password_auth: true` (and/or
   `keyboard_interactive: true`). Keys and ssh-agent are always tried first; if a
   password is needed you're prompted **no-echo on the terminal**. This works in

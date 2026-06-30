@@ -88,6 +88,34 @@ never the first:
    `.claude/` untracked), atomic Conventional Commits, no AI-attribution trailer
    unless explicitly asked.
 
+### Quality pass (after a complex feature or refactor)
+
+The per-change gate above isn't a full audit. When wrapping up a **complex feature
+or refactor** (multi-commit, new subsystem, security-sensitive surface like the SSH
+transport), run a dedicated quality sweep *before* the final push — ideally as
+**parallel focused reviews, one per dimension**, then synthesize, fix the real
+findings (note nits, don't necessarily fix), re-run the gate on what you touched,
+and ship via the procedure above. The four dimensions:
+
+1. **Security** — secret handling (never logged/argv/env/disk), authn/authz, injection
+   (args/shell/paths), subprocess hygiene (reap/kill/env/stderr), file perms,
+   secure-by-default invariants preserved (no `InsecureIgnoreHostKey` etc.). State the
+   threat model (what's operator-owned vs reachable from the sandbox/agent).
+2. **Test coverage** — untested branches/edge/error paths; and hunt the **#59
+   anti-pattern**: tests that assert the implementation's own assumptions, or whose
+   *name* claims a contract the body doesn't exercise (a misnamed test is worse than
+   none).
+3. **Code quality & cleanup** — dead code / orphans the change left behind, Go idioms,
+   simplicity ("would a senior engineer call this overcomplicated?"), correctness
+   smells, over-engineering vs gaps.
+4. **Docs / spec consistency** — every doc/scaffold-named flag, path, or field exists
+   and behaves as documented (the #59 rule); decision-log accurate; no stale wording.
+
+This sweep found, on the corporate-SSH feature: a latent tilde-expansion bug, a
+misnamed precedence test (#59), option-injection hardening, and several real coverage
+gaps — none caught by the per-change gate alone. Scale it to the work: a couple of
+reviewers for a moderate feature, all four for a security-sensitive or sprawling one.
+
 ## Adding a language
 
 A language is only "done" when it has **the same treatment as Python, JavaScript,
