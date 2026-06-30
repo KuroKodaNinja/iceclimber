@@ -71,7 +71,7 @@ func buildDialPlan(ctx context.Context, cfg DialConfig) (*dialPlan, error) {
 			p.identityFiles = append(p.identityFiles, r.IdentityFiles...) // after the explicit key
 
 			if sshBin, berr := sshBinary(); berr == nil {
-				p.proxyArgv = r.proxyArgv(sshBin)
+				p.proxyArgv = r.proxyArgv(sshBin, cfg.SSHConfigFile)
 			}
 		case errors.Is(err, errSSHUnavailable):
 			// No ssh client → keep the literal cfg (direct dial). Silent: a library
@@ -92,7 +92,7 @@ func buildDialPlan(ctx context.Context, cfg DialConfig) (*dialPlan, error) {
 func (p *dialPlan) dialTarget(ctx context.Context) (net.Conn, string, error) {
 	addr := net.JoinHostPort(p.host, strconv.Itoa(p.port))
 	if len(p.proxyArgv) > 0 {
-		conn, err := newProxyConn(ctx, p.proxyArgv)
+		conn, err := newProxyConn(ctx, p.proxyArgv, addr)
 		if err != nil {
 			return nil, addr, fmt.Errorf("start proxy for %s: %w", addr, err)
 		}

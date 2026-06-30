@@ -78,10 +78,17 @@ func TestProxyArgv(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.r.proxyArgv(ssh); !reflect.DeepEqual(got, tt.want) {
+			if got := tt.r.proxyArgv(ssh, ""); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("proxyArgv = %q, want %q", got, tt.want)
 			}
 		})
+	}
+
+	// configFile is propagated as -F so a jump alias resolves against it (only in
+	// the ProxyJump branch; an explicit ProxyCommand is literal).
+	r := resolvedSSH{HostName: "h", Port: 22, ProxyJump: "b"}
+	if got := r.proxyArgv(ssh, "/tmp/cfg"); !reflect.DeepEqual(got, []string{ssh, "-F", "/tmp/cfg", "-W", "h:22", "b"}) {
+		t.Errorf("proxyArgv with -F = %q", got)
 	}
 }
 

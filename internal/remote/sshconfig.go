@@ -145,15 +145,19 @@ func isNone(s string) bool { return s == "" || strings.EqualFold(s, "none") }
 // proxyArgv returns the argv for the ProxyCommand subprocess that yields a stdio
 // byte-stream to the target, or nil for a direct dial. ProxyJump takes precedence
 // over ProxyCommand (OpenSSH semantics). For ProxyJump j1,…,jn we synthesize
-// `ssh [-J j1,…,j(n-1)] -W HostName:Port jn` — the faithful equivalent of
+// `ssh [-F cfg] [-J j1,…,j(n-1)] -W HostName:Port jn` — the faithful equivalent of
 // OpenSSH's own ProxyJump→ProxyCommand expansion, so the whole (multi-hop) chain
-// and any bastion auth/2FA are handled by the ssh client.
-func (r *resolvedSSH) proxyArgv(sshBin string) []string {
+// and any bastion auth/2FA are handled by the ssh client. configFile (when set) is
+// propagated as -F so jump-host aliases resolve against the same config we used.
+func (r *resolvedSSH) proxyArgv(sshBin, configFile string) []string {
 	if r.ProxyJump != "" {
 		hops := strings.Split(r.ProxyJump, ",")
 		last := strings.TrimSpace(hops[len(hops)-1])
 		dest := r.HostName + ":" + strconv.Itoa(r.Port)
 		argv := []string{sshBin}
+		if configFile != "" {
+			argv = append(argv, "-F", configFile)
+		}
 		if len(hops) > 1 {
 			argv = append(argv, "-J", strings.Join(hops[:len(hops)-1], ","))
 		}

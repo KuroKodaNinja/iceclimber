@@ -46,7 +46,7 @@ func helperArgv(mode string) []string {
 
 func TestProxyConn_Roundtrip(t *testing.T) {
 	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
-	pc, err := newProxyConn(context.Background(), helperArgv("cat"))
+	pc, err := newProxyConn(context.Background(), helperArgv("cat"), "10.0.0.1:22")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,15 +66,16 @@ func TestProxyConn_Roundtrip(t *testing.T) {
 		t.Errorf("roundtrip = %q, want %q", got, want)
 	}
 
-	// Synthetic addrs are stable and non-empty.
-	if pc.RemoteAddr().Network() != "ssh-proxy" || pc.LocalAddr().String() == "" {
-		t.Errorf("unexpected addrs: %v %v", pc.LocalAddr(), pc.RemoteAddr())
+	// RemoteAddr reports the target host:port (tcp) so the knownhosts callback can
+	// SplitHostPort it.
+	if pc.RemoteAddr().Network() != "tcp" || pc.RemoteAddr().String() != "10.0.0.1:22" {
+		t.Errorf("RemoteAddr = %s/%s, want tcp/10.0.0.1:22", pc.RemoteAddr().Network(), pc.RemoteAddr())
 	}
 }
 
 func TestProxyConn_CloseIdempotent(t *testing.T) {
 	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
-	pc, err := newProxyConn(context.Background(), helperArgv("cat"))
+	pc, err := newProxyConn(context.Background(), helperArgv("cat"), "10.0.0.1:22")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +90,7 @@ func TestProxyConn_CloseIdempotent(t *testing.T) {
 func TestProxyConn_ContextCancelReaps(t *testing.T) {
 	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	ctx, cancel := context.WithCancel(context.Background())
-	pc, err := newProxyConn(ctx, helperArgv("sleep"))
+	pc, err := newProxyConn(ctx, helperArgv("sleep"), "10.0.0.1:22")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +116,7 @@ func TestProxyConn_ContextCancelReaps(t *testing.T) {
 
 func TestProxyConn_FailureSurfacesStderr(t *testing.T) {
 	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
-	pc, err := newProxyConn(context.Background(), helperArgv("fail"))
+	pc, err := newProxyConn(context.Background(), helperArgv("fail"), "10.0.0.1:22")
 	if err != nil {
 		t.Fatal(err)
 	}

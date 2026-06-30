@@ -24,16 +24,19 @@ type proxyConn struct {
 	stdout io.ReadCloser
 	stderr *boundedBuffer
 	cancel context.CancelFunc
+	target string // resolved host:port — reported as RemoteAddr so the knownhosts
+	//              callback (which SplitHostPorts RemoteAddr) keys on the real host.
 
 	waitErr   chan error
 	closeOnce sync.Once
 	closeErr  error
 }
 
-// newProxyConn starts argv and returns a net.Conn over its stdio. ctx cancellation
-// kills (and reaps) the process, which unblocks any in-flight Read/Write — that is
-// how a target-handshake timeout propagates through the tunnel.
-func newProxyConn(ctx context.Context, argv []string) (*proxyConn, error) {
+// newProxyConn starts argv and returns a net.Conn over its stdio, reporting target
+// (host:port) as its RemoteAddr. ctx cancellation kills (and reaps) the process,
+// which unblocks any in-flight Read/Write — that is how a target-handshake timeout
+// propagates through the tunnel.
+func newProxyConn(ctx context.Context, argv []string, target string) (*proxyConn, error) {
 	if len(argv) == 0 {
 		return nil, errors.New("proxy: empty argv")
 	}
@@ -58,7 +61,7 @@ func newProxyConn(ctx context.Context, argv []string) (*proxyConn, error) {
 		cancel()
 		return nil, err
 	}
-	pc := &proxyConn{cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr, cancel: cancel, waitErr: make(chan error, 1)}
+	pc := &proxyConn{cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr, cancel: cancel, target: target, waitErr: make(chan error, 1)}
 	go func() { pc.waitErr <- cmd.Wait() }()
 	return pc, nil
 }
@@ -87,8 +90,8 @@ func (c *proxyConn) Close() error {
 // enrich a handshake error (e.g. the bastion's "Permission denied").
 func (c *proxyConn) stderrString() string { return c.stderr.String() }
 
-func (c *proxyConn) LocalAddr() net.Addr  { return proxyAddr("ssh-proxy-local") }
-func (c *proxyConn) RemoteAddr() net.Addr { return proxyAddr("ssh-proxy") }
+func (c *proxyConn) LocalAddr() net.Addr  { return proxyAddr(c.target) }
+func (c *proxyConn) RemoteAddr() net.Addr { return proxyAddr(c.target) }
 
 // Deadlines are best-effort no-ops: OS pipes can't honor them and ssh.NewClientConn
 // doesn't set them — connection-level timeouts are driven by the context instead.
@@ -96,9 +99,11 @@ func (c *proxyConn) SetDeadline(time.Time) error      { return nil }
 func (c *proxyConn) SetReadDeadline(time.Time) error  { return nil }
 func (c *proxyConn) SetWriteDeadline(time.Time) error { return nil }
 
+// proxyAddr reports the resolved target as a tcp address so x/crypto's knownhosts
+// callback (which SplitHostPorts RemoteAddr().String()) keys on the real host:port.
 type proxyAddr string
 
-func (proxyAddr) Network() string  { return "ssh-proxy" }
+func (proxyAddr) Network() string  { return "tcp" }
 func (a proxyAddr) String() string { return string(a) }
 
 // isKilled reports whether err is the expected result of our own context-kill
