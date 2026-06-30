@@ -9,8 +9,25 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/agent"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/spf13/cobra"
 )
+
+// recordAgentCaps records a freshly installed/wrapped agent's identity in the sandbox
+// capabilities self-report (the agent block), so `status` shows it instead of "(not
+// reported)". Best-effort — the agent is installed regardless; the host block written
+// by bootstrap is preserved via read-modify-write. Shared by the CLI install/wrap
+// commands and the console's agent action.
+func recordAgentCaps(ctx context.Context, sess *session, d agent.Descriptor, res agent.Result) {
+	_ = protocol.WriteCapabilities(ctx, sess.fs, sess.tree, func(c *protocol.Capabilities) {
+		c.Agent = &protocol.CapAgent{
+			Name:           d.Name,
+			DisplayName:    d.DisplayName,
+			Version:        res.Version,
+			AuthConfigured: res.AuthConfigured,
+		}
+	})
+}
 
 func newAgentCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -86,6 +103,7 @@ func newAgentInstallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordAgentCaps(ctx, sess, d, res)
 
 			w := cmd.OutOrStdout()
 			fmt.Fprintf(w, "installed %s (%s) %s\n", d.DisplayName, d.Name, res.Version)
@@ -154,6 +172,7 @@ func newAgentWrapCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordAgentCaps(ctx, sess, d, res)
 
 			w := cmd.OutOrStdout()
 			fmt.Fprintf(w, "wrapped %s (%s)\n", d.DisplayName, d.Name)

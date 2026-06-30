@@ -200,6 +200,7 @@ func (o *consoleOps) doAgentInstall(r tui.AgentInstallRequest) opResult {
 	if err != nil {
 		return opResult{typ: verb, err: err}
 	}
+	recordAgentCaps(o.ctx, o.sess(), d, res)
 	detail := d.DisplayName
 	if res.Version != "" {
 		detail += " " + res.Version

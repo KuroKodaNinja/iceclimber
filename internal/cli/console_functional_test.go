@@ -314,6 +314,18 @@ func TestConsoleOps_AgentWrap(t *testing.T) {
 	if !nanaConfirms(evs, "launch:") {
 		t.Errorf("Nana should echo the launch path; events=%+v", evs)
 	}
+
+	// The wrap recorded the agent in capabilities (#8), preserving the bootstrap host block.
+	caps, err := protocol.ReadCapabilities(context.Background(), sess.fs, sess.tree)
+	if err != nil || caps == nil || caps.Agent == nil {
+		t.Fatalf("capabilities should record the wrapped agent; got %+v (err %v)", caps, err)
+	}
+	if caps.Agent.Name != "claude" || caps.Agent.AuthConfigured {
+		t.Errorf("agent caps = %+v, want claude with auth not configured (--skip-auth)", caps.Agent)
+	}
+	if caps.Host.Arch == "" {
+		t.Errorf("bootstrap host block lost after the agent caps write: %+v", caps.Host)
+	}
 }
 
 // waitOut blocks until all substrings have rendered in the program output.
