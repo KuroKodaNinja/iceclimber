@@ -248,7 +248,7 @@ func (o *consoleOps) PollStatus() tea.Cmd {
 		return tui.StatusMsg{
 			Sandbox:   o.sess().sandboxID,
 			Heartbeat: hb,
-			Queue:     fmt.Sprintf("%d awaiting · %d delivered", s.QueueOut, s.QueueIn),
+			Queue:     fmt.Sprintf("%d awaiting · %d uncollected", s.QueueOut, s.QueueIn),
 			Runtimes:  s.Runtimes,
 			Caps:      s.Caps,
 		}
@@ -785,6 +785,7 @@ func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Conf
 	}
 	reg := buildRegistry(sess, pr)
 	disp := protocol.NewDispatcher(sess.fs, sess.tree, reg)
+	disp.SetRetention(cfg.Retention())
 	disp.SetGate(ap.gate)
 	// Surface heartbeat liveness in the header (serving vs stale), independent of the
 	// SSH link state — non-blocking so the dispatcher never stalls on a slow UI.

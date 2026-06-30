@@ -226,5 +226,9 @@ func smokeTest(ctx context.Context, fs remotefs.FS, tree protocol.Tree, disp *pr
 	if resp.Status != protocol.StatusOK {
 		return fmt.Errorf("pong status = %q", resp.Status)
 	}
+	// Collect our own pong (controller-side) and run one more cycle so GC prunes the
+	// smoke-test pair — a fresh bootstrap shouldn't leave a permanent "1 uncollected".
+	_ = protocol.AckResponse(ctx, fs, tree, name)
+	_ = disp.RunOnce(ctx)
 	return nil
 }

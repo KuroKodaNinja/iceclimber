@@ -28,7 +28,7 @@ func TestCollectStatus(t *testing.T) {
 	if err := fs.WriteFile(ctx, tree.Heartbeat(), []byte("5 "+time.Now().UTC().Format(time.RFC3339)+"\n")); err != nil {
 		t.Fatal(err)
 	}
-	// Queue: 2 awaiting (outbox/new), 3 delivered-on-disk (inbox/new).
+	// Queue: 2 awaiting (outbox/new), 3 uncollected (inbox/new).
 	for i, dir := range []string{tree.Outbox().New(), tree.Outbox().New(), tree.Inbox().New(), tree.Inbox().New(), tree.Inbox().New()} {
 		if err := fs.WriteFile(ctx, path.Join(dir, string(rune('a'+i))+".json"), []byte("{}")); err != nil {
 			t.Fatal(err)
@@ -59,7 +59,7 @@ func TestCollectStatus(t *testing.T) {
 		t.Errorf("HeartbeatSeq = %q, want 5", s.HeartbeatSeq)
 	}
 	if s.QueueOut != 2 || s.QueueIn != 3 {
-		t.Errorf("queue = %d awaiting / %d delivered, want 2/3", s.QueueOut, s.QueueIn)
+		t.Errorf("queue = %d awaiting / %d uncollected, want 2/3", s.QueueOut, s.QueueIn)
 	}
 	runtimes := strings.Join(s.Runtimes, " | ")
 	if !strings.Contains(runtimes, "python 3.12.13-x ✓") {

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeTemp(t *testing.T, content string) string {
@@ -175,6 +176,23 @@ func TestExpandHome(t *testing.T) {
 	for _, tt := range tests {
 		if got := expandHome(tt.in); got != tt.want {
 			t.Errorf("expandHome(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestRetention(t *testing.T) {
+	cases := map[string]struct {
+		val  string
+		want time.Duration
+	}{
+		"default when unset": {"", time.Hour},
+		"explicit":           {"30m", 30 * time.Minute},
+		"disabled":           {"0", 0},
+		"invalid → default":  {"not-a-duration", time.Hour},
+	}
+	for name, tc := range cases {
+		if got := (&Config{MaildirRetention: tc.val}).Retention(); got != tc.want {
+			t.Errorf("%s: Retention(%q) = %v, want %v", name, tc.val, got, tc.want)
 		}
 	}
 }

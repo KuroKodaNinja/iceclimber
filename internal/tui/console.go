@@ -123,7 +123,7 @@ type OpRunner interface {
 type StatusSnapshot struct {
 	Sandbox   string
 	Heartbeat string // "seq 42 · ~3s ago" or "none yet"
-	Queue     string // "1 awaiting · 0 delivered"
+	Queue     string // "1 awaiting · 0 uncollected"
 	Runtimes  []string
 	Caps      string // "" if the agent hasn't reported
 	Err       string // set when the sandbox is unreachable (SSH dropped); panel shows it

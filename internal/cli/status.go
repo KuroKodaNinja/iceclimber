@@ -45,10 +45,10 @@ func newStatusCmd() *cobra.Command {
 				}
 				fmt.Fprintf(w, "heartbeat: seq %s%s\n", s.HeartbeatSeq, age)
 			}
-			// "delivered" not "unread": responses stay on disk after the agent reads them
-			// (the maildir isn't GC'd yet — Phase 2), so this is a historical count, not mail
-			// awaiting the agent.
-			fmt.Fprintf(w, "queue:     %d awaiting service · %d responses delivered\n", s.QueueOut, s.QueueIn)
+			// inbox/new is a REAL uncollected count now: the agent collects (inbox/new→cur)
+			// on read and GC prunes collected/abandoned pairs, so this is mail genuinely
+			// awaiting the agent — not a historical pile.
+			fmt.Fprintf(w, "queue:     %d awaiting service · %d awaiting collection\n", s.QueueOut, s.QueueIn)
 			if len(s.Runtimes) == 0 {
 				fmt.Fprintln(w, "runtimes:  none installed")
 			} else {
@@ -69,8 +69,8 @@ func newStatusCmd() *cobra.Command {
 type statusSnapshot struct {
 	HeartbeatSeq string
 	HeartbeatAge string // e.g. "3s" ("" if no parseable timestamp)
-	QueueOut     int    // requests awaiting service
-	QueueIn      int    // responses unread
+	QueueOut     int    // requests awaiting service (outbox/new)
+	QueueIn      int    // responses delivered but not yet collected by the agent (inbox/new)
 	Runtimes     []string
 	Caps         string // e.g. "Claude Code 1.2.3 · auth ✓ · linux/arm64 (glibc)", or "" if not reported
 }

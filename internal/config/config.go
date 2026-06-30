@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -51,6 +52,28 @@ type Config struct {
 	// pre-existing system runtime). An explicit override of the bootstrap choice;
 	// unset languages default to managed. (§ pre-existing runtimes)
 	Runtimes RuntimesConfig `yaml:"runtimes"`
+	// MaildirRetention is how long a delivered-but-uncollected response may sit in
+	// inbox/new before GC reaps it (with its request). A Go duration string ("1h",
+	// "30m"); empty = the 1h default; "0" disables the retention sweep (collected pairs
+	// are still pruned). See Config.Retention.
+	MaildirRetention string `yaml:"maildir_retention"`
+}
+
+// DefaultMaildirRetention is the retention window applied when maildir_retention is unset.
+const DefaultMaildirRetention = time.Hour
+
+// Retention returns the parsed maildir retention window: the 1h default when unset (or
+// unparseable — a bad value never silently disables GC), else the configured duration
+// ("0" disables the retention sweep).
+func (c *Config) Retention() time.Duration {
+	if c.MaildirRetention == "" {
+		return DefaultMaildirRetention
+	}
+	d, err := time.ParseDuration(c.MaildirRetention)
+	if err != nil {
+		return DefaultMaildirRetention
+	}
+	return d
 }
 
 // RuntimesConfig is the operator's per-language runtime-source override.

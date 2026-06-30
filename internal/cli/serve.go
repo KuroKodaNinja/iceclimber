@@ -128,6 +128,7 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 		delete(reg, v)
 	}
 	disp := protocol.NewDispatcher(sess.fs, sess.tree, reg)
+	disp.SetRetention(cfg.Retention())
 	if ap != nil {
 		disp.SetGate(ap.gate)
 	}
