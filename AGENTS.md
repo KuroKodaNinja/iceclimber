@@ -146,6 +146,8 @@ make tui-functional   # console executor (install/bootstrap) against the VM
 make scenario         # full-stack "build a real app" tests per language (test/scenarios/)
 make sandbox-down     # tear it down
 make demo             # acceptance demo: real Claude agent in an air-gapped VM (DEMO.md)
+make release          # cross-build dist/ tarballs (iceclimber darwin/linux + popo linux) + checksums
+make gh-release       # build + publish dist/* to a GitHub release (gh; from a tagged commit)
 ```
 
 Per-language application scenarios (build + run a real program in the sandbox) live
@@ -199,6 +201,13 @@ ssh-keyscan replacement for ephemeral boxes; keys are never trusted silently
 offers it as a first-connect modal. Host-key primitives live in
 `internal/remote/hostkey.go` (`FetchHostKey`/`CheckHostKey`/`RecordHostKey`); an
 unknown/changed key surfaces as a typed `remote.HostKeyError`.
+**Corporate SSH** (decision #65): `ssh.host` may be a `~/.ssh/config` Host alias —
+by default `remote.Dial` resolves it with `ssh -G` (honoring the operator's config)
+and reaches the target **through any `ProxyJump`/`ProxyCommand`** by delegating the
+jump to the system `ssh` client over a subprocess `net.Conn` (so jumpboxes/2FA need
+no iceclimber config). Opt-in `password_auth`/`keyboard_interactive` prompt no-echo
+on `/dev/tty` (works headless too). All four dial sites funnel through `dialConfig`
+→ `remote.buildDialPlan`; `ResolveTarget` keys host-key trust on the resolved name.
 `iceclimber agent install [claude]` installs a coding agent into the sandbox
 (decision #57): `internal/agent` downloads the agent's **per-platform** package
 (e.g. `@anthropic-ai/claude-code-linux-arm64-musl`) on the controller and **relays

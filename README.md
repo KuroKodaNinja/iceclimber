@@ -50,6 +50,28 @@ make build            # → ./iceclimber
 make test             # unit suite (go test -race ./...)
 ```
 
+### Releases
+
+Cross-build distributable binaries (no network; produces `dist/` with tarballs +
+`SHA256SUMS`):
+
+```sh
+make release                 # version from `git describe`; or: make release VERSION=v0.2.0
+```
+
+This ships **iceclimber** for `darwin/{amd64,arm64}` and `linux/{amd64,arm64}`, plus
+the sandbox-side **popo** client for `linux/{amd64,arm64}`. You normally don't need
+popo separately — every `iceclimber` **embeds both** linux popo clients and relays
+the right one in at `bootstrap`, chosen by the *sandbox's* arch (not your machine's),
+so a macOS controller drives a linux/amd64 or /arm64 sandbox all the same. (The
+standalone popo tarballs are there for manual/offline placement.) To publish a
+GitHub release from a tagged commit:
+
+```sh
+git tag v0.2.0 && git push --tags
+make gh-release VERSION=v0.2.0     # builds, then `gh release create` uploads dist/*
+```
+
 ---
 
 ## Popo side (the controller — you)
@@ -72,6 +94,35 @@ ssh:
 
 Host keys are verified against `known_hosts` — the SSH transport is secure by
 default, with no insecure skips.
+
+#### Corporate networks: `~/.ssh/config`, jumpboxes, passwords
+
+`host` may be a **`~/.ssh/config` Host alias**, not just a literal address. By
+default iceclimber resolves it with `ssh -G` (honoring `Match`/`Include`, `User`,
+`Port`, `IdentityFile`, …), so the connection details you already maintain for
+`ssh` just work — set `use_ssh_config: false` to force a literal direct dial.
+
+- **Jumpbox / bastion** — put a `ProxyJump` (or `ProxyCommand`) on the host in your
+  `~/.ssh/config`; iceclimber reaches the sandbox **through it** by delegating the
+  jump to the system `ssh` client (multi-hop and bastion 2FA included). There's no
+  iceclimber-specific jump setting — it's abstracted into your ssh config. `trust`
+  and the console's first-connect modal also route through the jump.
+- **Password / keyboard-interactive** — opt in with `password_auth: true` (and/or
+  `keyboard_interactive: true`). Keys and ssh-agent are always tried first; if a
+  password is needed you're prompted **no-echo on the terminal**. This works in
+  headless mode too (the prompt uses the controlling terminal), so an unattended
+  `serve` still authenticates as long as a terminal exists — otherwise use
+  ssh-agent or a key. Passwords are never logged or written to disk.
+
+```yaml
+ssh:
+  host: prod-sandbox        # a Host alias from ~/.ssh/config (ProxyJump lives there)
+  password_auth: true       # prompt for a password if key/agent don't authenticate
+  known_hosts: ~/.ssh/known_hosts
+```
+
+(Honoring `~/.ssh/config` requires the OpenSSH client on the controller; without
+it, iceclimber falls back to a literal direct dial.)
 
 ### 2. Trust the host key
 
