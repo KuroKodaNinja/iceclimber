@@ -102,6 +102,20 @@ type StatusSnapshot struct {
 // StatusMsg delivers a fresh StatusSnapshot to the console.
 type StatusMsg StatusSnapshot
 
+// ConnState is the console's SSH connection state, driving the header indicator.
+type ConnState int
+
+const (
+	ConnConnected    ConnState = iota // serving over a live connection (console default)
+	ConnReconnecting                  // the link dropped; the supervisor is reconnecting
+	ConnViewing                       // passive log viewer (`iceclimber tui`); not connected
+)
+
+// ConnStateMsg updates the header's connection indicator. The serve supervisor emits
+// it on (re)connect and on a drop, so the header reflects reality instead of always
+// claiming "serving".
+type ConnStateMsg struct{ State ConnState }
+
 // EgressRule is one persisted allow/deny rule; EgressPending is one held request.
 type EgressRule struct{ Kind, Pattern string } // Kind: "allow" | "deny"
 type EgressPending struct{ ID, Host, URL string }
@@ -144,6 +158,7 @@ type Console struct {
 	panelErr  string // last egress action error, shown in the panel ("" = none)
 	width     int
 	height    int
+	connState ConnState // SSH connection state (serving vs reconnecting)
 
 	// form-bound values. Held behind a pointer so the huh form and every
 	// (value-copied) Console share one struct — binding to &c.field directly
@@ -234,6 +249,9 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return c, c.waitEvent()
 	case *ApprovalRequest:
 		c.modal = msg
+		return c, c.waitEvent()
+	case ConnStateMsg:
+		c.connState = msg.State
 		return c, c.waitEvent()
 	case ProgressMsg:
 		if msg.Phase != c.progPhase() {
@@ -376,7 +394,7 @@ func (c Console) View() string {
 		meter = c.renderMeter()
 	}
 	return dashboard(c.width, c.height, c.sandboxID, c.served, c.approved, c.denied,
-		c.lastTS, true, c.popoLines, c.nanaLines, true, c.nana != nil, c.ops != nil, c.running, meter)
+		c.lastTS, c.connState, c.popoLines, c.nanaLines, true, c.nana != nil, c.ops != nil, c.running, meter)
 }
 
 // openForm builds and focuses the named operator form.

@@ -71,14 +71,14 @@ func nanaEcho(e activity.Event) string {
 
 // dashboard renders the header + two panes + footer. showNana renders the [NANA]
 // pane (the sandbox's voice); hasAgentLog only tweaks the empty-pane hint.
-func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, serving bool, popoLines []popoLine, nanaLines []string, showNana, hasAgentLog, hasOps bool, running, meter string) string {
+func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, conn ConnState, popoLines []popoLine, nanaLines []string, showNana, hasAgentLog, hasOps bool, running, meter string) string {
 	if w < 40 {
 		w = 40
 	}
 	if h < 10 {
 		h = 10
 	}
-	hdr := header(w, sandboxID, served, approved, denied, lastTS, serving)
+	hdr := header(w, sandboxID, served, approved, denied, lastTS, conn)
 	ftr := footer(w, hasOps, running, meter)
 	bodyH := h - lipgloss.Height(hdr) - lipgloss.Height(ftr)
 	if bodyH < 4 {
@@ -93,10 +93,13 @@ func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS 
 	return lipgloss.JoinVertical(lipgloss.Left, hdr, popoPane(w, bodyH, popoLines), ftr)
 }
 
-func header(w int, sandboxID string, served, approved, denied int, lastTS time.Time, serving bool) string {
-	state := dimStyle.Render("○ viewing")
-	if serving {
-		state = okStyle.Render("● serving")
+func header(w int, sandboxID string, served, approved, denied int, lastTS time.Time, conn ConnState) string {
+	state := okStyle.Render("● serving")
+	switch conn {
+	case ConnReconnecting:
+		state = warnStyle.Render("◌ reconnecting…")
+	case ConnViewing:
+		state = dimStyle.Render("○ viewing")
 	}
 	left := titleStyle.Render(" iceclimber ▸ "+sandboxID+" ") + " " + state
 	right := dimStyle.Render(fmt.Sprintf("serviced %d · approved %d · denied %d · last %s ",

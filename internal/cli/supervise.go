@@ -42,6 +42,11 @@ type serveHooks struct {
 func superviseServe(ctx context.Context, cfg *config.Config, transport string, deny []string, out io.Writer, supervised bool, interval time.Duration, hooks serveHooks) error {
 	prompter := remote.NewCachingPrompter(nil)
 
+	// The bridge reads the live session via the holder, so it follows reconnects;
+	// started once (and the agent.log reset once) for the whole serve run.
+	holder := &sessionHolder{}
+	startAgentLogBridge(ctx, cfg, holder)
+
 	// One connect+serve cycle: dial (reusing the cached prompter), serve until Serve
 	// returns, then close. connected reports whether the dial succeeded, so the loop
 	// can Commit the password and notify onConnected.
@@ -50,6 +55,7 @@ func superviseServe(ctx context.Context, cfg *config.Config, transport string, d
 		if err != nil {
 			return false, err
 		}
+		holder.Set(sess)
 		if hooks.onConnected != nil {
 			hooks.onConnected(sess, attempt)
 		}

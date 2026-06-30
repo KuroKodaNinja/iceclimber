@@ -111,6 +111,23 @@ func TestFlow_DashboardChrome(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 }
 
+// TestFlow_ConnStateHeader: the header starts at "● serving", flips to
+// "◌ reconnecting…" on a ConnReconnecting message, and back to serving on
+// ConnConnected — so the operator sees the real link state during an SSH drop.
+func TestFlow_ConnStateHeader(t *testing.T) {
+	tm := startConsole(t, newRecordOps())
+	waitText(t, tm, "● serving") // default
+
+	tm.Send(ConnStateMsg{State: ConnReconnecting})
+	waitText(t, tm, "◌ reconnecting…")
+
+	tm.Send(ConnStateMsg{State: ConnConnected})
+	waitText(t, tm, "● serving")
+
+	tm.Quit()
+	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+}
+
 func TestFlow_NanaPaneHint(t *testing.T) {
 	tm := startConsole(t, newRecordOps()) // no agent-log
 	// With no agent output, the [NANA] pane shows the actionable hint.

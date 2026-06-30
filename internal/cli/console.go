@@ -73,10 +73,15 @@ func (t *tuiAsker) ask(p prompt) choice {
 // an OpResultMsg to clear the console's running indicator.
 type consoleOps struct {
 	ctx    context.Context
-	sess   *session
+	holder *sessionHolder // current session; the supervisor swaps it on reconnect
 	act    *activity.Logger
 	events chan tea.Msg
 }
+
+// sess returns the current session. After an SSH drop the supervisor reconnects and
+// swaps in a fresh one, so every operator action reads it live — an action attempted
+// mid-drop errors against the old session and the operator simply retries.
+func (o *consoleOps) sess() *session { return o.holder.Get() }
 
 // echo is one sandbox-side confirmation line (Nana's voice).
 type echo struct {
@@ -106,7 +111,7 @@ func (o *consoleOps) RunInstall(r tui.InstallRequest) tea.Cmd {
 
 func (o *consoleOps) RunBootstrap() tea.Cmd {
 	return func() tea.Msg {
-		err := provision(o.ctx, o.sess)
+		err := provision(o.ctx, o.sess())
 		o.record("bootstrap", "tree + pip.conf + NANA.md + ping/pong smoke test", err)
 		if err == nil {
 			// provision's smoke test already round-tripped a ping/pong through the
@@ -122,10 +127,10 @@ func (o *consoleOps) RunBootstrap() tea.Cmd {
 // the panel shows an error rather than empty/stale fields.
 func (o *consoleOps) PollStatus() tea.Cmd {
 	return func() tea.Msg {
-		if _, err := o.sess.fs.List(o.ctx, o.sess.tree.Root); err != nil {
-			return tui.StatusMsg{Sandbox: o.sess.sandboxID, Err: err.Error()}
+		if _, err := o.sess().fs.List(o.ctx, o.sess().tree.Root); err != nil {
+			return tui.StatusMsg{Sandbox: o.sess().sandboxID, Err: err.Error()}
 		}
-		s := collectStatus(o.ctx, o.sess)
+		s := collectStatus(o.ctx, o.sess())
 		hb := "none yet"
 		if s.HeartbeatSeq != "" {
 			hb = "seq " + s.HeartbeatSeq
@@ -134,7 +139,7 @@ func (o *consoleOps) PollStatus() tea.Cmd {
 			}
 		}
 		return tui.StatusMsg{
-			Sandbox:   o.sess.sandboxID,
+			Sandbox:   o.sess().sandboxID,
 			Heartbeat: hb,
 			Queue:     fmt.Sprintf("%d awaiting · %d unread", s.QueueOut, s.QueueIn),
 			Runtimes:  s.Runtimes,
@@ -144,10 +149,10 @@ func (o *consoleOps) PollStatus() tea.Cmd {
 }
 
 func (o *consoleOps) store() *egress.Store {
-	if o.sess.policy == nil {
+	if o.sess().policy == nil {
 		return nil
 	}
-	return o.sess.policy.Store()
+	return o.sess().policy.Store()
 }
 
 // Egress reads the operator's persisted rules + pending held requests (local files).
@@ -217,7 +222,7 @@ func (o *consoleOps) ForgetRule(kind, pattern string) error {
 func (o *consoleOps) progress() progress.Func {
 	return func(e progress.Event) {
 		select {
-		case o.events <- tui.ProgressMsg{Event: e, Transport: o.sess.transport}:
+		case o.events <- tui.ProgressMsg{Event: e, Transport: o.sess().transport}:
 		default:
 		}
 	}
@@ -237,7 +242,7 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 			return opResult{typ: "python.install", detail: "python " + ver, echoes: echoes}
 		}
 		pkgs := parseSpecs(specs)
-		out, err := pip.Run(o.ctx, pipDeps(o.sess, pr), ver, pkgs, "auto")
+		out, err := pip.Run(o.ctx, pipDeps(o.sess(), pr), ver, pkgs, "auto")
 		if err != nil {
 			return opResult{typ: "pip.install", err: err, echoes: echoes}
 		}
@@ -254,7 +259,7 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 			return opResult{typ: "node.install", detail: "node " + ver, echoes: echoes}
 		}
 		pkgs := parseNpmSpecs(specs)
-		out, err := npm.Run(o.ctx, npmDeps(o.sess, pr), ver, pkgs, "auto")
+		out, err := npm.Run(o.ctx, npmDeps(o.sess(), pr), ver, pkgs, "auto")
 		if err != nil {
 			return opResult{typ: "npm.install", err: err, echoes: echoes}
 		}
@@ -272,7 +277,7 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		if err != nil {
 			return opResult{typ: "maven.install", err: err, echoes: echoes}
 		}
-		out, err := maven.Run(o.ctx, mavenDeps(o.sess, pr), ver, coords, "auto")
+		out, err := maven.Run(o.ctx, mavenDeps(o.sess(), pr), ver, coords, "auto")
 		if err != nil {
 			return opResult{typ: "maven.install", err: err, echoes: echoes}
 		}
@@ -285,9 +290,9 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 // ensurePython locates the Python runtime at ver, installing it if absent, and
 // returns a sandbox echo of the interpreter that will host the packages.
 func (o *consoleOps) ensurePython(ver string, pr progress.Func) ([]echo, error) {
-	bin, err := python.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
+	bin, err := python.Locate(o.ctx, o.sess().fs, o.sess().tree.Root, ver, o.sess().fp.Arch, o.sess().fp.Libc.Family)
 	if err != nil {
-		res, ierr := newInstaller(o.sess, pr).Install(o.ctx, ver)
+		res, ierr := newInstaller(o.sess(), pr).Install(o.ctx, ver)
 		if ierr != nil {
 			return nil, ierr
 		}
@@ -299,9 +304,9 @@ func (o *consoleOps) ensurePython(ver string, pr progress.Func) ([]echo, error) 
 // ensureNode locates the Node runtime at ver, installing it if absent, and returns
 // a sandbox echo of the runtime that will host the packages.
 func (o *consoleOps) ensureNode(ver string, pr progress.Func) ([]echo, error) {
-	bin, err := node.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
+	bin, err := node.Locate(o.ctx, o.sess().fs, o.sess().tree.Root, ver, o.sess().fp.Arch, o.sess().fp.Libc.Family)
 	if err != nil {
-		res, ierr := newNodeInstaller(o.sess, pr).Install(o.ctx, ver)
+		res, ierr := newNodeInstaller(o.sess(), pr).Install(o.ctx, ver)
 		if ierr != nil {
 			return nil, ierr
 		}
@@ -313,9 +318,9 @@ func (o *consoleOps) ensureNode(ver string, pr progress.Func) ([]echo, error) {
 // ensureJava locates the JDK at ver, installing it if absent, and returns a sandbox
 // echo of the runtime that will host the resolved dependencies.
 func (o *consoleOps) ensureJava(ver string, pr progress.Func) ([]echo, error) {
-	bin, err := java.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
+	bin, err := java.Locate(o.ctx, o.sess().fs, o.sess().tree.Root, ver, o.sess().fp.Arch, o.sess().fp.Libc.Family)
 	if err != nil {
-		res, ierr := newJavaInstaller(o.sess, pr).Install(o.ctx, ver)
+		res, ierr := newJavaInstaller(o.sess(), pr).Install(o.ctx, ver)
 		if ierr != nil {
 			return nil, ierr
 		}
@@ -343,7 +348,7 @@ func mavenEchoes(out maven.Result) []echo {
 // verifyRuntime runs the freshly-installed interpreter in the sandbox; its version
 // banner is the sandbox itself confirming the runtime loads.
 func (o *consoleOps) verifyRuntime(bin, flag string) echo {
-	res, err := o.sess.runner.Run(o.ctx, remote.ShellQuote(bin)+" "+flag, nil)
+	res, err := o.sess().runner.Run(o.ctx, remote.ShellQuote(bin)+" "+flag, nil)
 	if err != nil || res.ExitCode != 0 {
 		return echo{path.Base(bin) + " did not run in the sandbox", false}
 	}
@@ -367,13 +372,13 @@ func specNames(specs []pkg.Spec) []string {
 // `pip show` (the dist name, so no import-name guessing), reading the version the
 // sandbox actually has.
 func (o *consoleOps) verifyPyPkgs(ver string, names []string) []echo {
-	bin, err := python.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
+	bin, err := python.Locate(o.ctx, o.sess().fs, o.sess().tree.Root, ver, o.sess().fp.Arch, o.sess().fp.Libc.Family)
 	if err != nil {
 		return []echo{{"python " + ver + " runtime not found to verify packages", false}}
 	}
 	echoes := make([]echo, 0, len(names))
 	for _, name := range names {
-		res, err := o.sess.runner.Run(o.ctx, remote.ShellQuote(bin)+" -m pip show "+remote.ShellQuote(name), nil)
+		res, err := o.sess().runner.Run(o.ctx, remote.ShellQuote(bin)+" -m pip show "+remote.ShellQuote(name), nil)
 		if err != nil || res.ExitCode != 0 {
 			echoes = append(echoes, echo{name + " not present", false})
 			continue
@@ -386,14 +391,14 @@ func (o *consoleOps) verifyPyPkgs(ver string, names []string) []echo {
 // verifyNodePkgs confirms each requested package's node_modules dir exists in the
 // sandbox runtime (the dir name is the package name, so no require-name guessing).
 func (o *consoleOps) verifyNodePkgs(ver string, names []string) []echo {
-	bin, err := node.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
+	bin, err := node.Locate(o.ctx, o.sess().fs, o.sess().tree.Root, ver, o.sess().fp.Arch, o.sess().fp.Libc.Family)
 	if err != nil {
 		return []echo{{"node " + ver + " runtime not found to verify packages", false}}
 	}
 	modules := path.Join(path.Dir(path.Dir(bin)), "lib", "node_modules")
 	echoes := make([]echo, 0, len(names))
 	for _, name := range names {
-		data, err := o.sess.fs.ReadFile(o.ctx, path.Join(modules, name, "package.json"))
+		data, err := o.sess().fs.ReadFile(o.ctx, path.Join(modules, name, "package.json"))
 		if err != nil {
 			echoes = append(echoes, echo{name + " not present in node_modules", false})
 			continue
@@ -532,28 +537,112 @@ func splitSpecs(s string) []string {
 // asker fails safe to deny via the done channel (ctx.Done); `sess.Close()` (deferred)
 // tears down the connection.
 func runConsole(parent context.Context, cfg *config.Config, transport, agentLog string) error {
-	sess, err := openSession(parent, cfg, transport)
+	// The initial connect (and host-key trust prompt) runs before the alt-screen TUI
+	// so a /dev/tty password/trust prompt isn't fighting the rendered UI. A single
+	// CachingPrompter is reused for reconnects so a password typed now is remembered.
+	prompter := remote.NewCachingPrompter(nil)
+	sess, err := openSessionWith(parent, cfg, transport, prompter)
 	if hke := (*remote.HostKeyError)(nil); errors.As(err, &hke) {
 		// First contact with an untrusted (often ephemeral) sandbox: offer to
 		// record the host key from within the console, then reconnect once.
 		if tErr := trustHostInteractive(parent, cfg, hke); tErr != nil {
 			return tErr
 		}
-		sess, err = openSession(parent, cfg, transport)
+		sess, err = openSessionWith(parent, cfg, transport, prompter)
 	}
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	prompter.Commit() // the startup dial authenticated — remember the password for reconnects
 
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
 	events := make(chan tea.Msg, 64)
 	act := activity.New(activityPath(cfg))
+
+	// The supervisor owns the session: it swaps the holder on each (re)connect and
+	// closes each session when its serve cycle ends. Close the current one on return
+	// as a backstop (Close is idempotent if the supervisor already closed it).
+	holder := &sessionHolder{}
+	holder.Set(sess)
+	defer func() {
+		if s := holder.Get(); s != nil {
+			_ = s.Close()
+		}
+	}()
+
+	emit := func(m tea.Msg) {
+		select {
+		case events <- m:
+		default: // never stall the supervisor on a slow/closed UI
+		}
+	}
+
+	// With no explicit --agent-log, default to the controller-side agent.log and
+	// bridge the sandbox's agent stream into it, so [NANA] populates with no flag.
+	// Reset it first (synchronously) so this session shows only its own stream — not
+	// a previous run's leftover. The bridge reads the live session via the holder, so
+	// it follows reconnects.
+	logPath := agentLog
+	if logPath == "" {
+		logPath = agentLogPath(cfg)
+		resetAgentLog(logPath)
+		go bridgeAgentLog(ctx, holder, logPath)
+	}
+
+	// Serve in the background with auto-reconnect. The first cycle serves the already
+	// open session; on a drop the supervisor reconnects (capped backoff, forever) and
+	// the header reflects the connection state.
+	go func() {
+		seeded := sess
+		cycle := func(ctx context.Context, attempt int) (bool, error) {
+			s := seeded
+			seeded = nil
+			if s == nil {
+				var derr error
+				if s, derr = openSessionWith(ctx, cfg, transport, prompter); derr != nil {
+					return false, derr
+				}
+			}
+			holder.Set(s)
+			emit(tui.ConnStateMsg{State: tui.ConnConnected})
+			if attempt > 0 {
+				emit(activity.Event{
+					TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindOperated,
+					Type: "serve", Status: "ok", Detail: "reconnected to sandbox",
+				})
+			}
+			disp := buildConsoleDispatcher(ctx, s, cfg, act, events)
+			serveErr := disp.Serve(ctx, 2*time.Second)
+			_ = s.Close()
+			return true, serveErr
+		}
+		onDown := func(err error, attempt int, backoff time.Duration) {
+			emit(tui.ConnStateMsg{State: tui.ConnReconnecting})
+			emit(activity.Event{
+				TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindOperated,
+				Type: "serve", Status: "failed",
+				Detail: fmt.Sprintf("connection lost: %v — reconnecting in %s (attempt %d)", err, backoff.Round(time.Second), attempt),
+			})
+		}
+		_ = runSupervisor(ctx, prompter, cycle, onDown, sleepCtx)
+	}()
+
+	ops := &consoleOps{ctx: ctx, holder: holder, act: act, events: events}
+	model := tui.NewConsole(cfg.SandboxID, events, logPath, ops)
+	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
+	cancel() // stop serving; any pending approval fails safe via done
+	return err
+}
+
+// buildConsoleDispatcher builds a dispatcher over sess for the interactive console:
+// the tuiAsker approver + gate (approvals shown as modals), the registry, and the
+// activity observer feeding both the JSONL and the live [POPO] event channel. Built
+// fresh on every (re)connect since the dispatcher snapshots the session's fs/runner.
+func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Config, act *activity.Logger, events chan tea.Msg) *protocol.Dispatcher {
 	ap := newApprover(&tuiAsker{events: events, done: ctx.Done()}, cfg.SandboxID, act, nil)
 	sess.approver = ap
-
 	reg := buildRegistry(sess)
 	disp := protocol.NewDispatcher(sess.fs, sess.tree, reg)
 	ap.keepalive = func() { _ = disp.WriteHeartbeat(ctx) }
@@ -570,40 +659,7 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 		default: // never stall serving on a slow/closed UI
 		}
 	})
-
-	// Serve in the background; the console drives approvals over the event channel.
-	// If Serve dies unexpectedly (e.g. the SSH link drops) the console would look
-	// alive but stop receiving events — surface that as a visible activity line.
-	go func() {
-		if err := disp.Serve(ctx, 2*time.Second); err != nil && !errors.Is(err, context.Canceled) {
-			ev := activity.Event{
-				TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindOperated,
-				Type: "serve", Status: "failed", Detail: "serving stopped: " + err.Error(),
-			}
-			_ = act.Append(ev)
-			select {
-			case events <- ev:
-			default:
-			}
-		}
-	}()
-
-	// With no explicit --agent-log, default to the controller-side agent.log and
-	// bridge the sandbox's agent stream into it, so [NANA] populates with no flag.
-	// Reset it first (synchronously, before the reader/bridge) so this session shows
-	// only its own agent stream — not a previous run's leftover output.
-	logPath := agentLog
-	if logPath == "" {
-		logPath = agentLogPath(cfg)
-		resetAgentLog(logPath)
-		go bridgeAgentLog(ctx, sess, logPath)
-	}
-
-	ops := &consoleOps{ctx: ctx, sess: sess, act: act, events: events}
-	model := tui.NewConsole(cfg.SandboxID, events, logPath, ops)
-	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
-	cancel() // stop serving; any pending approval fails safe via done
-	return err
+	return disp
 }
 
 // resetAgentLog truncates (creates empty) the controller-side agent log at the start
@@ -624,11 +680,10 @@ func resetAgentLog(path string) {
 // so every view (console / tui / logs) shows the agent's stream by tailing one local
 // file — no --agent-log flag needed. The per-file read/offset/rotation logic and the
 // stream-json rendering live in pollAgentLogs.
-func bridgeAgentLog(ctx context.Context, sess *session, dst string) {
+func bridgeAgentLog(ctx context.Context, holder *sessionHolder, dst string) {
 	if dst == "" {
 		return
 	}
-	base := path.Join(sess.tree.Root, "agent")
 	offsets := map[string]int{}
 	t := time.NewTicker(1500 * time.Millisecond)
 	defer t.Stop()
@@ -637,6 +692,13 @@ func bridgeAgentLog(ctx context.Context, sess *session, dst string) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			// Read the live session each tick so the bridge follows reconnects; skip
+			// a tick while the link is down (between sessions).
+			sess := holder.Get()
+			if sess == nil {
+				continue
+			}
+			base := path.Join(sess.tree.Root, "agent")
 			if lines := pollAgentLogs(ctx, sess.fs, base, offsets); len(lines) > 0 {
 				appendLines(dst, lines)
 			}

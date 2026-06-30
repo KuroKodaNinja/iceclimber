@@ -88,7 +88,9 @@ func TestDefaultVersion(t *testing.T) {
 // supersedes it).
 func TestConsoleProgress_NonBlockingDrop(t *testing.T) {
 	ch := make(chan tea.Msg, 1)
-	o := &consoleOps{sess: &session{transport: "exec"}, events: ch}
+	holder := &sessionHolder{}
+	holder.Set(&session{transport: "exec"})
+	o := &consoleOps{holder: holder, events: ch}
 	fn := o.progress()
 	done := make(chan struct{})
 	go func() {

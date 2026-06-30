@@ -96,16 +96,20 @@ func withDispatcher(ctx context.Context, cfg *config.Config, transport string, d
 		return err
 	}
 	defer sess.Close()
+	h := &sessionHolder{}
+	h.Set(sess)
+	startAgentLogBridge(ctx, cfg, h)
 	disp := buildServeDispatcher(ctx, sess, cfg, deny, out, supervised)
 	return fn(disp)
 }
 
 // buildServeDispatcher builds a dispatcher over an already-open session: the
-// approver (when supervised) + gate, the registry minus any denied verbs, the
-// activity observer (durable JSONL + a live stdout feed), and the agent.log bridge.
-// Shared by the one-shot path (withDispatcher) and the reconnect supervisor, which
-// rebuilds it on every (re)connect since the dispatcher snapshots the session's
-// fs/runner at construction.
+// approver (when supervised) + gate, the registry minus any denied verbs, and the
+// activity observer (durable JSONL + a live stdout feed). Shared by the one-shot
+// path (withDispatcher) and the reconnect supervisor, which rebuilds it on every
+// (re)connect since the dispatcher snapshots the session's fs/runner at
+// construction. The caller owns the agent.log bridge (started once per serve run, so
+// it survives reconnects without re-truncating the log).
 func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config, deny []string, out io.Writer, supervised bool) *protocol.Dispatcher {
 	act := activity.New(activityPath(cfg))
 
@@ -145,15 +149,17 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 		fmt.Fprintln(out, strings.TrimRight(line, " "))
 	})
 
-	// Bridge the sandbox's per-agent session.log(s) into the controller-side agent.log
-	// so `iceclimber logs`/`tui` (which default --agent-log there) show the agent's
-	// stream without a flag, just like the embedded-serve console. Reset it first so
-	// this serve session's [NANA] doesn't show a previous run's leftover stream.
+	return disp
+}
+
+// startAgentLogBridge resets the controller-side agent.log and bridges the sandbox's
+// per-agent session.log(s) into it (so `iceclimber logs`/`tui` show the agent stream
+// without a flag), reading the live session via holder so it follows reconnects.
+// Started once per serve run.
+func startAgentLogBridge(ctx context.Context, cfg *config.Config, holder *sessionHolder) {
 	agentLog := agentLogPath(cfg)
 	resetAgentLog(agentLog)
-	go bridgeAgentLog(ctx, sess, agentLog)
-
-	return disp
+	go bridgeAgentLog(ctx, holder, agentLog)
 }
 
 // serviceDetail builds a short, human one-line summary of a response for the

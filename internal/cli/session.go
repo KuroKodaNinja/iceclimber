@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
@@ -37,6 +38,28 @@ type session struct {
 	policy           *egress.Policy
 	sandboxID        string
 	approver         webfetch.Approver // non-nil only in interactive serve
+}
+
+// sessionHolder guards the current session pointer so the reconnect supervisor can
+// swap it (Set) on each (re)connect while operator actions (consoleOps) and the
+// agent-log bridge read it (Get) concurrently. An action that reads a just-closed
+// session simply errors and the operator retries — no shared mutable state beyond
+// this pointer hand-off.
+type sessionHolder struct {
+	mu  sync.Mutex
+	cur *session
+}
+
+func (h *sessionHolder) Set(s *session) {
+	h.mu.Lock()
+	h.cur = s
+	h.mu.Unlock()
+}
+
+func (h *sessionHolder) Get() *session {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.cur
 }
 
 // Close releases the SFTP client (if any) and the SSH connection.
