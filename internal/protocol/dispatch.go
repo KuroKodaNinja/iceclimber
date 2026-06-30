@@ -15,12 +15,13 @@ import (
 // Dispatcher services requests for one sandbox tree over a remotefs.FS. It is the
 // engine behind both `serve` and `bootstrap`'s smoke test.
 type Dispatcher struct {
-	fs       remotefs.FS
-	tree     Tree
-	registry Registry
-	seq      int64
-	observe  func(ServiceEvent)
-	gate     func(context.Context, Request) error
+	fs          remotefs.FS
+	tree        Tree
+	registry    Registry
+	seq         int64 // written only by the heartbeat goroutine (sole writer)
+	observe     func(ServiceEvent)
+	gate        func(context.Context, Request) error
+	onHeartbeat func(seq int64)
 }
 
 // ServiceEvent reports one serviced request to an optional observer. It carries
@@ -49,6 +50,10 @@ func (d *Dispatcher) Observe(fn func(ServiceEvent)) { d.observe = fn }
 // `serve` to prompt the operator. Optional — a nil gate runs everything.
 func (d *Dispatcher) SetGate(fn func(context.Context, Request) error) { d.gate = fn }
 
+// OnHeartbeat registers a callback fired after each heartbeat write (with the new
+// seq). The console uses it to show a live "serving / stale" indicator. Optional.
+func (d *Dispatcher) OnHeartbeat(fn func(seq int64)) { d.onHeartbeat = fn }
+
 // RunOnce performs a single dispatch cycle: recover any in-flight requests left
 // in cur/ by a previous crash, then drain new/ oldest-first. Used by
 // `serve --once` and the bootstrap smoke test.
@@ -59,18 +64,26 @@ func (d *Dispatcher) RunOnce(ctx context.Context) error {
 	return d.drainNew(ctx)
 }
 
-// Serve loops: write the heartbeat, drain the outbox, sleep. It recovers once at
-// startup. Returns when ctx is cancelled.
+// Serve drains the outbox in a loop, with the heartbeat on a SEPARATE goroutine so a
+// long-running handler (a big install) or a blocked approval gate can't starve it —
+// nana judges Popo alive on seq advancement, and a stalled heartbeat would otherwise
+// read as a dead Popo (and mislead the console's serving indicator). It recovers once
+// at startup and returns when ctx is cancelled (or the drain hits a transport error,
+// which the serve supervisor catches to reconnect).
 func (d *Dispatcher) Serve(ctx context.Context, interval time.Duration) error {
 	if err := d.recover(ctx); err != nil {
 		return err
 	}
+	// Heartbeat ticker, scoped to this Serve call (stopped on return). The fs write
+	// rides its own SSH channel (sftp/ssh sessions are concurrency-safe), so it keeps
+	// advancing while drainNew services a request.
+	hbCtx, hbStop := context.WithCancel(ctx)
+	defer hbStop()
+	go d.heartbeatLoop(hbCtx, interval)
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		if err := d.WriteHeartbeat(ctx); err != nil {
-			return err
-		}
 		if err := d.drainNew(ctx); err != nil {
 			return err
 		}
@@ -82,9 +95,29 @@ func (d *Dispatcher) Serve(ctx context.Context, interval time.Duration) error {
 	}
 }
 
+// heartbeatLoop is the sole writer of the heartbeat (and of d.seq). It writes one
+// immediately (liveness visible without waiting a full interval), then every interval
+// until ctx is cancelled. A failed write (e.g. the link dropped) is non-fatal — the
+// next tick retries, and the drain loop's own error drives reconnect; meanwhile the
+// console's freshness indicator shows the heartbeat going stale.
+func (d *Dispatcher) heartbeatLoop(ctx context.Context, interval time.Duration) {
+	_ = d.WriteHeartbeat(ctx)
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			_ = d.WriteHeartbeat(ctx)
+		}
+	}
+}
+
 // WriteHeartbeat bumps the sequence and atomically replaces the heartbeat file
 // with "<seq> <iso8601>". Nana judges liveness on seq advancement, which needs
-// no clock sync (plan §4.7, decision #8).
+// no clock sync (plan §4.7, decision #8). Called only from heartbeatLoop (Serve) and
+// once by the bootstrap smoke test, so d.seq has a single writer at a time.
 func (d *Dispatcher) WriteHeartbeat(ctx context.Context) error {
 	d.seq++
 	content := strconv.FormatInt(d.seq, 10) + " " + time.Now().UTC().Format(time.RFC3339) + "\n"
@@ -94,6 +127,9 @@ func (d *Dispatcher) WriteHeartbeat(ctx context.Context) error {
 	}
 	if err := d.fs.Rename(ctx, tmp, d.tree.Heartbeat()); err != nil {
 		return fmt.Errorf("heartbeat publish: %w", err)
+	}
+	if d.onHeartbeat != nil {
+		d.onHeartbeat(d.seq)
 	}
 	return nil
 }

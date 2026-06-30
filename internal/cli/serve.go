@@ -116,7 +116,7 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 	// Build the approver before the registry so web.fetch's Deps receives it.
 	var ap *approver
 	if supervised {
-		ap = newApprover(newTerminalAsker(os.Stdin, out), cfg.SandboxID, act, nil)
+		ap = newApprover(newTerminalAsker(os.Stdin, out), cfg.SandboxID, act)
 		sess.approver = ap
 	}
 
@@ -126,8 +126,6 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 	}
 	disp := protocol.NewDispatcher(sess.fs, sess.tree, reg)
 	if ap != nil {
-		// keepalive refreshes liveness right before a prompt blocks (same goroutine).
-		ap.keepalive = func() { _ = disp.WriteHeartbeat(ctx) }
 		disp.SetGate(ap.gate)
 	}
 

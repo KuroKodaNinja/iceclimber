@@ -25,7 +25,7 @@ func (f *fakeAsker) ask(p prompt) choice {
 
 func newFakeApprover(choices ...choice) (*approver, *fakeAsker) {
 	fa := &fakeAsker{choices: choices}
-	return newApprover(fa, "sbx", nil, nil), fa
+	return newApprover(fa, "sbx", nil), fa
 }
 
 func areq(typ, params string) protocol.Request {

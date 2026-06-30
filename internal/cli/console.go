@@ -761,11 +761,10 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 // activity observer feeding both the JSONL and the live [POPO] event channel. Built
 // fresh on every (re)connect since the dispatcher snapshots the session's fs/runner.
 func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Config, act *activity.Logger, events chan tea.Msg) *protocol.Dispatcher {
-	ap := newApprover(&tuiAsker{events: events, done: ctx.Done()}, cfg.SandboxID, act, nil)
+	ap := newApprover(&tuiAsker{events: events, done: ctx.Done()}, cfg.SandboxID, act)
 	sess.approver = ap
 	reg := buildRegistry(sess)
 	disp := protocol.NewDispatcher(sess.fs, sess.tree, reg)
-	ap.keepalive = func() { _ = disp.WriteHeartbeat(ctx) }
 	disp.SetGate(ap.gate)
 	disp.Observe(func(ev protocol.ServiceEvent) {
 		e := activity.Event{

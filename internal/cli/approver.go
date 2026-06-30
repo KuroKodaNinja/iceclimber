@@ -46,27 +46,24 @@ type approver struct {
 	asker     asker
 	sandboxID string
 	act       *activity.Logger
-	keepalive func() // refresh liveness right before blocking on the operator
 
 	mu       sync.Mutex
 	allowAll map[string]bool // verb types approved "for all this session"
 	denyAll  map[string]bool // verb types denied "for all this session"
 }
 
-func newApprover(a asker, sandboxID string, act *activity.Logger, keepalive func()) *approver {
+func newApprover(a asker, sandboxID string, act *activity.Logger) *approver {
 	return &approver{
-		asker: a, sandboxID: sandboxID, act: act, keepalive: keepalive,
+		asker: a, sandboxID: sandboxID, act: act,
 		allowAll: map[string]bool{}, denyAll: map[string]bool{},
 	}
 }
 
-// present injects the sandbox id, refreshes liveness, and asks. Every prompt goes
-// through here so liveness stays honest while the operator decides.
+// present injects the sandbox id and asks. (Liveness no longer needs refreshing here:
+// the dispatcher's background heartbeat ticker keeps it fresh even while the operator
+// decides, so a blocked prompt can't make Popo look dead.)
 func (a *approver) present(p prompt) choice {
 	p.sandbox = a.sandboxID
-	if a.keepalive != nil {
-		a.keepalive()
-	}
 	return a.asker.ask(p)
 }
 
