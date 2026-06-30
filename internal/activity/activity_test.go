@@ -84,6 +84,19 @@ func TestReadAndCounts(t *testing.T) {
 	}
 }
 
+func TestCounts_IgnoresStarted(t *testing.T) {
+	// KindStarted is live-only and never written, but a stray line must not inflate the
+	// serviced tally — in-progress is not completion.
+	evs := []Event{
+		{Kind: KindStarted, ID: "1", Type: "ping"},
+		{Kind: KindServiced, ID: "1", Type: "ping", Status: "ok"},
+		{Kind: KindStarted, ID: "2", Type: "pip.install"},
+	}
+	if s, a, d := Counts(evs); s != 1 || a != 0 || d != 0 {
+		t.Errorf("Counts = served %d, approved %d, denied %d; want 1/0/0 (started ignored)", s, a, d)
+	}
+}
+
 func TestLoggerEmptyPathIsNoop(t *testing.T) {
 	l := New("")
 	if err := l.Append(Event{Kind: KindServiced}); err != nil {

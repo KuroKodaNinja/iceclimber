@@ -122,6 +122,13 @@ func eventBody(e activity.Event) string {
 		return "approved " + e.Detail
 	case activity.KindDenied:
 		return "denied " + e.Detail
+	case activity.KindStarted:
+		// Live-only; not normally on disk. Render defensively for a stray line.
+		typ := e.Type
+		if typ == "" {
+			typ = "?"
+		}
+		return "▸ " + typ + " …"
 	default:
 		return strings.TrimSpace(e.Kind + " " + e.Detail)
 	}

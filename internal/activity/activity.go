@@ -20,6 +20,11 @@ const (
 	KindDenied   = "denied"   // operator denied a held egress
 	KindOperated = "operated" // operator-initiated action (console install/bootstrap)
 	KindVerified = "verified" // sandbox-side confirmation (Nana echo: ran in the sandbox)
+	// KindStarted marks a request picked up and in progress. It is a LIVE-only signal
+	// (its value is "right now") — emitted to the console event channel but never
+	// written to the durable JSONL, so the log holds exactly one serviced line per
+	// request and Counts/seed-on-restart stay honest. Carries id/type; no status/dur.
+	KindStarted = "started"
 )
 
 // Event sides: which actor an event is attributed to (drives the console pane).
@@ -114,6 +119,9 @@ func Counts(events []Event) (serviced, approved, denied int) {
 			approved++
 		case KindDenied:
 			denied++
+		case KindStarted:
+			// Live-only, never durable — but ignore defensively so a stray line (e.g.
+			// a future writer or a hand-edited log) can't inflate the serviced tally.
 		}
 	}
 	return
