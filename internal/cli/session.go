@@ -70,7 +70,19 @@ func dialConfig(cfg *config.Config) remote.DialConfig {
 }
 
 func openSession(ctx context.Context, cfg *config.Config, transport string) (*session, error) {
-	r, err := remote.Dial(ctx, dialConfig(cfg))
+	return openSessionWith(ctx, cfg, transport, nil)
+}
+
+// openSessionWith is openSession with an explicit interactive-auth prompter. The
+// reconnect supervisor passes a single remote.CachingPrompter across every dial so a
+// password typed once is reused on reconnect (see superviseServe). A nil prompter
+// uses the default /dev/tty prompter.
+func openSessionWith(ctx context.Context, cfg *config.Config, transport string, prompter remote.PasswordPrompter) (*session, error) {
+	dc := dialConfig(cfg)
+	if prompter != nil {
+		dc.Prompter = prompter
+	}
+	r, err := remote.Dial(ctx, dc)
 	if err != nil {
 		return nil, fmt.Errorf("connect to sandbox %s: %w", cfg.SandboxID, err)
 	}

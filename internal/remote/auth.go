@@ -32,8 +32,15 @@ func authMethods(p *dialPlan) ([]ssh.AuthMethod, error) {
 	if pr == nil {
 		pr = ttyPrompter{}
 	}
+	// Keyboard-interactive uses the raw prompter even behind a CachingPrompter: its
+	// challenges may be one-time OTP/2FA codes that must not be replayed on reconnect.
+	// Password (PAM/local) may ride the cache.
+	kbdPr := pr
+	if cp, ok := pr.(*CachingPrompter); ok {
+		kbdPr = cp.Raw()
+	}
 	if p.allowKbd {
-		methods = append(methods, keyboardInteractiveAuth(pr))
+		methods = append(methods, keyboardInteractiveAuth(kbdPr))
 	}
 	if p.allowPassword {
 		methods = append(methods, passwordAuth(pr, p.user+"@"+p.host))
@@ -43,6 +50,15 @@ func authMethods(p *dialPlan) ([]ssh.AuthMethod, error) {
 		return nil, errors.New("no SSH auth method available: set ssh.identity_file, start ssh-agent (SSH_AUTH_SOCK), or enable ssh.password_auth")
 	}
 	return methods, nil
+}
+
+// IsAuthFailure reports whether err is an SSH authentication failure (the server
+// rejected our credentials) rather than a transport/network error. The reconnect
+// supervisor uses it to decide whether to drop a cached password and re-prompt
+// (auth failure) or keep it and retry (transport failure). Matches the stable
+// x/crypto/ssh handshake-failure message.
+func IsAuthFailure(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "unable to authenticate")
 }
 
 // fileSigners loads private keys from the given files, in order, deduped. Missing

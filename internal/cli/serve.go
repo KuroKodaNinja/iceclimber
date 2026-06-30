@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -53,16 +52,13 @@ func newServeCmd() *cobra.Command {
 			// Long-lived: stop cleanly on Ctrl-C / SIGTERM.
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return withDispatcher(ctx, cfg, transport, deny, out, supervised, func(d *protocol.Dispatcher) error {
-				fmt.Fprintf(out, "serving sandbox %s; Ctrl-C to stop\n", cfg.SandboxID)
-				if supervised {
-					fmt.Fprintln(out, "supervised: you'll be asked to approve each operation")
-				}
-				if err := d.Serve(ctx, interval); err != nil && !errors.Is(err, context.Canceled) {
-					return err
-				}
-				return nil
-			})
+			fmt.Fprintf(out, "serving sandbox %s; Ctrl-C to stop\n", cfg.SandboxID)
+			if supervised {
+				fmt.Fprintln(out, "supervised: you'll be asked to approve each operation")
+			}
+			// Auto-reconnect on an SSH drop instead of exiting (keepalive keeps the
+			// link warm; the supervisor rebuilds the session if it drops anyway).
+			return superviseServe(ctx, cfg, transport, deny, out, supervised, interval, loggingServeHooks(out, cfg.SandboxID))
 		},
 	}
 	cmd.Flags().BoolVar(&once, "once", false, "run a single dispatch cycle and exit")
@@ -86,13 +82,8 @@ func isTerminal(f *os.File) bool {
 func runHeadless(ctx context.Context, cfg *config.Config, transport string, out io.Writer) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return withDispatcher(ctx, cfg, transport, nil, out, false, func(d *protocol.Dispatcher) error {
-		fmt.Fprintf(out, "serving sandbox %s (headless); Ctrl-C to stop\n", cfg.SandboxID)
-		if err := d.Serve(ctx, 2*time.Second); err != nil && !errors.Is(err, context.Canceled) {
-			return err
-		}
-		return nil
-	})
+	fmt.Fprintf(out, "serving sandbox %s (headless); Ctrl-C to stop\n", cfg.SandboxID)
+	return superviseServe(ctx, cfg, transport, nil, out, false, 2*time.Second, loggingServeHooks(out, cfg.SandboxID))
 }
 
 // withDispatcher opens a session, builds a dispatcher (minus any denied verbs),
@@ -105,7 +96,17 @@ func withDispatcher(ctx context.Context, cfg *config.Config, transport string, d
 		return err
 	}
 	defer sess.Close()
+	disp := buildServeDispatcher(ctx, sess, cfg, deny, out, supervised)
+	return fn(disp)
+}
 
+// buildServeDispatcher builds a dispatcher over an already-open session: the
+// approver (when supervised) + gate, the registry minus any denied verbs, the
+// activity observer (durable JSONL + a live stdout feed), and the agent.log bridge.
+// Shared by the one-shot path (withDispatcher) and the reconnect supervisor, which
+// rebuilds it on every (re)connect since the dispatcher snapshots the session's
+// fs/runner at construction.
+func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config, deny []string, out io.Writer, supervised bool) *protocol.Dispatcher {
 	act := activity.New(activityPath(cfg))
 
 	// Build the approver before the registry so web.fetch's Deps receives it.
@@ -152,7 +153,7 @@ func withDispatcher(ctx context.Context, cfg *config.Config, transport string, d
 	resetAgentLog(agentLog)
 	go bridgeAgentLog(ctx, sess, agentLog)
 
-	return fn(disp)
+	return disp
 }
 
 // serviceDetail builds a short, human one-line summary of a response for the
