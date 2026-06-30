@@ -166,6 +166,43 @@ func TestServeResetsStaleAgentLog(t *testing.T) {
 	t.Fatal("serve did not reset the stale agent.log — [NANA] would show a previous session's stream")
 }
 
+// TestAgentWrapPreexisting proves `agent wrap` wires the nana/run launcher around a
+// binary ALREADY on the sandbox, with NO relay. We use /bin/echo as a stand-in
+// pre-existing agent binary (it tolerates --version), wrap it, and confirm the
+// launcher bakes that path, the nana dispatcher is written, nothing was relayed
+// into the agent dir, and `nana` actually runs the wrapped binary.
+func TestAgentWrapPreexisting(t *testing.T) {
+	sb := requireSandbox(t)
+	root := "/tmp/iceclimber-wrap-" + protocol.NewID()
+	cfg := writeConfigRoot(t, sb, root)
+	scheduleRootCleanup(t, root)
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
+
+	out := string(runIceclimber(t, "agent", "wrap", "claude",
+		"--bin", "/bin/echo", "--skip-auth", "--transport", "sftp", "--config", cfg))
+	if !strings.Contains(out, "wrapped Claude Code") || !strings.Contains(out, "not relayed") {
+		t.Errorf("wrap output unexpected:\n%s", out)
+	}
+
+	// The run launcher bakes the pre-existing binary; nana + run are executable.
+	if s := limaSh(t, "cat "+root+"/agent/claude/run 2>/dev/null"); !strings.Contains(s, "bin='/bin/echo'") {
+		t.Errorf("run launcher should bake /bin/echo:\n%s", s)
+	}
+	for _, p := range []string{root + "/nana", root + "/agent/claude/run"} {
+		if s := limaSh(t, "test -x "+p+" && echo ok || echo no"); !strings.Contains(s, "ok") {
+			t.Errorf("%s missing or not executable", p)
+		}
+	}
+	// No relay: no agent binary was pushed into the agent dir.
+	if s := limaSh(t, "test -e "+root+"/agent/claude/claude && echo present || echo absent"); !strings.Contains(s, "absent") {
+		t.Errorf("wrap must not relay a binary into the agent dir")
+	}
+	// nana launches the wrapped binary and exits cleanly.
+	if s := limaSh(t, root+"/nana --version >/dev/null 2>&1; echo EXIT=$?"); !strings.Contains(s, "EXIT=0") {
+		t.Errorf("nana over the wrapped binary did not run cleanly: %s", s)
+	}
+}
+
 // TestAgentInstallRejectsAPIKey proves the command refuses an API-key token.
 func TestAgentInstallRejectsAPIKey(t *testing.T) {
 	sb := requireSandbox(t)

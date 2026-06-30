@@ -49,6 +49,25 @@ func TestPopoClient(t *testing.T) {
 	}
 }
 
+// TestPopoShellenv proves `popo shellenv` emits an eval-able block that puts popo
+// (and $ICECLIMBER_HOME) into an interactive sandbox shell: after eval, popo
+// resolves by name and ICECLIMBER_HOME points at the install root.
+func TestPopoShellenv(t *testing.T) {
+	sb := requireSandbox(t)
+	root := "/tmp/iceclimber-shellenv-" + protocol.NewID()
+	cfg := writeConfigRoot(t, sb, root)
+	scheduleRootCleanup(t, root)
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp") // drops <root>/popo
+
+	out := limaSh(t, `eval "$(`+root+`/popo shellenv)"; echo "HOME=$ICECLIMBER_HOME"; command -v popo`)
+	if !strings.Contains(out, "HOME="+root) {
+		t.Errorf("shellenv did not export ICECLIMBER_HOME=%s:\n%s", root, out)
+	}
+	if !strings.Contains(out, root+"/popo") {
+		t.Errorf("after eval, popo should resolve by name to %s/popo:\n%s", root, out)
+	}
+}
+
 // TestRawFileProtocol proves the file-I/O-only fallback (PROTOCOL.md): a sandbox-side
 // actor talks to Popo with NO popo client — it writes the request envelope to
 // outbox/tmp and renames it into outbox/new (atomic delivery), then reads the response
