@@ -695,15 +695,18 @@ func appendLines(dst string, lines []string) {
 // in-console equivalent of `iceclimber trust`. Declining is a hard stop: the
 // security floor is never lowered silently.
 func trustHostInteractive(ctx context.Context, cfg *config.Config, hke *remote.HostKeyError) error {
-	key, err := remote.FetchHostKey(ctx, remote.DialConfig{
-		Host: cfg.SSH.Host, Port: cfg.SSH.Port, User: cfg.SSH.User, IdentityFile: cfg.SSH.IdentityFile,
-	})
+	dc := dialConfig(cfg)
+	host, port, resolvedKH, err := remote.ResolveTarget(ctx, dc)
+	if err != nil {
+		return fmt.Errorf("resolve ssh config for %s: %w", cfg.SandboxID, err)
+	}
+	key, err := remote.FetchHostKey(ctx, dc)
 	if err != nil {
 		return fmt.Errorf("fetch host key for %s: %w", cfg.SandboxID, err)
 	}
 	info := tui.HostKeyInfo{
 		SandboxID:   cfg.SandboxID,
-		Address:     fmt.Sprintf("%s:%d", cfg.SSH.Host, portOr22(cfg.SSH.Port)),
+		Address:     fmt.Sprintf("%s:%d", host, port),
 		KeyType:     key.Type(),
 		Fingerprint: remote.Fingerprint(key),
 		Mismatch:    hke.Mismatch,
@@ -715,5 +718,9 @@ func trustHostInteractive(ctx context.Context, cfg *config.Config, hke *remote.H
 	if tp, ok := out.(tui.TrustPrompt); !ok || !tp.Accepted() {
 		return fmt.Errorf("host key for %s not trusted; aborting", cfg.SandboxID)
 	}
-	return remote.RecordHostKey(cfg.SSH.KnownHosts, cfg.SSH.Host, cfg.SSH.Port, key, hke.Mismatch)
+	kh := cfg.SSH.KnownHosts
+	if kh == "" {
+		kh = resolvedKH
+	}
+	return remote.RecordHostKey(kh, host, port, key, hke.Mismatch)
 }

@@ -167,6 +167,7 @@ ssh:
   user: %s
   identity_file: %s
   known_hosts: %s
+  use_ssh_config: false
 `, sandboxName, sb.Host, sb.Port, sb.User, sb.IdentityFile, sb.KnownHosts)
 	path := filepath.Join(t.TempDir(), "iceclimber.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {

@@ -108,6 +108,7 @@ ssh:
   user: %s
   identity_file: %s
   known_hosts: %s
+  use_ssh_config: false
 remote_root: %s
 pip:
   index_url: %s

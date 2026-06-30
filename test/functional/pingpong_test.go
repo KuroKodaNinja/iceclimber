@@ -87,6 +87,7 @@ ssh:
   user: %s
   identity_file: %s
   known_hosts: %s
+  use_ssh_config: false
 remote_root: %s
 `, sandboxName, sb.Host, sb.Port, sb.User, sb.IdentityFile, sb.KnownHosts, root)
 	path := filepath.Join(t.TempDir(), "iceclimber.yaml")

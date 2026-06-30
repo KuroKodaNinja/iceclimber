@@ -32,6 +32,8 @@ ssh:
   user: $USER_
   identity_file: $IDENT
   known_hosts: $KH
+  # Hermetic: don't read the dev/CI machine's real ~/.ssh/config during tests.
+  use_ssh_config: false
 EOF
 if [ -n "$ROOT" ]; then
 	echo "remote_root: $ROOT" >> "$OUT"

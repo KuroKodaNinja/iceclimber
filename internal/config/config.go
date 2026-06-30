@@ -94,13 +94,27 @@ type Pip struct {
 	ControllerIndexURL string `yaml:"controller_index_url"`
 }
 
-// SSH holds the controller's connection details for the sandbox host.
+// SSH holds the controller's connection details for the sandbox host. host may be
+// a literal host/IP or a ~/.ssh/config Host alias; when use_ssh_config is on (the
+// default) `ssh -G` resolves the alias (HostName/User/Port/IdentityFile/ProxyJump),
+// abstracting jumpboxes away into the operator's existing ssh config.
 type SSH struct {
 	Host         string `yaml:"host"`
-	User         string `yaml:"user"`
-	Port         int    `yaml:"port"`
+	User         string `yaml:"user"`          // optional; ssh_config / OS default supplies it
+	Port         int    `yaml:"port"`          // optional; 0 = let ssh_config / default (22) decide
 	IdentityFile string `yaml:"identity_file"` // optional; falls back to ssh-agent
 	KnownHosts   string `yaml:"known_hosts"`   // optional; defaults to ~/.ssh/known_hosts
+
+	// PasswordAuth / KeyboardInteractive opt into interactive auth (off by default;
+	// key/agent are always tried first). Prompted no-echo on the controlling
+	// terminal — works headless too, as long as a terminal exists.
+	PasswordAuth        bool `yaml:"password_auth"`
+	KeyboardInteractive bool `yaml:"keyboard_interactive"`
+	// UseSSHConfig gates consulting ~/.ssh/config via `ssh -G`. Pointer so an unset
+	// field means "default true"; set false to force a literal direct dial.
+	UseSSHConfig *bool `yaml:"use_ssh_config"`
+	// SSHConfigFile overrides the ssh config path used for resolution (ssh -F).
+	SSHConfigFile string `yaml:"ssh_config_file"`
 }
 
 // Load reads, parses, and validates the config at path. When selectSandbox is
@@ -115,11 +129,12 @@ func Load(path, selectSandbox string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
-	if c.SSH.Port == 0 {
-		c.SSH.Port = 22
-	}
+	// Port is intentionally NOT defaulted to 22 here: 0 means "unset" so an
+	// ssh_config Port can win during resolution; the dial layer applies the 22
+	// default last (after `ssh -G`). Display sites use portOr22 for a friendly value.
 	c.SSH.IdentityFile = expandHome(c.SSH.IdentityFile)
 	c.SSH.KnownHosts = expandHome(c.SSH.KnownHosts)
+	c.SSH.SSHConfigFile = expandHome(c.SSH.SSHConfigFile)
 	c.CacheDir = expandHome(c.CacheDir)
 	c.AuditLog = expandHome(c.AuditLog)
 	c.ActivityLog = expandHome(c.ActivityLog)
@@ -137,9 +152,7 @@ func (c *Config) validate(selectSandbox string) error {
 	if c.SSH.Host == "" {
 		missing = append(missing, "ssh.host")
 	}
-	if c.SSH.User == "" {
-		missing = append(missing, "ssh.user")
-	}
+	// ssh.user is optional: ssh_config (or the OS default) can supply it.
 	if len(missing) > 0 {
 		return fmt.Errorf("config missing required field(s): %s", strings.Join(missing, ", "))
 	}

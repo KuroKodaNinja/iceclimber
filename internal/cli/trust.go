@@ -59,7 +59,19 @@ type trustOpts struct {
 
 func runTrust(ctx context.Context, cmd *cobra.Command, cfg *config.Config, khPath string, opt trustOpts) error {
 	w := cmd.OutOrStdout()
-	dc := remote.DialConfig{Host: cfg.SSH.Host, Port: cfg.SSH.Port, User: cfg.SSH.User, IdentityFile: cfg.SSH.IdentityFile}
+	dc := dialConfig(cfg)
+
+	// Resolve the effective target (honors ~/.ssh/config + ProxyJump), so we
+	// verify and record the key against the resolved HostName:Port — and reach a
+	// host behind a bastion. When no explicit known_hosts is set, use the resolved
+	// UserKnownHostsFile so it interoperates with the operator's normal ssh.
+	host, port, resolvedKH, err := remote.ResolveTarget(ctx, dc)
+	if err != nil {
+		return fmt.Errorf("resolve ssh config for %s: %w", cfg.SandboxID, err)
+	}
+	if khPath == "" {
+		khPath = resolvedKH
+	}
 
 	key, err := remote.FetchHostKey(ctx, dc)
 	if err != nil {
@@ -67,12 +79,12 @@ func runTrust(ctx context.Context, cmd *cobra.Command, cfg *config.Config, khPat
 	}
 	fp := remote.Fingerprint(key)
 
-	state, err := remote.CheckHostKey(khPath, cfg.SSH.Host, cfg.SSH.Port, key)
+	state, err := remote.CheckHostKey(khPath, host, port, key)
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(w, "sandbox:     %s (%s@%s:%d)\n", cfg.SandboxID, cfg.SSH.User, cfg.SSH.Host, portOr22(cfg.SSH.Port))
+	fmt.Fprintf(w, "sandbox:     %s (%s@%s:%d)\n", cfg.SandboxID, cfg.SSH.User, host, port)
 	fmt.Fprintf(w, "host key:    %s\n", key.Type())
 	fmt.Fprintf(w, "fingerprint: %s\n", fp)
 
@@ -106,7 +118,7 @@ func runTrust(ctx context.Context, cmd *cobra.Command, cfg *config.Config, khPat
 		}
 	}
 
-	if err := remote.RecordHostKey(khPath, cfg.SSH.Host, cfg.SSH.Port, key, opt.replace); err != nil {
+	if err := remote.RecordHostKey(khPath, host, port, key, opt.replace); err != nil {
 		return err
 	}
 	resolved, _ := remote.ResolveKnownHosts(khPath)

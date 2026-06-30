@@ -29,13 +29,7 @@ func newProbeCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
 			defer cancel()
 
-			r, err := remote.Dial(ctx, remote.DialConfig{
-				Host:         cfg.SSH.Host,
-				Port:         cfg.SSH.Port,
-				User:         cfg.SSH.User,
-				IdentityFile: cfg.SSH.IdentityFile,
-				KnownHosts:   cfg.SSH.KnownHosts,
-			})
+			r, err := remote.Dial(ctx, dialConfig(cfg))
 			if err != nil {
 				return fmt.Errorf("connect to sandbox %s: %w", cfg.SandboxID, err)
 			}
@@ -61,7 +55,7 @@ func newProbeCmd() *cobra.Command {
 
 func printFingerprint(cmd *cobra.Command, cfg *config.Config, fp *probe.Fingerprint) {
 	w := cmd.OutOrStdout()
-	fmt.Fprintf(w, "sandbox:   %s (%s@%s:%d)\n", cfg.SandboxID, cfg.SSH.User, cfg.SSH.Host, cfg.SSH.Port)
+	fmt.Fprintf(w, "sandbox:   %s (%s@%s:%d)\n", cfg.SandboxID, cfg.SSH.User, cfg.SSH.Host, portOr22(cfg.SSH.Port))
 	fmt.Fprintf(w, "os/arch:   %s / %s\n", orUnknown(fp.OS), orUnknown(fp.Arch))
 	if fp.OS == "linux" {
 		conf := "low-confidence"

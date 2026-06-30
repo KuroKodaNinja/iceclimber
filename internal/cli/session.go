@@ -50,14 +50,25 @@ func (s *session) Close() error {
 // RemoteFS transport. "auto" prefers SFTP and falls back to ExecFS; "sftp" and
 // "exec" force one (the override exists so the functional suite can exercise
 // ExecFS even on a box whose SFTP works).
+// dialConfig maps the operator config's SSH block to a remote.DialConfig — the
+// single place CLI config becomes connection input, so honoring ~/.ssh/config,
+// jumpboxes, and interactive auth applies to every dial site uniformly.
+func dialConfig(cfg *config.Config) remote.DialConfig {
+	return remote.DialConfig{
+		Host:                     cfg.SSH.Host,
+		Port:                     cfg.SSH.Port,
+		User:                     cfg.SSH.User,
+		IdentityFile:             cfg.SSH.IdentityFile,
+		KnownHosts:               cfg.SSH.KnownHosts,
+		SSHConfigFile:            cfg.SSH.SSHConfigFile,
+		UseSSHConfig:             cfg.SSH.UseSSHConfig,
+		AllowPassword:            cfg.SSH.PasswordAuth,
+		AllowKeyboardInteractive: cfg.SSH.KeyboardInteractive,
+	}
+}
+
 func openSession(ctx context.Context, cfg *config.Config, transport string) (*session, error) {
-	r, err := remote.Dial(ctx, remote.DialConfig{
-		Host:         cfg.SSH.Host,
-		Port:         cfg.SSH.Port,
-		User:         cfg.SSH.User,
-		IdentityFile: cfg.SSH.IdentityFile,
-		KnownHosts:   cfg.SSH.KnownHosts,
-	})
+	r, err := remote.Dial(ctx, dialConfig(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("connect to sandbox %s: %w", cfg.SandboxID, err)
 	}

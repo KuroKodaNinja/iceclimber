@@ -33,8 +33,10 @@ remote_root: /home/agent/.iceclimber
 	if cfg.SandboxID != "box-1" || cfg.SSH.Host != "example.internal" {
 		t.Errorf("unexpected config: %+v", cfg)
 	}
-	if cfg.SSH.Port != 22 {
-		t.Errorf("Port = %d, want default 22", cfg.SSH.Port)
+	// Port is intentionally left 0 (unset) when omitted — the dial layer applies the
+	// 22 default last, so an ssh_config Port can win during resolution.
+	if cfg.SSH.Port != 0 {
+		t.Errorf("Port = %d, want 0 (unset; defaulted at dial time)", cfg.SSH.Port)
 	}
 	home, _ := os.UserHomeDir()
 	if want := filepath.Join(home, ".ssh", "known_hosts"); cfg.SSH.KnownHosts != want {
@@ -46,10 +48,23 @@ func TestLoad_MissingRequired(t *testing.T) {
 	path := writeTemp(t, "sandbox_id: box-1\n")
 	_, err := Load(path, "")
 	if err == nil {
-		t.Fatal("expected error for missing ssh host/user")
+		t.Fatal("expected error for missing ssh.host")
 	}
-	if !strings.Contains(err.Error(), "ssh.host") || !strings.Contains(err.Error(), "ssh.user") {
-		t.Errorf("error should name missing fields, got: %v", err)
+	if !strings.Contains(err.Error(), "ssh.host") {
+		t.Errorf("error should name the missing ssh.host, got: %v", err)
+	}
+}
+
+// TestLoad_UserOptional: ssh.user is no longer required — ssh_config or the OS
+// default can supply it, so a config with only ssh.host loads cleanly.
+func TestLoad_UserOptional(t *testing.T) {
+	path := writeTemp(t, "sandbox_id: box-1\nssh:\n  host: example.internal\n")
+	cfg, err := Load(path, "")
+	if err != nil {
+		t.Fatalf("ssh.user should be optional; Load failed: %v", err)
+	}
+	if cfg.SSH.User != "" {
+		t.Errorf("User = %q, want empty (resolved later)", cfg.SSH.User)
 	}
 }
 

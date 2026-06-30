@@ -37,7 +37,7 @@ func newConfigCmd() *cobra.Command {
 				}
 				w := cmd.OutOrStdout()
 				fmt.Fprintf(w, "sandbox_id:    %s\n", cfg.SandboxID)
-				fmt.Fprintf(w, "ssh:           %s@%s:%d\n", cfg.SSH.User, cfg.SSH.Host, cfg.SSH.Port)
+				fmt.Fprintf(w, "ssh:           %s@%s:%d\n", cfg.SSH.User, cfg.SSH.Host, portOr22(cfg.SSH.Port))
 				fmt.Fprintf(w, "identity_file: %s\n", orNone(cfg.SSH.IdentityFile))
 				fmt.Fprintf(w, "remote_root:   %s\n", orNone(cfg.RemoteRoot))
 				fmt.Fprintf(w, "cache_dir:     %s\n", orNone(cfg.CacheDir))
