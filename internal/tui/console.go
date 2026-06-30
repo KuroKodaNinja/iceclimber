@@ -457,7 +457,7 @@ func (c Console) renderMeter() string {
 	switch {
 	case p.Unit == progress.Bytes && p.Total > 0:
 		ratio := float64(p.Cur) / float64(p.Total)
-		fmt.Fprintf(b, "  %s %d%%  %s/%s", meterBar(ratio, 18), int(ratio*100),
+		fmt.Fprintf(b, "  %s %d%%  %s/%s", meterBar(ratio, 18), pct(ratio),
 			progress.HumanBytes(p.Cur), progress.HumanBytes(p.Total))
 		if eta := progress.ETA(p.Cur, p.Total, time.Since(c.progStart)); eta != "" {
 			b.WriteString("  " + eta)

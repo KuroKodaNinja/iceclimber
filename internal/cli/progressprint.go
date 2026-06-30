@@ -50,7 +50,11 @@ func (p *progressPrinter) handle(e progress.Event) {
 	line := e.Phase
 	switch {
 	case e.Unit == progress.Bytes && e.Total > 0:
-		line += fmt.Sprintf("  %d%%  %s/%s", e.Cur*100/e.Total, progress.HumanBytes(e.Cur), progress.HumanBytes(e.Total))
+		pctv := e.Cur * 100 / e.Total
+		if pctv > 100 {
+			pctv = 100
+		}
+		line += fmt.Sprintf("  %d%%  %s/%s", pctv, progress.HumanBytes(e.Cur), progress.HumanBytes(e.Total))
 		if eta := progress.ETA(e.Cur, e.Total, p.now().Sub(p.start)); eta != "" {
 			line += "  " + eta
 		}

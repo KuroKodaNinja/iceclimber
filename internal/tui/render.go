@@ -110,11 +110,13 @@ func header(w int, sandboxID string, served, approved, denied int, lastTS time.T
 
 func footer(w int, hasOps bool, running, meter string) string {
 	if running != "" {
-		// The meter carries its own spinner/bar styling; wrap to width only.
-		if meter != "" {
-			return lipgloss.NewStyle().Width(w).Render(" " + meter)
+		// The meter carries its own spinner/bar styling; wrap to width only. (The
+		// console always supplies a non-empty meter while running; the fallback keeps
+		// a sane line if a caller ever passes running without one.)
+		if meter == "" {
+			meter = warnStyle.Render("⏳ running " + running + " …")
 		}
-		return warnStyle.Width(w).Render(" ⏳ running " + running + " …")
+		return lipgloss.NewStyle().Width(w).Render(" " + meter)
 	}
 	keys := "q quit"
 	if hasOps {
@@ -133,6 +135,19 @@ func meterBar(ratio float64, w int) string {
 	}
 	n := int(ratio * float64(w))
 	return "▕" + strings.Repeat("█", n) + strings.Repeat("░", w-n) + "▏"
+}
+
+// pct renders a clamped 0–100 percentage (a server reporting more bytes than its
+// Content-Length must not print "103%" beside a full bar).
+func pct(ratio float64) int {
+	p := int(ratio * 100)
+	if p > 100 {
+		return 100
+	}
+	if p < 0 {
+		return 0
+	}
+	return p
 }
 
 func popoPane(w, h int, lines []popoLine) string {

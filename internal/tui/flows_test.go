@@ -434,9 +434,14 @@ func TestFlow_InstallProgressMeter(t *testing.T) {
 	tm.Send(ProgressMsg{Event: progress.Event{Phase: "installing six", Cur: 1, Total: 3, Unit: progress.Items}})
 	waitText(t, tm, "(1/3)")
 
+	// Finishing the op clears the meter: the idle footer (keybinds) returns and the
+	// model drops the progress sample + running label.
 	close(ops.release)
-	tm.Quit()
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	waitText(t, tm, "i install")
+	c := finalConsole(t, tm)
+	if c.prog != nil || c.running != "" {
+		t.Errorf("meter not cleared after finish: prog=%v running=%q", c.prog, c.running)
+	}
 }
 
 func TestFlow_RunningIndicator(t *testing.T) {

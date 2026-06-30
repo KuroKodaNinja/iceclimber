@@ -2,9 +2,11 @@ package cli
 
 import (
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/tui"
 )
 
@@ -78,5 +80,30 @@ func TestDefaultVersion(t *testing.T) {
 	}
 	if defaultVersion("javascript", "  22 ") != "22" {
 		t.Error("an explicit version should be trimmed and preserved")
+	}
+}
+
+// TestConsoleProgress_NonBlockingDrop: consoleOps.progress must never block the
+// install goroutine — a full events channel just drops the sample (the next one
+// supersedes it).
+func TestConsoleProgress_NonBlockingDrop(t *testing.T) {
+	ch := make(chan tea.Msg, 1)
+	o := &consoleOps{sess: &session{transport: "exec"}, events: ch}
+	fn := o.progress()
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 100; i++ { // far more than the buffer of 1
+			fn(progress.Event{Phase: "transferring", Cur: int64(i), Total: 100, Unit: progress.Bytes})
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("progress() blocked on a full channel — must drop, not stall the install")
+	}
+	// The one buffered sample is a transport-tagged ProgressMsg.
+	if m, ok := (<-ch).(tui.ProgressMsg); !ok || m.Transport != "exec" {
+		t.Errorf("buffered msg = %#v, want a ProgressMsg tagged via exec", m)
 	}
 }

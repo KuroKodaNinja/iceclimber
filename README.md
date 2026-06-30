@@ -168,8 +168,8 @@ operator install is **confirmed in the sandbox** (the interpreter's own version
 banner, a package presence check) and echoed into `[NANA]`. While an install runs,
 the footer shows a **live progress meter** — a spinner, the current phase
 (resolving / downloading / transferring / verifying), a bar with %/bytes/ETA for
-the transfer (or an `(i/n)` count for packages), and the **transfer mode**
-(`· via exec` or `· via sftp`). The `iceclimber install …` CLI shows the same
+the transfer (or an `(i/n)` count for pip packages; npm/maven show a phase
+spinner), and the **transfer mode** (`· via exec` or `· via sftp`). The `iceclimber install …` CLI shows the same
 progress on a terminal (a single updating line; plain phase lines when piped).
 
 ```sh

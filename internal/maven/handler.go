@@ -61,6 +61,9 @@ func Run(ctx context.Context, d Deps, javaVersion string, specs []pkg.Spec, tier
 		return Result{Installed: o.Installed, Failed: o.Failed, Classpath: cp}
 	}
 
+	// The Coursier resolve/fetch is one opaque invocation (no per-artifact signal),
+	// so this is a coarse phase marker — symmetric with npm's resolving→installing.
+	d.Progress.Phase("installing")
 	if resolveTier(tier, d.MirrorURL) == pkg.TierRelay {
 		o, cp, err := m.RelayResolve(ctx, specs)
 		if err != nil {
