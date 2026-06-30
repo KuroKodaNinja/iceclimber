@@ -28,6 +28,12 @@ type Deps struct {
 	ControllerPython   string
 	ControllerIndexURL string
 	Progress           progress.Func // optional operator-facing progress (nil = silent)
+
+	// RuntimeMode selects where the interpreter comes from: "" / "managed" (locate an
+	// iceclimber runtime) or "system" (install into a venv built from a system python).
+	RuntimeMode string
+	SystemPath  string // system interpreter (system mode); "" → python3 on PATH
+	EnvManager  string // system mode: "" / "venv"
 }
 
 // Run locates the target runtime and installs the specs via the selected tier
@@ -36,7 +42,11 @@ type Deps struct {
 // Outcome is the partial-success case (plan §4.3). Shared by CLI and handler.
 func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, tier string) (pkg.Outcome, error) {
 	d.Progress.Phase("resolving")
-	bin, err := python.Locate(ctx, d.FS, d.Root, pythonVersion, d.Arch, d.Libc)
+	// Resolve the interpreter for the chosen runtime source: a managed iceclimber
+	// runtime, or a venv built from a system python (created on demand). Both yield an
+	// absolute interpreter the rest of the install path uses unchanged.
+	bin, err := python.EnsureEnv(ctx, d.FS, d.Runner, d.Root, pythonVersion, d.Arch, d.Libc,
+		python.EnvSpec{Mode: d.RuntimeMode, SystemPath: d.SystemPath, EnvManager: d.EnvManager})
 	if err != nil {
 		return pkg.Outcome{}, err
 	}

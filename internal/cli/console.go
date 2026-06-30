@@ -26,6 +26,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
 	"github.com/KuroKodaNinja/iceclimber/internal/tui"
 )
 
@@ -290,9 +291,20 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 // ensurePython locates the Python runtime at ver, installing it if absent, and
 // returns a sandbox echo of the interpreter that will host the packages.
 func (o *consoleOps) ensurePython(ver string, pr progress.Func) ([]echo, error) {
-	bin, err := python.Locate(o.ctx, o.sess().fs, o.sess().tree.Root, ver, o.sess().fp.Arch, o.sess().fp.Libc.Family)
+	sess := o.sess()
+	src := sess.runtimeSources.Of("python")
+	if src.Mode == runtimes.ModeSystem {
+		// System mode: create/reuse an iceclimber-owned venv from the system python.
+		bin, err := python.EnsureEnv(o.ctx, sess.fs, sess.runner, sess.tree.Root, ver, sess.fp.Arch, sess.fp.Libc.Family,
+			python.EnvSpec{Mode: string(src.Mode), SystemPath: sess.systemRuntimePath("python", src), EnvManager: src.EnvManager})
+		if err != nil {
+			return nil, err
+		}
+		return []echo{o.verifyRuntime(bin, "-V")}, nil
+	}
+	bin, err := python.Locate(o.ctx, sess.fs, sess.tree.Root, ver, sess.fp.Arch, sess.fp.Libc.Family)
 	if err != nil {
-		res, ierr := newInstaller(o.sess(), pr).Install(o.ctx, ver)
+		res, ierr := newInstaller(sess, pr).Install(o.ctx, ver)
 		if ierr != nil {
 			return nil, ierr
 		}

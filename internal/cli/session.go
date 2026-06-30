@@ -39,6 +39,7 @@ type session struct {
 	policy           *egress.Policy
 	sandboxID        string
 	approver         webfetch.Approver // non-nil only in interactive serve
+	runtimeSources   runtimes.Sources  // resolved per-language runtime source (config > persisted > managed)
 }
 
 // sessionHolder guards the current session pointer so the reconnect supervisor can
@@ -61,6 +62,21 @@ func (h *sessionHolder) Get() *session {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.cur
+}
+
+// systemRuntimePath returns the system interpreter path for a language in system
+// mode: the source's explicit Path, else the binary probe discovered on PATH, else
+// "" (the manager falls back to the bare name on PATH).
+func (s *session) systemRuntimePath(lang string, src runtimes.Source) string {
+	if src.Path != "" {
+		return src.Path
+	}
+	if s.fp != nil {
+		if rt, ok := s.fp.Runtime(lang); ok {
+			return rt.Path
+		}
+	}
+	return ""
 }
 
 // Close releases the SFTP client (if any) and the SSH connection.
@@ -126,7 +142,16 @@ func openSessionWith(ctx context.Context, cfg *config.Config, transport string, 
 		}
 	}
 
-	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, auditPath: auditPath(cfg), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID}
+	// Resolve the runtime source for installs (config overrides the bootstrap-persisted
+	// choice; both fall back to managed). No prompt here — serve/install are unattended.
+	persistedSrc, err := runtimesStore(cfg).Load()
+	if err != nil {
+		_ = r.Close()
+		return nil, fmt.Errorf("load runtime sources: %w", err)
+	}
+	resolvedSrc := runtimes.Resolve(nil, configRuntimeSources(cfg.Runtimes), persistedSrc, nil, nil)
+
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, auditPath: auditPath(cfg), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID, runtimeSources: resolvedSrc}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"

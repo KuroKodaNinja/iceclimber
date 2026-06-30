@@ -121,12 +121,18 @@ pip:
 	return path
 }
 
-// limaSh runs a shell snippet inside the sandbox and returns its combined output.
+// limaSh runs a shell snippet inside the musl sandbox and returns its combined
+// output. Use limaShOn to target a different instance (e.g. the glibc box).
 func limaSh(t *testing.T, script string) string {
+	return limaShOn(t, sandboxName, script)
+}
+
+// limaShOn runs a shell snippet inside a named Lima instance.
+func limaShOn(t *testing.T, name, script string) string {
 	t.Helper()
-	out, err := exec.Command("limactl", "shell", sandboxName, "--", "sh", "-c", script).CombinedOutput()
+	out, err := exec.Command("limactl", "shell", name, "--", "sh", "-c", script).CombinedOutput()
 	if err != nil {
-		t.Fatalf("limactl shell: %v\n%s", err, out)
+		t.Fatalf("limactl shell %s: %v\n%s", name, err, out)
 	}
 	return string(out)
 }
