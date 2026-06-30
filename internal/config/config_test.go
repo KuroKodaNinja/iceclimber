@@ -55,6 +55,15 @@ func TestLoad_MissingRequired(t *testing.T) {
 	}
 }
 
+// TestLoad_RejectsDashHost: a host starting with '-' would be parsed by `ssh -G`
+// as an option flag (option injection), so Load must reject it.
+func TestLoad_RejectsDashHost(t *testing.T) {
+	path := writeTemp(t, "sandbox_id: box-1\nssh:\n  host: -oProxyCommand=evil\n  user: u\n")
+	if _, err := Load(path, ""); err == nil || !strings.Contains(err.Error(), "must not start with '-'") {
+		t.Fatalf("want rejection of dash-host, got: %v", err)
+	}
+}
+
 // TestLoad_UserOptional: ssh.user is no longer required — ssh_config or the OS
 // default can supply it, so a config with only ssh.host loads cleanly.
 func TestLoad_UserOptional(t *testing.T) {

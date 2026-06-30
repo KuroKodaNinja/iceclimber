@@ -75,11 +75,11 @@ func (c *proxyConn) Close() error {
 	c.closeOnce.Do(func() {
 		cerr := c.stdin.Close()
 		c.cancel()
-		werr := <-c.waitErr // reap; context kill surfaces as an *exec.ExitError, ignored
+		werr := <-c.waitErr // reap
 		_ = c.stdout.Close()
 		if cerr != nil {
 			c.closeErr = cerr
-		} else if werr != nil && !isKilled(werr) {
+		} else if werr != nil && !ignorableProxyExit(werr) {
 			c.closeErr = werr
 		}
 	})
@@ -106,9 +106,12 @@ type proxyAddr string
 func (proxyAddr) Network() string  { return "tcp" }
 func (a proxyAddr) String() string { return string(a) }
 
-// isKilled reports whether err is the expected result of our own context-kill
-// (so Close doesn't report it as a failure).
-func isKilled(err error) bool {
+// ignorableProxyExit reports whether a Wait error is just a non-zero/killed exit
+// of the proxy subprocess — which Close intentionally swallows (it's teardown; a
+// real handshake-time proxy failure is surfaced via stderrString/proxyDetail). It
+// deliberately treats ANY *exec.ExitError this way (we don't distinguish our own
+// context-kill from a genuine non-zero exit at Close time).
+func ignorableProxyExit(err error) bool {
 	var ee *exec.ExitError
 	return errors.As(err, &ee)
 }

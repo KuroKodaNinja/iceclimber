@@ -108,7 +108,7 @@ func runTrust(ctx context.Context, cmd *cobra.Command, cfg *config.Config, khPat
 		}
 		fmt.Fprintln(w, "fingerprint matches --fingerprint ✓")
 	} else if !opt.accept {
-		ok, err := confirm(cmd, fmt.Sprintf("Record this host key in known_hosts? [y/N] "))
+		ok, err := confirm(cmd, "Record this host key in known_hosts? [y/N] ")
 		if err != nil {
 			return err
 		}

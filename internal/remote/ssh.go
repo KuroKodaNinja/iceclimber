@@ -32,7 +32,8 @@ type DialConfig struct {
 	// (power users / hermetic tests); empty uses the default ~/.ssh/config.
 	SSHConfigFile string
 	// UseSSHConfig gates consulting `ssh -G`. nil/true = consult (honor
-	// ~/.ssh/config + ProxyJump); false = force a literal direct dial.
+	// ~/.ssh/config + ProxyJump); false = force a literal direct dial. (Dial and the
+	// rest of the connection path live in dial.go.)
 	UseSSHConfig *bool
 
 	// AllowPassword / AllowKeyboardInteractive opt into those interactive auth
@@ -43,9 +44,6 @@ type DialConfig struct {
 	// prompter (works headless too, as long as a controlling terminal exists).
 	Prompter PasswordPrompter
 }
-
-// Dial is defined in dial.go (it resolves a dialPlan, then connects directly or
-// through a ProxyCommand subprocess before the x/crypto handshake).
 
 // Run executes cmd in a fresh non-interactive session. No pty is requested — a
 // clean byte stream is required for the raw transfers ExecFS relies on (§6).
@@ -96,8 +94,6 @@ func (s *SSHRunner) Close() error {
 func (s *SSHRunner) NewSFTP() (*sftp.Client, error) {
 	return sftp.NewClient(s.client)
 }
-
-// authMethods is defined in auth.go.
 
 // knownHostsCallback builds a host-key verifier from path, or from the user's
 // default ~/.ssh/known_hosts when path is empty. An unknown host is a hard

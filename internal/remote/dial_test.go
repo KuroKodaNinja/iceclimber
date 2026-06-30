@@ -2,6 +2,8 @@ package remote
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -56,6 +58,39 @@ func TestBuildDialPlan_ExplicitWins(t *testing.T) {
 	}
 	if p.proxyArgv != nil {
 		t.Errorf("UseSSHConfig=false must not proxy: %q", p.proxyArgv)
+	}
+}
+
+func TestBuildDialPlan_ExpandsResolvedKnownHosts(t *testing.T) {
+	fakeResolve(t, "hostname h\nport 22\nuserknownhostsfile ~/.ssh/corp_known_hosts\n")
+	p, err := buildDialPlan(context.Background(), DialConfig{Host: "sandbox"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, ".ssh", "corp_known_hosts")
+	if p.knownHosts != want {
+		t.Errorf("resolved known_hosts = %q, want tilde-expanded %q", p.knownHosts, want)
+	}
+}
+
+// TestBuildDialPlan_NoSSHClient: when the ssh binary is absent, an unset
+// UseSSHConfig degrades to a literal direct dial (no error), but an explicit
+// use_ssh_config:true fails loud rather than silently losing a ProxyJump.
+func TestBuildDialPlan_NoSSHClient(t *testing.T) {
+	t.Setenv("PATH", "") // make exec.LookPath("ssh") fail → errSSHUnavailable
+
+	p, err := buildDialPlan(context.Background(), DialConfig{Host: "sandbox", Port: 2200})
+	if err != nil {
+		t.Fatalf("default (nil UseSSHConfig) should fall back silently: %v", err)
+	}
+	if p.host != "sandbox" || p.port != 2200 || p.proxyArgv != nil {
+		t.Errorf("fallback plan = %+v, want literal direct dial", p)
+	}
+
+	yes := true
+	if _, err := buildDialPlan(context.Background(), DialConfig{Host: "sandbox", UseSSHConfig: &yes}); err == nil {
+		t.Error("explicit use_ssh_config:true with no ssh client must fail, not silently direct-dial")
 	}
 }
 

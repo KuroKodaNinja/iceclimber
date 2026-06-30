@@ -156,6 +156,11 @@ func (c *Config) validate(selectSandbox string) error {
 	if len(missing) > 0 {
 		return fmt.Errorf("config missing required field(s): %s", strings.Join(missing, ", "))
 	}
+	// A host starting with '-' would be parsed by `ssh -G` as an option flag
+	// (option injection); reject it. Real hosts/aliases never start with '-'.
+	if strings.HasPrefix(c.SSH.Host, "-") {
+		return fmt.Errorf("ssh.host %q must not start with '-'", c.SSH.Host)
+	}
 	if selectSandbox != "" && selectSandbox != c.SandboxID {
 		return fmt.Errorf("--sandbox %q does not match configured sandbox_id %q", selectSandbox, c.SandboxID)
 	}

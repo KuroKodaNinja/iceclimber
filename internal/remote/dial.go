@@ -66,7 +66,9 @@ func buildDialPlan(ctx context.Context, cfg DialConfig) (*dialPlan, error) {
 				p.port = r.Port
 			}
 			if p.knownHosts == "" && len(r.KnownHostsFiles) > 0 {
-				p.knownHosts = r.KnownHostsFiles[0]
+				// ssh -G may emit a ~ path; expand it like we do for identity files
+				// (config-provided known_hosts is already expanded by config.Load).
+				p.knownHosts = expandTilde(r.KnownHostsFiles[0])
 			}
 			p.identityFiles = append(p.identityFiles, r.IdentityFiles...) // after the explicit key
 
@@ -74,8 +76,13 @@ func buildDialPlan(ctx context.Context, cfg DialConfig) (*dialPlan, error) {
 				p.proxyArgv = r.proxyArgv(sshBin, cfg.SSHConfigFile)
 			}
 		case errors.Is(err, errSSHUnavailable):
-			// No ssh client → keep the literal cfg (direct dial). Silent: a library
-			// shouldn't write to stdout, and there's no config to honor anyway.
+			// No ssh client. If the operator *explicitly* opted into ssh_config
+			// (e.g. they rely on a ProxyJump), fail loud rather than silently
+			// direct-dialing the literal host and losing the intended path. With
+			// UseSSHConfig unset (default), degrade quietly to a direct dial.
+			if cfg.UseSSHConfig != nil && *cfg.UseSSHConfig {
+				return nil, fmt.Errorf("use_ssh_config is enabled but no ssh client was found in PATH (needed to resolve %q / any ProxyJump)", cfg.Host)
+			}
 		default:
 			return nil, fmt.Errorf("resolve ssh config for %s: %w", cfg.Host, err)
 		}
