@@ -766,6 +766,14 @@ func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Conf
 	reg := buildRegistry(sess)
 	disp := protocol.NewDispatcher(sess.fs, sess.tree, reg)
 	disp.SetGate(ap.gate)
+	// Surface heartbeat liveness in the header (serving vs stale), independent of the
+	// SSH link state — non-blocking so the dispatcher never stalls on a slow UI.
+	disp.OnHeartbeat(func(seq int64) {
+		select {
+		case events <- tui.HeartbeatMsg{Seq: seq, At: time.Now()}:
+		default:
+		}
+	})
 	disp.Observe(func(ev protocol.ServiceEvent) {
 		e := activity.Event{
 			TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindServiced,

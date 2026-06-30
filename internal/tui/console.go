@@ -143,6 +143,18 @@ const (
 // claiming "serving".
 type ConnStateMsg struct{ State ConnState }
 
+// HeartbeatMsg reports a heartbeat write (the dispatcher's OnHeartbeat). The header
+// uses the arrival time to show serving-vs-stale independent of the SSH link state —
+// so a connected-but-wedged dispatcher (no heartbeats advancing) reads as stale.
+type HeartbeatMsg struct {
+	Seq int64
+	At  time.Time
+}
+
+// heartbeatStale is how long without an advancing heartbeat before the header flags it
+// (≈3× the 2s serve interval, with slack to avoid false positives).
+const heartbeatStale = 8 * time.Second
+
 // EgressRule is one persisted allow/deny rule; EgressPending is one held request.
 type EgressRule struct{ Kind, Pattern string } // Kind: "allow" | "deny"
 type EgressPending struct{ ID, Host, URL string }
@@ -185,7 +197,11 @@ type Console struct {
 	panelErr  string // last egress action error, shown in the panel ("" = none)
 	width     int
 	height    int
-	connState ConnState // SSH connection state (serving vs reconnecting)
+	connState ConnState // SSH link state (connected vs reconnecting)
+	// Heartbeat freshness — distinct from the link: a connected-but-wedged dispatcher
+	// stops advancing the seq, which the header surfaces as "stale".
+	lastHeartbeat time.Time
+	heartbeatSeq  int64
 
 	// form-bound values. Held behind a pointer so the huh form and every
 	// (value-copied) Console share one struct — binding to &c.field directly
@@ -290,6 +306,9 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return c, c.waitEvent()
 	case ConnStateMsg:
 		c.connState = msg.State
+		return c, c.waitEvent()
+	case HeartbeatMsg:
+		c.lastHeartbeat, c.heartbeatSeq = msg.At, msg.Seq
 		return c, c.waitEvent()
 	case ProgressMsg:
 		if msg.Phase != c.progPhase() {
@@ -431,8 +450,12 @@ func (c Console) View() string {
 	if c.running != "" {
 		meter = c.renderMeter()
 	}
+	hb := hbStatus{}
+	if !c.lastHeartbeat.IsZero() {
+		hb = hbStatus{known: true, seq: c.heartbeatSeq, age: time.Since(c.lastHeartbeat)}
+	}
 	return dashboard(c.width, c.height, c.sandboxID, c.served, c.approved, c.denied,
-		c.lastTS, c.connState, c.popoLines, c.nanaLines, true, c.nana != nil, c.ops != nil, c.running, meter)
+		c.lastTS, c.connState, hb, c.popoLines, c.nanaLines, true, c.nana != nil, c.ops != nil, c.running, meter)
 }
 
 // openForm builds and focuses the named operator form.

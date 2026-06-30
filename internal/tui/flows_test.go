@@ -127,19 +127,34 @@ func TestFlow_DashboardChrome(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 }
 
-// TestFlow_ConnStateHeader: the header starts at "● serving", flips to
-// "◌ reconnecting…" on a ConnReconnecting message, and back to serving on
-// ConnConnected — so the operator sees the real link state during an SSH drop.
+// TestFlow_ConnStateHeader: the LINK indicator follows ConnStateMsg — connected by
+// default, "◌ reconnecting…" on a drop, back to connected on reconnect.
 func TestFlow_ConnStateHeader(t *testing.T) {
 	tm := startConsole(t, newRecordOps())
-	waitText(t, tm, "● serving") // default
+	waitText(t, tm, "● connected") // default link state, no heartbeat yet
 
 	tm.Send(ConnStateMsg{State: ConnReconnecting})
 	waitText(t, tm, "◌ reconnecting…")
 
 	tm.Send(ConnStateMsg{State: ConnConnected})
-	waitText(t, tm, "● serving")
+	waitText(t, tm, "● connected")
 
+	tm.Quit()
+	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+}
+
+// TestFlow_HeartbeatFreshness: a fresh heartbeat shows "serving"; once it goes stale
+// (no advance past the threshold) the header flags it — even though the LINK is still
+// connected. This is the regression for "green serving while the heartbeat is stale".
+func TestFlow_HeartbeatFreshness(t *testing.T) {
+	tm := startConsole(t, newRecordOps())
+	// A fresh heartbeat → serving.
+	tm.Send(HeartbeatMsg{Seq: 7, At: time.Now()})
+	waitText(t, tm, "● serving · hb 7")
+	// An old heartbeat (older than the stale threshold) with the link still connected
+	// → the header must flag it stale, not keep claiming serving.
+	tm.Send(HeartbeatMsg{Seq: 7, At: time.Now().Add(-30 * time.Second)})
+	waitText(t, tm, "heartbeat stale")
 	tm.Quit()
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 }

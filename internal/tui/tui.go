@@ -90,7 +90,7 @@ func (m *Model) addNana(raw string) {
 // View renders the passive dashboard frame.
 func (m Model) View() string {
 	return dashboard(m.width, m.height, m.sandboxID, m.served, m.approved, m.denied,
-		m.lastTS, ConnViewing, m.popoLines, m.nanaLines, m.nana != nil, m.nana != nil, false, "", "")
+		m.lastTS, ConnViewing, hbStatus{}, m.popoLines, m.nanaLines, m.nana != nil, m.nana != nil, false, "", "")
 }
 
 // Init starts the poll ticker.

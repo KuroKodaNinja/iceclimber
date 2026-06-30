@@ -71,14 +71,21 @@ func nanaEcho(e activity.Event) string {
 
 // dashboard renders the header + two panes + footer. showNana renders the [NANA]
 // pane (the sandbox's voice); hasAgentLog only tweaks the empty-pane hint.
-func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, conn ConnState, popoLines []popoLine, nanaLines []string, showNana, hasAgentLog, hasOps bool, running, meter string) string {
+// hbStatus is the heartbeat freshness shown in the header next to the link state.
+type hbStatus struct {
+	known bool
+	seq   int64
+	age   time.Duration
+}
+
+func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, conn ConnState, hb hbStatus, popoLines []popoLine, nanaLines []string, showNana, hasAgentLog, hasOps bool, running, meter string) string {
 	if w < 40 {
 		w = 40
 	}
 	if h < 10 {
 		h = 10
 	}
-	hdr := header(w, sandboxID, served, approved, denied, lastTS, conn)
+	hdr := header(w, sandboxID, served, approved, denied, lastTS, conn, hb)
 	ftr := footer(w, hasOps, running, meter)
 	bodyH := h - lipgloss.Height(hdr) - lipgloss.Height(ftr)
 	if bodyH < 4 {
@@ -93,13 +100,23 @@ func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS 
 	return lipgloss.JoinVertical(lipgloss.Left, hdr, popoPane(w, bodyH, popoLines), ftr)
 }
 
-func header(w int, sandboxID string, served, approved, denied int, lastTS time.Time, conn ConnState) string {
-	state := okStyle.Render("● serving")
+func header(w int, sandboxID string, served, approved, denied int, lastTS time.Time, conn ConnState, hb hbStatus) string {
+	// Two distinct signals: the SSH link, and dispatcher liveness (heartbeat freshness).
+	var state string
 	switch conn {
-	case ConnReconnecting:
-		state = warnStyle.Render("◌ reconnecting…")
 	case ConnViewing:
 		state = dimStyle.Render("○ viewing")
+	case ConnReconnecting:
+		state = warnStyle.Render("◌ reconnecting…")
+	default: // ConnConnected — qualify with heartbeat health
+		switch {
+		case !hb.known:
+			state = okStyle.Render("● connected")
+		case hb.age <= heartbeatStale:
+			state = okStyle.Render(fmt.Sprintf("● serving · hb %d", hb.seq))
+		default:
+			state = warnStyle.Render(fmt.Sprintf("● connected · ⚠ heartbeat stale %s", hb.age.Round(time.Second)))
+		}
 	}
 	left := titleStyle.Render(" iceclimber ▸ "+sandboxID+" ") + " " + state
 	right := dimStyle.Render(fmt.Sprintf("serviced %d · approved %d · denied %d · last %s ",
