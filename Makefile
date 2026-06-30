@@ -12,9 +12,18 @@ DEMO_TPL    := test/lima/demo.yaml
 DEMO_CFG    := .demo/config.yaml
 BIN         := iceclimber
 
+# Release versioning: the nearest git tag (e.g. v0.2.0), else a short commit, with a
+# -dirty suffix if the tree has uncommitted changes. Override with `make release VERSION=…`.
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+PKG      := github.com/KuroKodaNinja/iceclimber
+LDFLAGS  := -s -w -X $(PKG)/internal/cli.version=$(VERSION)
+# Controller (iceclimber) targets we ship. popo is sandbox-side only, so it stays
+# linux/{amd64,arm64} (built host-independently by popo-bins) — see the `release` recipe.
+RELEASE_PLATFORMS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
+
 .PHONY: build popo-bins fmt vet test test-functional tui-functional scenario e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
 	demo-up demo-down demo-status demo-firewall demo-firewall-down demo-shell \
-	demo demo-live demo-console demo-config demo-bootstrap demo-agent demo-verify demo-reset demo-logs demo-tui clean
+	demo demo-live demo-console demo-config demo-bootstrap demo-agent demo-verify demo-reset demo-logs demo-tui release gh-release clean
 
 build: popo-bins
 	go build -o $(BIN) .
@@ -182,5 +191,43 @@ demo-reset:
 	   $$root/work/*"; \
 	 echo "demo: maildir + work cleared (runtimes + approvals kept)"
 
+# --- Release: cross-built binaries for distribution (see README) ---
+
+# Cross-build iceclimber for every controller platform + ship the sandbox-side popo
+# clients, packaged with checksums into dist/. Depends on popo-bins so every
+# iceclimber embeds BOTH linux popo clients (the relayed one is chosen by the
+# sandbox's fingerprint at bootstrap, not the host's arch — so a mac build bootstraps
+# a linux/amd64 or /arm64 VM all the same). CGO_ENABLED=0 → static, reliably
+# cross-compiled binaries. The version is stamped into `iceclimber version`.
+release: popo-bins
+	@command -v shasum >/dev/null || command -v sha256sum >/dev/null || { echo "need shasum or sha256sum" >&2; exit 1; }
+	@rm -rf dist && mkdir -p dist
+	@echo "iceclimber $(VERSION)"
+	@set -e; for p in $(RELEASE_PLATFORMS); do \
+		os=$${p%/*}; arch=$${p#*/}; \
+		echo "  build iceclimber $$os/$$arch"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags="$(LDFLAGS)" -o dist/$(BIN) . ; \
+		tar -C dist -czf dist/iceclimber_$(VERSION)_$${os}_$${arch}.tar.gz $(BIN); \
+		rm -f dist/$(BIN); \
+	done
+	@set -e; for arch in arm64 amd64; do \
+		echo "  package popo linux/$$arch"; \
+		cp internal/popobin/bin/popo-linux-$$arch dist/popo; \
+		tar -C dist -czf dist/popo_$(VERSION)_linux_$${arch}.tar.gz popo; \
+		rm -f dist/popo; \
+	done
+	@cd dist && { command -v sha256sum >/dev/null && sha256sum *.tar.gz || shasum -a 256 *.tar.gz; } > SHA256SUMS
+	@echo "release artifacts ($(VERSION)):"; ls -1 dist/
+
+# Publish the dist/ artifacts to a GitHub release for $(VERSION). Run from a tagged
+# commit (`git tag v0.2.0 && git push --tags`), having built `make release` first.
+# `gh release create` creates the GitHub release (and the tag, if missing) and
+# uploads the tarballs + checksums. Publishing is outward-facing — intentionally a
+# separate, explicit step, never part of `release`.
+gh-release: release
+	@command -v gh >/dev/null || { echo "gh CLI not found — install it or upload dist/* manually" >&2; exit 1; }
+	gh release create $(VERSION) dist/*.tar.gz dist/SHA256SUMS --title $(VERSION) --generate-notes
+
 clean:
 	rm -f $(BIN)
+	rm -rf dist
