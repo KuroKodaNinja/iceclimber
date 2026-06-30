@@ -16,12 +16,16 @@ import (
 // It is produced by buildDialPlan and consumed by Dial and FetchHostKey so all
 // connection paths agree on the resolved target.
 type dialPlan struct {
-	host         string   // resolved HostName — the dial target AND the known_hosts key
-	port         int
-	user         string
-	identityFile string   // explicit key file (ssh-config IdentityFiles join in the auth commit)
-	knownHosts   string   // resolved known_hosts path ("" → ~/.ssh/known_hosts)
-	proxyArgv    []string // nil = direct dial
+	host          string   // resolved HostName — the dial target AND the known_hosts key
+	port          int
+	user          string
+	identityFiles []string // explicit key file first, then ssh-config IdentityFiles
+	knownHosts    string   // resolved known_hosts path ("" → ~/.ssh/known_hosts)
+	proxyArgv     []string // nil = direct dial
+
+	allowPassword bool
+	allowKbd      bool
+	prompter      PasswordPrompter // nil → ttyPrompter
 }
 
 // buildDialPlan resolves cfg into a dialPlan. When UseSSHConfig isn't disabled it
@@ -30,11 +34,16 @@ type dialPlan struct {
 // literal direct dial — corporate features are simply unavailable, not fatal.
 func buildDialPlan(ctx context.Context, cfg DialConfig) (*dialPlan, error) {
 	p := &dialPlan{
-		host:         cfg.Host,
-		port:         cfg.Port,
-		user:         cfg.User,
-		identityFile: cfg.IdentityFile,
-		knownHosts:   cfg.KnownHosts,
+		host:          cfg.Host,
+		port:          cfg.Port,
+		user:          cfg.User,
+		knownHosts:    cfg.KnownHosts,
+		allowPassword: cfg.AllowPassword,
+		allowKbd:      cfg.AllowKeyboardInteractive,
+		prompter:      cfg.Prompter,
+	}
+	if cfg.IdentityFile != "" {
+		p.identityFiles = []string{cfg.IdentityFile} // explicit key wins (tried first)
 	}
 	if cfg.UseSSHConfig == nil || *cfg.UseSSHConfig {
 		r, err := resolveSSHConfig(ctx, resolveInput{
@@ -59,6 +68,8 @@ func buildDialPlan(ctx context.Context, cfg DialConfig) (*dialPlan, error) {
 			if p.knownHosts == "" && len(r.KnownHostsFiles) > 0 {
 				p.knownHosts = r.KnownHostsFiles[0]
 			}
+			p.identityFiles = append(p.identityFiles, r.IdentityFiles...) // after the explicit key
+
 			if sshBin, berr := sshBinary(); berr == nil {
 				p.proxyArgv = r.proxyArgv(sshBin)
 			}
@@ -101,7 +112,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*SSHRunner, error) {
 	if err != nil {
 		return nil, err
 	}
-	auth, err := authMethods(plan.identityFile)
+	auth, err := authMethods(plan)
 	if err != nil {
 		return nil, err
 	}

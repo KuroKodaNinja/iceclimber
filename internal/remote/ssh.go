@@ -6,12 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
@@ -36,6 +34,14 @@ type DialConfig struct {
 	// UseSSHConfig gates consulting `ssh -G`. nil/true = consult (honor
 	// ~/.ssh/config + ProxyJump); false = force a literal direct dial.
 	UseSSHConfig *bool
+
+	// AllowPassword / AllowKeyboardInteractive opt into those interactive auth
+	// methods to the target (off by default; key/agent are tried first regardless).
+	AllowPassword            bool
+	AllowKeyboardInteractive bool
+	// Prompter reads secrets for the interactive methods; nil → a /dev/tty no-echo
+	// prompter (works headless too, as long as a controlling terminal exists).
+	Prompter PasswordPrompter
 }
 
 // Dial is defined in dial.go (it resolves a dialPlan, then connects directly or
@@ -91,34 +97,7 @@ func (s *SSHRunner) NewSFTP() (*sftp.Client, error) {
 	return sftp.NewClient(s.client)
 }
 
-func authMethods(identityFile string) ([]ssh.AuthMethod, error) {
-	if identityFile != "" {
-		key, err := os.ReadFile(identityFile)
-		if err != nil {
-			return nil, fmt.Errorf("read identity file %s: %w", identityFile, err)
-		}
-		signer, err := ssh.ParsePrivateKey(key)
-		if err != nil {
-			var passErr *ssh.PassphraseMissingError
-			if errors.As(err, &passErr) {
-				return nil, fmt.Errorf("identity file %s is passphrase-protected; load it into ssh-agent and clear identity_file", identityFile)
-			}
-			return nil, fmt.Errorf("parse identity file %s: %w", identityFile, err)
-		}
-		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
-	}
-
-	sock := os.Getenv("SSH_AUTH_SOCK")
-	if sock == "" {
-		return nil, errors.New("no identity_file configured and SSH_AUTH_SOCK is unset; cannot authenticate")
-	}
-	conn, err := net.Dial("unix", sock)
-	if err != nil {
-		return nil, fmt.Errorf("connect to ssh-agent: %w", err)
-	}
-	ag := agent.NewClient(conn)
-	return []ssh.AuthMethod{ssh.PublicKeysCallback(ag.Signers)}, nil
-}
+// authMethods is defined in auth.go.
 
 // knownHostsCallback builds a host-key verifier from path, or from the user's
 // default ~/.ssh/known_hosts when path is empty. An unknown host is a hard

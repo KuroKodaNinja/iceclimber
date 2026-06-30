@@ -1,0 +1,106 @@
+package remote
+
+import (
+	"errors"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
+)
+
+// authMethods assembles the target auth methods in OpenSSH's order: public keys
+// (from identity files + ssh-agent), then — only when opted in — keyboard-
+// interactive and password. The interactive callbacks are *lazy*: SSH invokes
+// them only after key/agent methods fail, so a working agent never triggers a
+// prompt. Returns an error only when no method is available at all.
+func authMethods(p *dialPlan) ([]ssh.AuthMethod, error) {
+	var methods []ssh.AuthMethod
+
+	if signers := fileSigners(p.identityFiles); len(signers) > 0 {
+		methods = append(methods, ssh.PublicKeys(signers...))
+	}
+	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
+		if conn, err := net.Dial("unix", sock); err == nil {
+			methods = append(methods, ssh.PublicKeysCallback(agent.NewClient(conn).Signers))
+		}
+	}
+
+	pr := p.prompter
+	if pr == nil {
+		pr = ttyPrompter{}
+	}
+	if p.allowKbd {
+		methods = append(methods, keyboardInteractiveAuth(pr))
+	}
+	if p.allowPassword {
+		methods = append(methods, passwordAuth(pr, p.user+"@"+p.host))
+	}
+
+	if len(methods) == 0 {
+		return nil, errors.New("no SSH auth method available: set ssh.identity_file, start ssh-agent (SSH_AUTH_SOCK), or enable ssh.password_auth")
+	}
+	return methods, nil
+}
+
+// fileSigners loads private keys from the given files, in order, deduped. Missing
+// or unreadable files are skipped silently (ssh -G emits nonexistent defaults),
+// and passphrase-protected/unparseable keys are skipped too (the agent likely
+// holds them) — matching how OpenSSH tries each identity and moves on.
+func fileSigners(files []string) []ssh.Signer {
+	var signers []ssh.Signer
+	seen := map[string]bool{}
+	for _, f := range files {
+		f = expandTilde(f)
+		if f == "" || seen[f] {
+			continue
+		}
+		seen[f] = true
+		key, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		s, err := ssh.ParsePrivateKey(key)
+		if err != nil {
+			continue
+		}
+		signers = append(signers, s)
+	}
+	return signers
+}
+
+// keyboardInteractiveAuth answers each server challenge via the prompter (one
+// no-echo read per question — covers password and 2FA/OTP prompts).
+func keyboardInteractiveAuth(pr PasswordPrompter) ssh.AuthMethod {
+	return ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
+		answers := make([]string, len(questions))
+		for i, q := range questions {
+			ans, err := pr.Prompt(strings.TrimSpace(q) + " ")
+			if err != nil {
+				return nil, err
+			}
+			answers[i] = ans
+		}
+		return answers, nil
+	})
+}
+
+// passwordAuth prompts (no-echo) for the target password on demand.
+func passwordAuth(pr PasswordPrompter, who string) ssh.AuthMethod {
+	return ssh.PasswordCallback(func() (string, error) {
+		return pr.Prompt(who + "'s password: ")
+	})
+}
+
+// expandTilde resolves a leading ~ / ~/ against the home dir (ssh -G may emit
+// identity/known-hosts paths with ~). ~user is not supported.
+func expandTilde(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(p, "~"))
+		}
+	}
+	return p
+}
