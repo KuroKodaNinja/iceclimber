@@ -1,11 +1,20 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
+	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/probe"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
+	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
+	"github.com/KuroKodaNinja/iceclimber/internal/remotefs/remotefstest"
 )
 
 // TestIsOperatorDenied: only a gate operator_denied (handler never ran) is excluded
@@ -63,5 +72,71 @@ func TestServicedEvent(t *testing.T) {
 	}
 	if _, ok := servicedEvent(egress); !ok {
 		t.Error("an in-handler egress_denied is a serviced outcome and must count")
+	}
+}
+
+// TestConsoleDispatcher_StartedIsEphemeral: the console pushes a live KindStarted
+// event the moment a request is picked up (so the operator sees it in-progress), but
+// the durable JSONL must hold ONLY the serviced line — a started line would double the
+// log and corrupt seed-on-restart counters.
+func TestConsoleDispatcher_StartedIsEphemeral(t *testing.T) {
+	ctx := context.Background()
+	fs := remotefs.NewExecFS(remotefstest.LocalRunner{})
+	tree := protocol.Tree{Root: t.TempDir()}
+	if err := protocol.EnsureTree(ctx, fs, tree); err != nil {
+		t.Fatalf("EnsureTree: %v", err)
+	}
+	sess := &session{fs: fs, tree: tree, transport: "exec", sandboxID: "s", fp: &probe.Fingerprint{}}
+	logPath := filepath.Join(t.TempDir(), "activity.jsonl")
+	act := activity.New(logPath)
+	events := make(chan tea.Msg, 16)
+	disp := buildConsoleDispatcher(ctx, sess, &config.Config{SandboxID: "s"}, act, events)
+
+	id := protocol.NewID()
+	name := protocol.RequestName(id)
+	data, _ := json.Marshal(protocol.Request{
+		SchemaVersion: protocol.SchemaVersion, ID: id, Type: "ping",
+		CreatedAt: time.Now().UTC(), Params: json.RawMessage("{}"),
+	})
+	if err := protocol.Deliver(ctx, fs, tree.Outbox(), name, data); err != nil {
+		t.Fatal(err)
+	}
+	if err := disp.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	// Live channel: both a started and a serviced event reached the UI.
+	var sawStarted, sawServiced bool
+	for drain := true; drain; {
+		select {
+		case m := <-events:
+			if e, ok := m.(activity.Event); ok {
+				switch e.Kind {
+				case activity.KindStarted:
+					sawStarted = true
+				case activity.KindServiced:
+					sawServiced = true
+				}
+			}
+		default:
+			drain = false
+		}
+	}
+	if !sawStarted || !sawServiced {
+		t.Errorf("live events: started=%v serviced=%v, want both", sawStarted, sawServiced)
+	}
+
+	// Durable log: exactly the serviced line, never the started one.
+	evs, err := activity.Read(logPath)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	for _, e := range evs {
+		if e.Kind == activity.KindStarted {
+			t.Errorf("durable log contains a started line (must be ephemeral): %+v", e)
+		}
+	}
+	if s, _, _ := activity.Counts(evs); s != 1 {
+		t.Errorf("durable serviced count = %d, want 1", s)
 	}
 }

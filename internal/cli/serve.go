@@ -130,6 +130,16 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 		disp.SetGate(ap.gate)
 	}
 
+	// Mark each request as it's picked up (ephemeral — a one-line stdout receipt, no
+	// JSONL append, no meter on a non-TTY pipe). The serviced line with its duration
+	// follows on completion.
+	disp.ObserveStart(func(ev protocol.StartEvent) {
+		typ := ev.Req.Type
+		if typ == "" {
+			typ = "?"
+		}
+		fmt.Fprintf(out, "  %s  ▸ %s …\n", time.Now().Format("15:04:05"), typ)
+	})
 	disp.Observe(func(ev protocol.ServiceEvent) {
 		e, ok := servicedEvent(ev)
 		if !ok {

@@ -784,10 +784,26 @@ func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Conf
 		default:
 		}
 	})
+	// Surface a request the moment it's picked up (in-progress 1:1), for both agent-
+	// and operator-initiated requests. Live-only: pushed to the UI, never appended to
+	// the durable log — the matching serviced/denied event clears the indicator.
+	disp.ObserveStart(func(ev protocol.StartEvent) {
+		select {
+		case events <- startedEvent(ev):
+		default:
+		}
+	})
 	disp.Observe(func(ev protocol.ServiceEvent) {
 		e, ok := servicedEvent(ev)
 		if !ok {
-			return // denied by the gate — counted as a denial, not a serviced request
+			// Denied by the gate (no serviced event, and the approver's denial is logged
+			// durably but not pushed live) — still clear any in-progress indicator so it
+			// never sticks. Counted as a denial via the durable log seed.
+			select {
+			case events <- tui.ClearServingMsg{}:
+			default:
+			}
+			return
 		}
 		_ = act.Append(e)
 		select {
@@ -821,6 +837,18 @@ func servicedEvent(ev protocol.ServiceEvent) (activity.Event, bool) {
 // handler ran (so it counts as a denial, not a serviced request).
 func isOperatorDenied(resp protocol.Response) bool {
 	return resp.Error != nil && resp.Error.Code == protocol.CodeOperatorDenied
+}
+
+// startedEvent builds the live in-progress event for a picked-up request. It is
+// pushed to the console event channel but never appended to the durable log (a
+// "right now" signal); the matching serviced/denied event clears the indicator.
+func startedEvent(ev protocol.StartEvent) activity.Event {
+	return activity.Event{
+		TS:   time.Now().UTC().Format(time.RFC3339),
+		Kind: activity.KindStarted,
+		ID:   ev.Req.ID,
+		Type: ev.Req.Type,
+	}
 }
 
 // resetAgentLog truncates (creates empty) the controller-side agent log at the start

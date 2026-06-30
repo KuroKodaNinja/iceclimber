@@ -143,6 +143,11 @@ const (
 // claiming "serving".
 type ConnStateMsg struct{ State ConnState }
 
+// ClearServingMsg clears the in-progress "serving" indicator without a serviced event
+// — used when a request is denied by the gate (which produces no serviced event and
+// whose denial is logged durably, not pushed live), so the indicator never sticks.
+type ClearServingMsg struct{}
+
 // HeartbeatMsg reports a heartbeat write (the dispatcher's OnHeartbeat). The header
 // uses the arrival time to show serving-vs-stale independent of the SSH link state —
 // so a connected-but-wedged dispatcher (no heartbeats advancing) reads as stale.
