@@ -31,3 +31,10 @@ func TestRenderActivity(t *testing.T) {
 		t.Errorf("unparseable line should render empty, got %q", got)
 	}
 }
+
+func TestEventBody_ShowsDuration(t *testing.T) {
+	got := eventBody(activity.Event{Kind: activity.KindServiced, Type: "pip.install", Status: "ok", DurMS: 3200})
+	if !strings.Contains(got, "3.2s") {
+		t.Errorf("serviced body should show elapsed; got %q", got)
+	}
+}

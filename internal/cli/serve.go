@@ -147,6 +147,9 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 			typ = "?"
 		}
 		line := fmt.Sprintf("  %s  %-15s %-19s %s", time.Now().Format("15:04:05"), typ, ev.Resp.Status, detail)
+		if ev.Dur > 0 {
+			line += " · " + ev.Dur.Round(100*time.Millisecond).String()
+		}
 		fmt.Fprintln(out, strings.TrimRight(line, " "))
 	})
 

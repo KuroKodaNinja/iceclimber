@@ -229,7 +229,7 @@ operation the agent requests, with context, and you approve inline:
 
 | Command | What it does |
 |---|---|
-| `status` | Liveness (heartbeat), queue depth, installed runtimes, the agent's capabilities |
+| `status` | Liveness (heartbeat freshness), queue depth (awaiting + delivered), **health-probed** runtimes (✓ runs / ✗ won't), the agent's capabilities. The console header shows the SSH link and heartbeat health as **separate** signals, so a connected-but-wedged Popo reads as stale, not green |
 | `logs -f` | Tail Popo's activity (`[POPO]`) merged with the agent's stream (`[NANA]`, bridged automatically; `--agent-log <file>` overrides) |
 | `tui` | A live split-pane `[POPO]`/`[NANA]` dashboard (`[NANA]` bridged automatically; `--snapshot` for one static frame) |
 | `pending` / `approve <id>` / `deny <id>` | Async egress approval (when not serving on a TTY) |

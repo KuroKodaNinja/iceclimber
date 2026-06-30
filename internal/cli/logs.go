@@ -112,7 +112,11 @@ func eventBody(e activity.Event) string {
 		if typ == "" {
 			typ = "?"
 		}
-		return strings.TrimRight(fmt.Sprintf("%-15s %-19s %s", typ, e.Status, e.Detail), " ")
+		base := fmt.Sprintf("%-15s %-19s %s", typ, e.Status, e.Detail)
+		if e.DurMS > 0 {
+			base += " · " + (time.Duration(e.DurMS) * time.Millisecond).Round(100*time.Millisecond).String()
+		}
+		return strings.TrimRight(base, " ")
 	case activity.KindApproved:
 		return "approved " + e.Detail
 	case activity.KindDenied:

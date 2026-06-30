@@ -235,7 +235,8 @@ func (o *consoleOps) PollStatus() tea.Cmd {
 		if _, err := o.sess().fs.List(o.ctx, o.sess().tree.Root); err != nil {
 			return tui.StatusMsg{Sandbox: o.sess().sandboxID, Err: err.Error()}
 		}
-		s := collectStatus(o.ctx, o.sess())
+		sess := o.sess()
+		s := collectStatus(o.ctx, sess.fs, sess.runner, sess.tree)
 		hb := "none yet"
 		if s.HeartbeatSeq != "" {
 			hb = "seq " + s.HeartbeatSeq
@@ -246,7 +247,7 @@ func (o *consoleOps) PollStatus() tea.Cmd {
 		return tui.StatusMsg{
 			Sandbox:   o.sess().sandboxID,
 			Heartbeat: hb,
-			Queue:     fmt.Sprintf("%d awaiting · %d unread", s.QueueOut, s.QueueIn),
+			Queue:     fmt.Sprintf("%d awaiting · %d delivered", s.QueueOut, s.QueueIn),
 			Runtimes:  s.Runtimes,
 			Caps:      s.Caps,
 		}

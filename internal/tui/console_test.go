@@ -106,6 +106,18 @@ func TestConsole_CounterSeedAndIncrements(t *testing.T) {
 	}
 }
 
+func TestEventToLine_ShowsDuration(t *testing.T) {
+	l := eventToLine(activity.Event{Kind: activity.KindServiced, Type: "pip.install", Status: "ok", Detail: "rich", DurMS: 3200})
+	if !strings.Contains(l.plain, "3.2s") {
+		t.Errorf("serviced line should show total elapsed; got %q", l.plain)
+	}
+	// No duration recorded → no "·" duration suffix, no dangling spaces.
+	l0 := eventToLine(activity.Event{Kind: activity.KindServiced, Type: "ping", Status: "ok"})
+	if strings.HasSuffix(l0.plain, " ") || strings.Contains(l0.plain, "· ") {
+		t.Errorf("zero-duration line should not show a duration: %q", l0.plain)
+	}
+}
+
 func TestConsole_OperatedEvent(t *testing.T) {
 	c := NewConsole("sbx", make(chan tea.Msg, 4), "", nil)
 	updated, _ := c.Update(activity.Event{

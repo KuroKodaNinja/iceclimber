@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
+	"github.com/KuroKodaNinja/iceclimber/internal/remote"
+	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +34,7 @@ func newStatusCmd() *cobra.Command {
 			}
 			defer sess.Close()
 
-			s := collectStatus(ctx, sess)
+			s := collectStatus(ctx, sess.fs, sess.runner, sess.tree)
 			w := cmd.OutOrStdout()
 			fmt.Fprintf(w, "sandbox:   %s  (%s, transport %s)\n", cfg.SandboxID, sess.tree.Root, sess.transport)
 			if s.HeartbeatSeq == "" {
@@ -43,7 +46,10 @@ func newStatusCmd() *cobra.Command {
 				}
 				fmt.Fprintf(w, "heartbeat: seq %s%s\n", s.HeartbeatSeq, age)
 			}
-			fmt.Fprintf(w, "queue:     %d awaiting service, %d responses unread\n", s.QueueOut, s.QueueIn)
+			// "delivered" not "unread": responses stay on disk after the agent reads them
+			// (the maildir isn't GC'd yet — Phase 2), so this is a historical count, not mail
+			// awaiting the agent.
+			fmt.Fprintf(w, "queue:     %d awaiting service · %d responses delivered\n", s.QueueOut, s.QueueIn)
 			if len(s.Runtimes) == 0 {
 				fmt.Fprintln(w, "runtimes:  none installed")
 			} else {
@@ -70,11 +76,12 @@ type statusSnapshot struct {
 	Caps         string // "has_exec=true, has_file_write=true" or "" if not reported
 }
 
-// collectStatus reads liveness, queue depth, installed runtimes (all languages),
-// and the agent's capabilities from the sandbox.
-func collectStatus(ctx context.Context, sess *session) statusSnapshot {
+// collectStatus reads liveness, queue depth, installed runtimes (health-probed, all
+// languages), and the agent's capabilities from the sandbox. Takes the fs/runner/tree
+// directly (not *session) so it's unit-testable with fakes.
+func collectStatus(ctx context.Context, fs remotefs.FS, runner remote.Runner, tree protocol.Tree) statusSnapshot {
 	var s statusSnapshot
-	if data, err := sess.fs.ReadFile(ctx, sess.tree.Heartbeat()); err == nil {
+	if data, err := fs.ReadFile(ctx, tree.Heartbeat()); err == nil {
 		fields := strings.Fields(strings.TrimSpace(string(data)))
 		if len(fields) >= 1 {
 			s.HeartbeatSeq = fields[0]
@@ -85,18 +92,25 @@ func collectStatus(ctx context.Context, sess *session) statusSnapshot {
 			}
 		}
 	}
-	s.QueueOut = listCount(ctx, sess, sess.tree.Outbox().New())
-	s.QueueIn = listCount(ctx, sess, sess.tree.Inbox().New())
+	s.QueueOut = listCount(ctx, fs, tree.Outbox().New())
+	s.QueueIn = listCount(ctx, fs, tree.Inbox().New())
 	for _, lang := range []string{"python", "node", "java"} {
-		names, err := sess.fs.List(ctx, path.Join(sess.tree.Root, "runtimes", lang))
+		names, err := fs.List(ctx, path.Join(tree.Root, "runtimes", lang))
 		if err != nil {
 			continue
 		}
 		for _, n := range names {
-			s.Runtimes = append(s.Runtimes, lang+" "+n)
+			// Health-probe, not just dir presence: run the interpreter so a
+			// partial/aborted extraction (or a binary that won't run on this libc) shows
+			// as broken instead of "installed".
+			mark := "✓"
+			if !runtimeRuns(ctx, runner, tree, lang, n) {
+				mark = "✗ (won't run)"
+			}
+			s.Runtimes = append(s.Runtimes, lang+" "+n+" "+mark)
 		}
 	}
-	if data, err := sess.fs.ReadFile(ctx, sess.tree.Capabilities()); err == nil {
+	if data, err := fs.ReadFile(ctx, tree.Capabilities()); err == nil {
 		var c struct {
 			HasExec      bool `json:"has_exec"`
 			HasFileWrite bool `json:"has_file_write"`
@@ -108,10 +122,25 @@ func collectStatus(ctx context.Context, sess *session) statusSnapshot {
 	return s
 }
 
-func listCount(ctx context.Context, sess *session, dir string) int {
-	names, err := sess.fs.List(ctx, dir)
+func listCount(ctx context.Context, fs remotefs.FS, dir string) int {
+	names, err := fs.List(ctx, dir)
 	if err != nil {
 		return 0
 	}
 	return len(names)
+}
+
+// runtimeRuns reports whether the installed runtime at runtimes/<lang>/<dir> actually
+// executes (its version probe exits 0) — the real "did the install succeed" signal.
+func runtimeRuns(ctx context.Context, runner remote.Runner, tree protocol.Tree, lang, dir string) bool {
+	exe, arg := "bin/python3", "--version"
+	switch lang {
+	case "node":
+		exe, arg = "bin/node", "--version"
+	case "java":
+		exe, arg = "bin/java", "-version"
+	}
+	bin := path.Join(tree.Root, "runtimes", lang, dir, exe)
+	res, err := runner.Run(ctx, remote.ShellQuote(bin)+" "+arg+" 2>&1", nil)
+	return err == nil && res.ExitCode == 0
 }
