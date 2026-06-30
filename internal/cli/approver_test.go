@@ -3,11 +3,41 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/webfetch"
 )
+
+// TestApprover_RememberedDenyLogsOnce: a remembered "deny all <type>" must log a
+// single denial (the operator's one decision), not re-log on every auto-applied
+// request — which was inflating the denied counter.
+func TestApprover_RememberedDenyLogsOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "activity.jsonl")
+	fa := &fakeAsker{choices: []choice{choiceDenyRemember}}
+	ap := newApprover(fa, "sbx", activity.New(path))
+
+	for i := 0; i < 3; i++ { // first prompts deny-all; the rest are auto-applied
+		if err := ap.gate(context.Background(), areq("pip.install", `{}`)); err == nil {
+			t.Fatalf("request %d: remembered deny should still deny", i)
+		}
+	}
+	evs, _ := activity.Read(path)
+	denied := 0
+	for _, e := range evs {
+		if e.Kind == activity.KindDenied {
+			denied++
+		}
+	}
+	if denied != 1 {
+		t.Errorf("remembered deny logged %d denials, want 1 (auto-applied must not re-log)", denied)
+	}
+	if fa.i != 1 {
+		t.Errorf("operator was prompted %d times, want 1 (the rest remembered)", fa.i)
+	}
+}
 
 // fakeAsker returns programmed choices and records the prompts it saw.
 type fakeAsker struct {

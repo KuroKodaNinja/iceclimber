@@ -130,6 +130,9 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 	}
 
 	disp.Observe(func(ev protocol.ServiceEvent) {
+		if isOperatorDenied(ev.Resp) {
+			return // denied by the gate — a denial, not a serviced request
+		}
 		detail := serviceDetail(ev.Req.Type, ev.Resp)
 		_ = act.Append(activity.Event{
 			Kind:   activity.KindServiced,

@@ -79,7 +79,9 @@ func (a *approver) gate(_ context.Context, req protocol.Request) error {
 	switch {
 	case a.denyAll[req.Type]:
 		a.mu.Unlock()
-		a.log(activity.KindDenied, req.Type, "(remembered)")
+		// Auto-applied remembered decision — do NOT re-log a denial (the operator
+		// decided once, already logged). Symmetric with the remembered-approve path
+		// below; re-logging here was inflating the denied counter on every request.
 		return fmt.Errorf("operator denied %s", req.Type)
 	case a.allowAll[req.Type]:
 		a.mu.Unlock()

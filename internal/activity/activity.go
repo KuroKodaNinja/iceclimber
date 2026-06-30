@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -75,4 +76,45 @@ func (l *Logger) Append(e Event) error {
 	}
 	_, err = f.Write(append(line, '\n'))
 	return err
+}
+
+// Read replays the durable log at path into its events (skipping blank/garbled
+// lines). A missing file yields no events, not an error — so callers can seed from a
+// not-yet-written log. This is the authoritative record for counters that must
+// survive a console restart.
+func Read(path string) ([]Event, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []Event
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var e Event
+		if json.Unmarshal([]byte(line), &e) == nil {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+// Counts tallies the serviced/approved/denied totals from a replayed log — the
+// authoritative seed for the console header's counters.
+func Counts(events []Event) (serviced, approved, denied int) {
+	for _, e := range events {
+		switch e.Kind {
+		case KindServiced:
+			serviced++
+		case KindApproved:
+			approved++
+		case KindDenied:
+			denied++
+		}
+	}
+	return
 }

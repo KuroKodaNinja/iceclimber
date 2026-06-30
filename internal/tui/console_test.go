@@ -89,6 +89,23 @@ func TestConsole_ActivityEvent(t *testing.T) {
 	}
 }
 
+func TestConsole_CounterSeedAndIncrements(t *testing.T) {
+	c := NewConsole("sbx", make(chan tea.Msg, 8), "", nil).WithSeedCounts(5, 2, 1)
+	if c.served != 5 || c.approved != 2 || c.denied != 1 {
+		t.Fatalf("seed: served=%d approved=%d denied=%d, want 5/2/1", c.served, c.approved, c.denied)
+	}
+	step := func(m tea.Model, kind string) Console {
+		u, _ := m.Update(activity.Event{TS: "2026-06-28T18:00:00Z", Kind: kind})
+		return u.(Console)
+	}
+	c = step(c, activity.KindServiced)
+	c = step(c, activity.KindApproved) // previously unasserted on the live Console
+	c = step(c, activity.KindDenied)   // "
+	if c.served != 6 || c.approved != 3 || c.denied != 2 {
+		t.Errorf("after one each: served=%d approved=%d denied=%d, want 6/3/2", c.served, c.approved, c.denied)
+	}
+}
+
 func TestConsole_OperatedEvent(t *testing.T) {
 	c := NewConsole("sbx", make(chan tea.Msg, 4), "", nil)
 	updated, _ := c.Update(activity.Event{

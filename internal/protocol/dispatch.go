@@ -24,6 +24,11 @@ type Dispatcher struct {
 	onHeartbeat func(seq int64)
 }
 
+// CodeOperatorDenied is the error code on a response the gate rejected before the
+// handler ran. Such a request was denied, not serviced — observers exclude it from
+// the "serviced" tally (the approver logs it as a denial).
+const CodeOperatorDenied = "operator_denied"
+
 // ServiceEvent reports one serviced request to an optional observer. It carries
 // primitives only, so the dispatcher stays decoupled from logging (the cli layer
 // turns this into an activity-log event).
@@ -223,7 +228,7 @@ func (d *Dispatcher) dispatch(ctx context.Context, name string, data []byte) Res
 	}
 	if d.gate != nil {
 		if err := d.gate(ctx, req); err != nil {
-			return Errf(req.ID, "operator_denied", "%v", err)
+			return Errf(req.ID, CodeOperatorDenied, "%v", err)
 		}
 	}
 	return h(ctx, req)

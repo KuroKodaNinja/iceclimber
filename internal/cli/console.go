@@ -711,6 +711,14 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 		go bridgeAgentLog(ctx, holder, logPath)
 	}
 
+	// Seed the header counters from the durable activity log (authoritative, cumulative
+	// per sandbox) — read NOW, before the serve goroutine appends anything, so a
+	// just-serviced event isn't counted twice (seed + the live event on the channel).
+	seedServed, seedApproved, seedDenied := 0, 0, 0
+	if evs, rerr := activity.Read(activityPath(cfg)); rerr == nil {
+		seedServed, seedApproved, seedDenied = activity.Counts(evs)
+	}
+
 	// Serve in the background with auto-reconnect. The first cycle serves the already
 	// open session; on a drop the supervisor reconnects (capped backoff, forever) and
 	// the header reflects the connection state.
@@ -750,7 +758,8 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	}()
 
 	ops := &consoleOps{ctx: ctx, holder: holder, act: act, events: events}
-	model := tui.NewConsole(cfg.SandboxID, events, logPath, ops)
+	model := tui.NewConsole(cfg.SandboxID, events, logPath, ops).
+		WithSeedCounts(seedServed, seedApproved, seedDenied)
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 	cancel() // stop serving; any pending approval fails safe via done
 	return err
@@ -775,6 +784,9 @@ func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Conf
 		}
 	})
 	disp.Observe(func(ev protocol.ServiceEvent) {
+		if isOperatorDenied(ev.Resp) {
+			return // denied by the gate — counted as a denial, not a serviced request
+		}
 		e := activity.Event{
 			TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindServiced,
 			ID: ev.Resp.ID, Type: ev.Req.Type, Status: ev.Resp.Status,
@@ -787,6 +799,12 @@ func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Conf
 		}
 	})
 	return disp
+}
+
+// isOperatorDenied reports whether a response was rejected by the gate before its
+// handler ran (so it counts as a denial, not a serviced request).
+func isOperatorDenied(resp protocol.Response) bool {
+	return resp.Error != nil && resp.Error.Code == protocol.CodeOperatorDenied
 }
 
 // resetAgentLog truncates (creates empty) the controller-side agent log at the start

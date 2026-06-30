@@ -52,6 +52,38 @@ func TestLoggerAppendRoundTrip(t *testing.T) {
 	}
 }
 
+func TestReadAndCounts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "activity.jsonl")
+
+	// Missing file → no events, no error (so counters can seed from a not-yet-written log).
+	if evs, err := Read(path); err != nil || len(evs) != 0 {
+		t.Fatalf("Read(missing) = %v, %v; want empty/nil", evs, err)
+	}
+
+	l := New(path)
+	for _, e := range []Event{
+		{Kind: KindServiced, ID: "1"}, {Kind: KindServiced, ID: "2"},
+		{Kind: KindApproved}, {Kind: KindDenied},
+		{Kind: KindOperated}, {Kind: KindVerified, Side: SideNana},
+	} {
+		if err := l.Append(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	evs, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(evs) != 6 {
+		t.Fatalf("Read returned %d events, want 6", len(evs))
+	}
+	s, a, d := Counts(evs)
+	if s != 2 || a != 1 || d != 1 {
+		t.Errorf("Counts = served %d, approved %d, denied %d; want 2/1/1 (operated+verified excluded)", s, a, d)
+	}
+}
+
 func TestLoggerEmptyPathIsNoop(t *testing.T) {
 	l := New("")
 	if err := l.Append(Event{Kind: KindServiced}); err != nil {

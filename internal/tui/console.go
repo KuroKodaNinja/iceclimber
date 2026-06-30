@@ -235,6 +235,14 @@ func NewConsole(sandboxID string, events <-chan tea.Msg, agentLog string, ops Op
 	return c
 }
 
+// WithSeedCounts seeds the header counters from the durable activity log so they
+// reflect the sandbox's real history (and survive a console restart) rather than only
+// what this UI process has seen. Live events increment from here.
+func (c Console) WithSeedCounts(served, approved, denied int) Console {
+	c.served, c.approved, c.denied = served, approved, denied
+	return c
+}
+
 func (c Console) Init() tea.Cmd { return tea.Batch(c.waitEvent(), tick()) }
 
 func (c Console) waitEvent() tea.Cmd { return func() tea.Msg { return <-c.events } }
