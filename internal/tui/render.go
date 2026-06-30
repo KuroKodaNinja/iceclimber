@@ -123,7 +123,7 @@ func footer(w int, hasOps bool, running, meter string) string {
 	}
 	keys := "q quit"
 	if hasOps {
-		keys = "i install   b bootstrap   s status   e egress   ·   q quit"
+		keys = "i install   a agent   b bootstrap   s status   e egress   ·   q quit"
 	}
 	return dimStyle.Width(w).Render(" [POPO] Popo's activity   [NANA] the sandbox's voice   ·   " + keys)
 }

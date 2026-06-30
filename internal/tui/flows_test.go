@@ -37,6 +37,7 @@ type recordOps struct {
 	forgot    chan EgressRule
 	approved  chan string
 	denied    chan string
+	agent     chan AgentInstallRequest
 }
 
 func newRecordOps() *recordOps {
@@ -46,6 +47,7 @@ func newRecordOps() *recordOps {
 		forgot:    make(chan EgressRule, 4),
 		approved:  make(chan string, 4),
 		denied:    make(chan string, 4),
+		agent:     make(chan AgentInstallRequest, 1),
 	}
 }
 
@@ -54,6 +56,12 @@ func (o *recordOps) RunInstall(r InstallRequest) tea.Cmd {
 }
 func (o *recordOps) RunBootstrap() tea.Cmd {
 	return func() tea.Msg { o.bootstrap <- struct{}{}; return OpResultMsg{} }
+}
+func (o *recordOps) RunAgentInstall(r AgentInstallRequest) tea.Cmd {
+	return func() tea.Msg { o.agent <- r; return OpResultMsg{} }
+}
+func (o *recordOps) Agents() []AgentChoice {
+	return []AgentChoice{{Name: "claude", DisplayName: "Claude Code"}}
 }
 func (o *recordOps) PollStatus() tea.Cmd            { return func() tea.Msg { return StatusMsg(o.status) } }
 func (o *recordOps) Egress() EgressSnapshot         { return o.egress }
@@ -106,7 +114,7 @@ func finalConsole(t *testing.T, tm *teatest.TestModel) Console {
 func TestFlow_DashboardChrome(t *testing.T) {
 	tm := startConsole(t, newRecordOps())
 	// Header, both panes, and the footer management keys render in one frame.
-	waitAll(t, tm, "iceclimber ▸ sbx", "[POPO]", "[NANA]", "i install", "b bootstrap")
+	waitAll(t, tm, "iceclimber ▸ sbx", "[POPO]", "[NANA]", "i install", "a agent", "b bootstrap")
 	tm.Quit()
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 }
@@ -382,6 +390,59 @@ func TestFlow_InstallAbort(t *testing.T) {
 
 // --- Bootstrap form ---------------------------------------------------------
 
+// TestFlow_AgentInstall drives the console's agent form ('a') with defaults — install
+// claude, auth from the environment — and asserts the request reaches the OpRunner.
+func TestFlow_AgentInstall(t *testing.T) {
+	ops := newRecordOps()
+	tm := startConsole(t, ops)
+	press(tm, "a")
+	waitText(t, tm, "Claude Code") // the agent select (form-specific, not the footer)
+	send(tm, tea.KeyEnter)         // accept claude → how
+	waitText(t, tm, "relay the agent binary")
+	send(tm, tea.KeyEnter) // accept install → binary path
+	waitText(t, tm, "binary path")
+	send(tm, tea.KeyEnter) // blank bin → auth
+	waitText(t, tm, "token in my environment")
+	send(tm, tea.KeyEnter) // accept env auth → submit
+	select {
+	case r := <-ops.agent:
+		if r.Name != "claude" || r.Wrap || r.SkipAuth {
+			t.Fatalf("request = %+v, want install claude with env auth", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("agent install never fired")
+	}
+	finalConsole(t, tm)
+}
+
+// TestFlow_AgentWrap drives the form to the wrap path with skip-auth and a pinned
+// binary, asserting those choices reach the OpRunner.
+func TestFlow_AgentWrap(t *testing.T) {
+	ops := newRecordOps()
+	tm := startConsole(t, ops)
+	press(tm, "a")
+	waitText(t, tm, "Claude Code")
+	send(tm, tea.KeyEnter)      // claude → how
+	waitText(t, tm, "no relay") // the wrap option
+	send(tm, tea.KeyDown)       // move to "wrap"
+	send(tm, tea.KeyEnter)      // accept wrap → binary path
+	waitText(t, tm, "binary path")
+	press(tm, "/opt/claude") // type a binary path
+	send(tm, tea.KeyEnter)   // → auth
+	waitText(t, tm, "configure auth later")
+	send(tm, tea.KeyDown)  // move to "skip"
+	send(tm, tea.KeyEnter) // submit
+	select {
+	case r := <-ops.agent:
+		if !r.Wrap || r.Bin != "/opt/claude" || !r.SkipAuth {
+			t.Fatalf("request = %+v, want wrap /opt/claude skip-auth", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("agent wrap never fired")
+	}
+	finalConsole(t, tm)
+}
+
 func TestFlow_BootstrapConfirm(t *testing.T) {
 	ops := newRecordOps()
 	tm := startConsole(t, ops)
@@ -421,6 +482,10 @@ func (o *gateOps) RunInstall(InstallRequest) tea.Cmd {
 func (o *gateOps) RunBootstrap() tea.Cmd {
 	return func() tea.Msg { <-o.release; return OpResultMsg{} }
 }
+func (o *gateOps) RunAgentInstall(AgentInstallRequest) tea.Cmd {
+	return func() tea.Msg { <-o.release; return OpResultMsg{} }
+}
+func (o *gateOps) Agents() []AgentChoice        { return nil }
 func (o *gateOps) PollStatus() tea.Cmd          { return nil }
 func (o *gateOps) Egress() EgressSnapshot       { return EgressSnapshot{} }
 func (o *gateOps) ApprovePending(string) error  { return nil }

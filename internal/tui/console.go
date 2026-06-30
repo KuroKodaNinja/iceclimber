@@ -66,6 +66,20 @@ type InstallRequest struct {
 	Pkgs    string // space/comma-separated package specs
 }
 
+// AgentInstallRequest is an operator request to install/wrap a coding agent (the
+// nana wrapper). Wrap uses a binary already on the sandbox (no relay); Bin optionally
+// pins its path. SkipAuth installs without configuring a token (else the token is
+// read from the operator's environment).
+type AgentInstallRequest struct {
+	Name     string // agent name, e.g. "claude"
+	Wrap     bool   // wrap an existing binary instead of relaying one in
+	Bin      string // wrap only: explicit absolute path (blank = found on PATH)
+	SkipAuth bool
+}
+
+// AgentChoice is one installable agent offered in the console's agent form.
+type AgentChoice struct{ Name, DisplayName string }
+
 // OpResultMsg signals an operator-initiated action finished; it clears the running
 // indicator. The pane line is driven separately by the activity event the runner
 // emits, so the result reads identically whether it was operator- or agent-driven.
@@ -78,6 +92,10 @@ type OpResultMsg struct{}
 type OpRunner interface {
 	RunInstall(InstallRequest) tea.Cmd
 	RunBootstrap() tea.Cmd
+	// RunAgentInstall installs/wraps a coding agent (the nana wrapper).
+	RunAgentInstall(AgentInstallRequest) tea.Cmd
+	// Agents lists the installable agents (for the agent form's picker). Local.
+	Agents() []AgentChoice
 	// PollStatus returns a cmd that reads sandbox status (SSH) and emits a StatusMsg.
 	PollStatus() tea.Cmd
 	// Egress reads the operator's persisted rules + pending held requests (local).
@@ -172,6 +190,11 @@ type formState struct {
 	version string
 	pkgs    string
 	confirm bool
+	// agent form
+	agentName string
+	agentMode string // "install" | "wrap"
+	agentBin  string
+	agentAuth string // "env" | "skip"
 }
 
 // NewConsole builds a console reading events (and, optionally, the agent stream).
@@ -224,6 +247,10 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "i":
 			if c.ops != nil {
 				return c.openForm("install")
+			}
+		case "a":
+			if c.ops != nil {
+				return c.openForm("agent")
 			}
 		case "b":
 			if c.ops != nil {
@@ -403,6 +430,8 @@ func (c Console) openForm(kind string) (tea.Model, tea.Cmd) {
 	switch kind {
 	case "install":
 		c.form = c.installForm()
+	case "agent":
+		c.form = c.agentForm()
 	case "bootstrap":
 		c.form = c.bootstrapForm()
 	}
@@ -440,6 +469,22 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 		// Batch the spinner tick so the in-flight footer animates while the op runs.
 		return c, tea.Batch(c.ops.RunInstall(InstallRequest{
 			Lang: c.st.lang, Version: c.st.version, Pkgs: c.st.pkgs,
+		}), c.spin.Tick)
+	case "agent":
+		if c.st.agentName == "" {
+			return c, nil
+		}
+		verb := "install"
+		if c.st.agentMode == "wrap" {
+			verb = "wrap"
+		}
+		c.running = "agent " + verb
+		c.progStart = time.Now()
+		return c, tea.Batch(c.ops.RunAgentInstall(AgentInstallRequest{
+			Name:     c.st.agentName,
+			Wrap:     c.st.agentMode == "wrap",
+			Bin:      c.st.agentBin,
+			SkipAuth: c.st.agentAuth == "skip",
 		}), c.spin.Tick)
 	case "bootstrap":
 		if !c.st.confirm {
@@ -522,6 +567,35 @@ func installLabel(lang string) string {
 	}
 }
 
+// agentForm collects an agent install/wrap (the nana wrapper). The auth token is read
+// from the operator's environment — never typed into the form — so a secret never
+// touches the UI; "skip" defers auth. The binary path applies to wrap only.
+func (c *Console) agentForm() *huh.Form {
+	agents := c.ops.Agents()
+	opts := make([]huh.Option[string], 0, len(agents))
+	for _, a := range agents {
+		opts = append(opts, huh.NewOption(a.DisplayName, a.Name))
+	}
+	c.st = &formState{agentMode: "install", agentAuth: "env"}
+	if len(agents) > 0 {
+		c.st.agentName = agents[0].Name
+	}
+	return huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().Title("agent").Value(&c.st.agentName).Options(opts...),
+		huh.NewSelect[string]().Title("how").Value(&c.st.agentMode).Options(
+			huh.NewOption("install — relay the agent binary into the sandbox", "install"),
+			huh.NewOption("wrap — a binary already on the sandbox (no relay)", "wrap"),
+		),
+		huh.NewInput().Title("binary path (wrap only, optional)").
+			Description("Absolute path on the sandbox; blank = found on PATH. Ignored for install.").
+			Value(&c.st.agentBin),
+		huh.NewSelect[string]().Title("auth").Value(&c.st.agentAuth).Options(
+			huh.NewOption("use the token in my environment", "env"),
+			huh.NewOption("skip — configure auth later", "skip"),
+		),
+	))
+}
+
 func (c *Console) bootstrapForm() *huh.Form {
 	c.st = &formState{}
 	return huh.NewForm(huh.NewGroup(
@@ -532,10 +606,14 @@ func (c *Console) bootstrapForm() *huh.Form {
 }
 
 func (c Console) formTitle() string {
-	if c.formKind == "bootstrap" {
+	switch c.formKind {
+	case "bootstrap":
 		return "Bootstrap"
+	case "agent":
+		return "Install agent"
+	default:
+		return "Install"
 	}
-	return "Install"
 }
 
 func (c *Console) applyEvent(e activity.Event) {

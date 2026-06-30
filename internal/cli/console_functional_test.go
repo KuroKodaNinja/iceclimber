@@ -228,6 +228,27 @@ func TestConsoleOps_BootstrapFlow(t *testing.T) {
 	}
 }
 
+// TestConsoleOps_AgentWrap drives the console's agent path end to end against the VM:
+// wrap /bin/echo as a stand-in agent (no relay, skip-auth) and confirm the operated
+// event + the launch echo. The TUI form→request wiring is teatest-covered; this
+// proves consoleOps.doAgentInstall actually wires to a live installer.
+func TestConsoleOps_AgentWrap(t *testing.T) {
+	sess := consoleSession(t)
+	defer sess.Close()
+	ops, events := newTestOps(t, sess)
+
+	runOp(t, ops.RunBootstrap(), events) // ensure the tree exists
+	evs := runOp(t, ops.RunAgentInstall(tui.AgentInstallRequest{
+		Name: "claude", Wrap: true, Bin: "/bin/echo", SkipAuth: true,
+	}), events)
+	if !operatedOK(evs, "agent.wrap") {
+		t.Errorf("missing ok agent.wrap; events=%+v", evs)
+	}
+	if !nanaConfirms(evs, "launch:") {
+		t.Errorf("Nana should echo the launch path; events=%+v", evs)
+	}
+}
+
 // waitOut blocks until all substrings have rendered in the program output.
 func waitOut(t *testing.T, tm *teatest.TestModel, subs ...string) {
 	t.Helper()

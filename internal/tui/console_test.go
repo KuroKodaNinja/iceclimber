@@ -14,6 +14,7 @@ import (
 type fakeOps struct {
 	install   *InstallRequest
 	bootstrap bool
+	agent     *AgentInstallRequest
 }
 
 func (f *fakeOps) RunInstall(r InstallRequest) tea.Cmd {
@@ -23,6 +24,13 @@ func (f *fakeOps) RunInstall(r InstallRequest) tea.Cmd {
 
 func (f *fakeOps) RunBootstrap() tea.Cmd {
 	return func() tea.Msg { f.bootstrap = true; return OpResultMsg{} }
+}
+func (f *fakeOps) RunAgentInstall(r AgentInstallRequest) tea.Cmd {
+	f.agent = &r
+	return func() tea.Msg { return OpResultMsg{} }
+}
+func (f *fakeOps) Agents() []AgentChoice {
+	return []AgentChoice{{Name: "claude", DisplayName: "Claude Code"}}
 }
 func (f *fakeOps) PollStatus() tea.Cmd          { return func() tea.Msg { return StatusMsg{} } }
 func (f *fakeOps) Egress() EgressSnapshot       { return EgressSnapshot{} }

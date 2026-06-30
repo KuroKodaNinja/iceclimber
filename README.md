@@ -188,7 +188,10 @@ a split-pane `[POPO]`/`[NANA]` cockpit (`[POPO]` = what the controller did, `[NA
 = the sandbox's own voice — the agent's stream plus sandbox-verified confirmations).
 You can also drive the sandbox from inside it: **`i`** opens an install form (pick
 **Python**, **JavaScript**, or **Java** — the runtime is installed for you; packages and
-version are optional, since the agent installs packages as its code needs them), **`b`** re-provisions (bootstrap), **`s`** shows live status,
+version are optional, since the agent installs packages as its code needs them),
+**`a`** installs or wraps a coding agent (the `nana` wrapper — relay it in, or wrap a
+binary already on the sandbox; auth comes from your environment, never typed into the
+UI), **`b`** re-provisions (bootstrap), **`s`** shows live status,
 **`e`** manages egress rules (approve/deny/forget), **`q`** quits. Each
 operator install is **confirmed in the sandbox** (the interpreter's own version
 banner, a package presence check) and echoed into `[NANA]`. While an install runs,

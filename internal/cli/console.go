@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
+	"github.com/KuroKodaNinja/iceclimber/internal/agent"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/egress"
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
@@ -108,6 +109,75 @@ func (o *consoleOps) RunInstall(r tui.InstallRequest) tea.Cmd {
 		}
 		return tui.OpResultMsg{}
 	}
+}
+
+// Agents lists the installable agents for the console's agent picker.
+func (o *consoleOps) Agents() []tui.AgentChoice {
+	all := agent.All()
+	out := make([]tui.AgentChoice, len(all))
+	for i, d := range all {
+		out[i] = tui.AgentChoice{Name: d.Name, DisplayName: d.DisplayName}
+	}
+	return out
+}
+
+// RunAgentInstall installs or wraps a coding agent (the nana wrapper) from the
+// console — the TUI equivalent of `iceclimber agent install/wrap`.
+func (o *consoleOps) RunAgentInstall(r tui.AgentInstallRequest) tea.Cmd {
+	return func() tea.Msg {
+		res := o.doAgentInstall(r)
+		o.record(res.typ, res.detail, res.err)
+		for _, e := range res.echoes {
+			o.echo(e)
+		}
+		return tui.OpResultMsg{}
+	}
+}
+
+func (o *consoleOps) doAgentInstall(r tui.AgentInstallRequest) opResult {
+	verb := "agent.install"
+	if r.Wrap {
+		verb = "agent.wrap"
+	}
+	d, ok := agent.Lookup(r.Name)
+	if !ok {
+		return opResult{typ: verb, err: fmt.Errorf("unknown agent %q", r.Name)}
+	}
+	// The token is read from the operator's environment (never typed into the TUI);
+	// skip-auth defers it. Mirrors the CLI's resolveAgentToken (env var, no file here).
+	token := ""
+	if !r.SkipAuth {
+		t, err := resolveAgentToken(d, "")
+		if err != nil {
+			return opResult{typ: verb, err: err}
+		}
+		token = t
+	}
+	inst := newAgentInstaller(o.sess())
+	var (
+		res agent.Result
+		err error
+	)
+	if r.Wrap {
+		res, err = inst.Wrap(o.ctx, d, token, r.Bin)
+	} else {
+		res, err = inst.Install(o.ctx, d, token)
+	}
+	if err != nil {
+		return opResult{typ: verb, err: err}
+	}
+	detail := d.DisplayName
+	if res.Version != "" {
+		detail += " " + res.Version
+	}
+	echoes := []echo{{"agent ready: " + res.Bin, true}}
+	if res.AuthConfigured {
+		echoes = append(echoes, echo{"auth configured (" + d.TokenEnv + ")", true})
+	} else {
+		echoes = append(echoes, echo{"auth skipped — set " + d.TokenEnv + " before launching", false})
+	}
+	echoes = append(echoes, echo{"launch: " + res.Launcher, true})
+	return opResult{typ: verb, detail: detail, echoes: echoes}
 }
 
 func (o *consoleOps) RunBootstrap() tea.Cmd {
