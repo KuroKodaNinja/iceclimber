@@ -270,6 +270,7 @@ func newInstallPythonCmd() *cobra.Command {
 
 func newInstallPipCmd() *cobra.Command {
 	var transport, pyVersion, tier string
+	var pipArgs []string
 	cmd := &cobra.Command{
 		Use:   "pip <pkg>[==version]...",
 		Short: "Install pip packages into an installed runtime (Tier 0 mirror / Tier 1 relay)",
@@ -289,7 +290,7 @@ func newInstallPipCmd() *cobra.Command {
 			defer sess.Close()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			out, err := pip.Run(ctx, pipDeps(sess, pr), pyVersion, parseSpecs(args), tier)
+			out, err := pip.Run(ctx, pipDeps(sess, pr), pyVersion, parseSpecs(args), tier, pipArgs)
 			finish()
 			if err != nil {
 				return err
@@ -301,6 +302,7 @@ func newInstallPipCmd() *cobra.Command {
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVar(&pyVersion, "python", "", "target python minor version, e.g. 3.12 (required)")
 	cmd.Flags().StringVar(&tier, "tier", "auto", "resolution tier: auto|mirror|relay")
+	cmd.Flags().StringArrayVar(&pipArgs, "pip-arg", nil, "extra pip flag passed through (allowlisted), e.g. --pip-arg=--index-url --pip-arg=https://download.pytorch.org/whl/cpu (repeatable)")
 	_ = cmd.MarkFlagRequired("python")
 	return cmd
 }

@@ -243,7 +243,7 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 			return opResult{typ: "python.install", detail: "python " + ver, echoes: echoes}
 		}
 		pkgs := parseSpecs(specs)
-		out, err := pip.Run(o.ctx, pipDeps(o.sess(), pr), ver, pkgs, "auto")
+		out, err := pip.Run(o.ctx, pipDeps(o.sess(), pr), ver, pkgs, "auto", nil)
 		if err != nil {
 			return opResult{typ: "pip.install", err: err, echoes: echoes}
 		}

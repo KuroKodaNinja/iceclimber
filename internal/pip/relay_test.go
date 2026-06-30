@@ -19,12 +19,15 @@ func TestPlatformTags(t *testing.T) {
 func TestDownloadArgs(t *testing.T) {
 	args := strings.Join(downloadArgs(
 		[]pkg.Spec{{Name: "markupsafe", Version: "2.1.5"}, {Name: "rich"}},
-		"3.12", "aarch64", "musl", "https://pypi.org/simple", "/tmp/wh"), " ")
+		"3.12", "aarch64", "musl", "https://pypi.org/simple", "/tmp/wh",
+		[]string{"--index-url", "https://download.pytorch.org/whl/cpu", "--pre"}), " ")
 	for _, want := range []string{
 		"-m pip download", "--only-binary=:all:", "--dest /tmp/wh",
 		"--python-version 3.12", "--abi cp312", "--implementation cp",
 		"--platform musllinux_1_2_aarch64", "--platform musllinux_1_1_aarch64",
 		"--index-url https://pypi.org/simple", "markupsafe==2.1.5", "rich",
+		// agent extra_args appended after the default index (agent --index-url wins) + before specs
+		"--index-url https://download.pytorch.org/whl/cpu", "--pre",
 	} {
 		if !strings.Contains(args, want) {
 			t.Errorf("downloadArgs missing %q in:\n%s", want, args)
@@ -60,17 +63,19 @@ func TestNormName(t *testing.T) {
 
 func TestResolveTier(t *testing.T) {
 	tests := []struct {
-		tier, index, want string
+		tier     string
+		hasIndex bool
+		want     string
 	}{
-		{"auto", "https://m/simple", pkg.TierMirror},
-		{"auto", "", pkg.TierRelay},
-		{"", "https://m/simple", pkg.TierMirror},
-		{"relay", "https://m/simple", pkg.TierRelay}, // forced
-		{"mirror", "", pkg.TierMirror},               // forced
+		{"auto", true, pkg.TierMirror},
+		{"auto", false, pkg.TierRelay},
+		{"", true, pkg.TierMirror},
+		{"relay", true, pkg.TierRelay}, // forced
+		{"mirror", false, pkg.TierMirror},
 	}
 	for _, tt := range tests {
-		if got := resolveTier(tt.tier, tt.index); got != tt.want {
-			t.Errorf("resolveTier(%q,%q) = %q, want %q", tt.tier, tt.index, got, tt.want)
+		if got := resolveTier(tt.tier, tt.hasIndex); got != tt.want {
+			t.Errorf("resolveTier(%q,%v) = %q, want %q", tt.tier, tt.hasIndex, got, tt.want)
 		}
 	}
 }

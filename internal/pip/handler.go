@@ -36,11 +36,33 @@ type Deps struct {
 	EnvManager  string // system mode: "" / "venv"
 }
 
+// extraArgAllow is the per-request pip flag allowlist (decision: validated
+// passthrough, not arbitrary). Value-taking flags consume their following token; the
+// agent cannot pass bare positionals or unlisted flags. This is what makes complex
+// installs like PyTorch (--index-url) possible without handing the agent a shell.
+var extraArgAllow = map[string]pkg.FlagSpec{
+	"--index-url":          {TakesValue: true},
+	"-i":                   {TakesValue: true},
+	"--extra-index-url":    {TakesValue: true},
+	"--find-links":         {TakesValue: true},
+	"-f":                   {TakesValue: true},
+	"--trusted-host":       {TakesValue: true},
+	"--pre":                {},
+	"--no-binary":          {TakesValue: true},
+	"--only-binary":        {TakesValue: true},
+	"--prefer-binary":      {},
+	"--no-build-isolation": {},
+}
+
 // Run locates the target runtime and installs the specs via the selected tier
-// (plan §5). A non-nil error means resolution/download (or locating the runtime)
-// failed — the whole request fails. A nil error with per-package failures in the
-// Outcome is the partial-success case (plan §4.3). Shared by CLI and handler.
-func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, tier string) (pkg.Outcome, error) {
+// (plan §5). extraArgs are validated allowlisted pip flags passed through to the
+// index-facing commands. A non-nil error means resolution/download (or resolving the
+// runtime) failed — the whole request fails. A nil error with per-package failures in
+// the Outcome is the partial-success case (plan §4.3). Shared by CLI and handler.
+func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, tier string, extraArgs []string) (pkg.Outcome, error) {
+	if err := pkg.ValidateExtraArgs(extraArgs, extraArgAllow); err != nil {
+		return pkg.Outcome{}, err
+	}
 	d.Progress.Phase("resolving")
 	// Resolve the interpreter for the chosen runtime source: a managed iceclimber
 	// runtime, or a venv built from a system python (created on demand). Both yield an
@@ -64,8 +86,9 @@ func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, ti
 		ControllerPython:   d.ControllerPython,
 		ControllerIndexURL: d.ControllerIndexURL,
 		Progress:           d.Progress,
+		ExtraArgs:          extraArgs,
 	})
-	if resolveTier(tier, d.IndexURL) == pkg.TierRelay {
+	if resolveTier(tier, m.hasIndex()) == pkg.TierRelay {
 		return m.RelayInstall(ctx, specs, pythonVersion)
 	}
 	plan, err := m.Resolve(ctx, specs)
@@ -85,16 +108,16 @@ func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, ti
 	return m.Install(ctx, plan)
 }
 
-// resolveTier maps the requested tier to a concrete one. "auto" picks relay when
-// no mirror is configured, else mirror. "mirror"/"relay" force the choice.
-func resolveTier(tier, indexURL string) string {
+// resolveTier maps the requested tier to a concrete one. "auto" picks relay when no
+// index is available (config or extra_args), else mirror. "mirror"/"relay" force it.
+func resolveTier(tier string, hasIndex bool) string {
 	switch tier {
 	case pkg.TierRelay:
 		return pkg.TierRelay
 	case pkg.TierMirror:
 		return pkg.TierMirror
 	default: // "auto" or ""
-		if indexURL == "" {
+		if !hasIndex {
 			return pkg.TierRelay
 		}
 		return pkg.TierMirror
@@ -107,6 +130,8 @@ type installParams struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
 	} `json:"packages"`
+	// ExtraArgs are allowlisted pip flags passed straight through (e.g. --index-url).
+	ExtraArgs []string `json:"extra_args,omitempty"`
 }
 
 // Handler adapts pip.Run into the pip.install protocol handler.
@@ -126,7 +151,7 @@ func Handler(d Deps) protocol.Handler {
 		for i, pp := range p.Packages {
 			specs[i] = pkg.Spec{Name: pp.Name, Version: pp.Version}
 		}
-		out, err := Run(ctx, d, p.PythonVersion, specs, "auto")
+		out, err := Run(ctx, d, p.PythonVersion, specs, "auto", p.ExtraArgs)
 		if err != nil {
 			return protocol.Errf(req.ID, "resolution_failed", "%v", err)
 		}

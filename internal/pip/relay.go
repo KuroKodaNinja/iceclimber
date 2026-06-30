@@ -39,8 +39,10 @@ func (m *Manager) RelayInstall(ctx context.Context, specs []pkg.Spec, minor stri
 	}
 	defer os.RemoveAll(localDir)
 
-	// 1. Controller download — resolve + fetch sandbox-platform wheels.
-	dl := exec.CommandContext(ctx, cpy, downloadArgs(specs, minor, m.cfg.Arch, m.cfg.Libc, idx, localDir)...)
+	// 1. Controller download — resolve + fetch sandbox-platform wheels. Agent
+	//    extra_args (e.g. --index-url for PyTorch's wheel index, --pre) are appended
+	//    so they steer the download too, not just a Tier-0 in-sandbox install.
+	dl := exec.CommandContext(ctx, cpy, downloadArgs(specs, minor, m.cfg.Arch, m.cfg.Libc, idx, localDir, m.cfg.ExtraArgs)...)
 	if out, err := dl.CombinedOutput(); err != nil {
 		return pkg.Outcome{}, fmt.Errorf("controller wheel download failed (a package may lack a %s wheel — Tier 2 build is future work): %s", m.cfg.Libc, lastLines(out, 5))
 	}
@@ -108,7 +110,7 @@ func (m *Manager) RelayInstall(ctx context.Context, specs []pkg.Spec, minor stri
 
 // downloadArgs builds the controller-side cross-platform `pip download`. These
 // args go to exec.Command directly (no shell), so no quoting.
-func downloadArgs(specs []pkg.Spec, minor, arch, libc, indexURL, dest string) []string {
+func downloadArgs(specs []pkg.Spec, minor, arch, libc, indexURL, dest string, extraArgs []string) []string {
 	args := []string{
 		"-m", "pip", "download",
 		"--only-binary=:all:", // cross-platform: no building sdists for a foreign target
@@ -121,6 +123,9 @@ func downloadArgs(specs []pkg.Spec, minor, arch, libc, indexURL, dest string) []
 	for _, t := range platformTags(arch, libc) {
 		args = append(args, "--platform", t)
 	}
+	// Allowlisted agent flags (validated in Run) — appended after the default
+	// --index-url so an agent-supplied one wins. These go to exec directly (no shell).
+	args = append(args, extraArgs...)
 	for _, s := range specs {
 		args = append(args, specString(s))
 	}

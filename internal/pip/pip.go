@@ -34,6 +34,10 @@ type Config struct {
 	ControllerPython   string // operator's python on the controller (default python3)
 	ControllerIndexURL string // Popo-reachable index to download from (default PyPI)
 	Progress           progress.Func
+	// ExtraArgs are validated, allowlisted pip flags the agent passed through (e.g.
+	// --index-url for PyTorch's wheel index, --pre). They are appended to the
+	// index-facing pip commands (resolve, Tier-0 install, relay download).
+	ExtraArgs []string
 }
 
 // Manager installs pip packages into one runtime.
@@ -48,8 +52,8 @@ func New(cfg Config) *Manager { return &Manager{cfg: cfg} }
 // specs resolve by pip's default) and returns the exact pinned plan with hashes.
 // A failed dependency graph is a request-level error — correct native behavior.
 func (m *Manager) Resolve(ctx context.Context, specs []pkg.Spec) (pkg.Plan, error) {
-	if m.cfg.IndexURL == "" {
-		return pkg.Plan{}, fmt.Errorf("no pip index configured (set pip.index_url)")
+	if !m.hasIndex() {
+		return pkg.Plan{}, fmt.Errorf("no pip index available (set pip.index_url or pass --index-url via extra_args)")
 	}
 	if len(specs) == 0 {
 		return pkg.Plan{}, fmt.Errorf("no packages requested")
@@ -101,6 +105,7 @@ func (m *Manager) resolveCmd(specs []pkg.Spec, reportPath string) string {
 		"--report", remote.ShellQuote(reportPath),
 	}
 	args = append(args, m.indexArgs()...)
+	args = append(args, m.quotedExtraArgs()...)
 	for _, s := range specs {
 		args = append(args, remote.ShellQuote(specString(s)))
 	}
@@ -113,12 +118,16 @@ func (m *Manager) installCmd(p pkg.Resolved) string {
 		"--no-deps", "--no-input", "--disable-pip-version-check",
 	}
 	args = append(args, m.indexArgs()...)
+	args = append(args, m.quotedExtraArgs()...)
 	args = append(args, remote.ShellQuote(p.Name+"=="+p.Version))
 	return strings.Join(args, " ")
 }
 
 func (m *Manager) indexArgs() []string {
-	a := []string{"--index-url", remote.ShellQuote(m.cfg.IndexURL)}
+	var a []string
+	if m.cfg.IndexURL != "" {
+		a = append(a, "--index-url", remote.ShellQuote(m.cfg.IndexURL))
+	}
 	if m.cfg.ExtraIndexURL != "" {
 		a = append(a, "--extra-index-url", remote.ShellQuote(m.cfg.ExtraIndexURL))
 	}
@@ -126,6 +135,22 @@ func (m *Manager) indexArgs() []string {
 		a = append(a, "--trusted-host", remote.ShellQuote(m.cfg.TrustedHost))
 	}
 	return a
+}
+
+// quotedExtraArgs renders the agent's allowlisted extra args, each shell-quoted.
+// Appended after indexArgs so an agent --index-url takes precedence over config.
+func (m *Manager) quotedExtraArgs() []string {
+	out := make([]string, len(m.cfg.ExtraArgs))
+	for i, a := range m.cfg.ExtraArgs {
+		out[i] = remote.ShellQuote(a)
+	}
+	return out
+}
+
+// hasIndex reports whether an index is available for a Tier-0 resolve — from
+// operator config or an agent-supplied --index-url in extra_args.
+func (m *Manager) hasIndex() bool {
+	return m.cfg.IndexURL != "" || pkg.ExtraArgsHaveFlag(m.cfg.ExtraArgs, "--index-url", "-i")
 }
 
 // specString renders a spec as pip expects it (bare name if unversioned).
