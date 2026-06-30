@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs/remotefstest"
+	"github.com/KuroKodaNinja/iceclimber/internal/tui"
 )
 
 // TestIsOperatorDenied: only a gate operator_denied (handler never ran) is excluded
@@ -138,5 +140,70 @@ func TestConsoleDispatcher_StartedIsEphemeral(t *testing.T) {
 	}
 	if s, _, _ := activity.Counts(evs); s != 1 {
 		t.Errorf("durable serviced count = %d, want 1", s)
+	}
+}
+
+// TestConsoleDispatcher_GateDenyClearsServing: a request the gate denies emits a
+// started (pickup) event AND a ClearServingMsg (so the in-flight indicator never
+// sticks), but NO serviced event — and writes no serviced line to the durable log.
+func TestConsoleDispatcher_GateDenyClearsServing(t *testing.T) {
+	ctx := context.Background()
+	fs := remotefs.NewExecFS(remotefstest.LocalRunner{})
+	tree := protocol.Tree{Root: t.TempDir()}
+	if err := protocol.EnsureTree(ctx, fs, tree); err != nil {
+		t.Fatalf("EnsureTree: %v", err)
+	}
+	sess := &session{fs: fs, tree: tree, transport: "exec", sandboxID: "s", fp: &probe.Fingerprint{}}
+	logPath := filepath.Join(t.TempDir(), "activity.jsonl")
+	cfg := &config.Config{SandboxID: "s", ActivityLog: logPath}
+	events := make(chan tea.Msg, 16)
+	disp := buildConsoleDispatcher(ctx, sess, cfg, activity.New(logPath), events)
+	// Force a gate denial — any gate error becomes an operator_denied response.
+	disp.SetGate(func(_ context.Context, _ protocol.Request) error { return fmt.Errorf("test deny") })
+
+	id := protocol.NewID()
+	name := protocol.RequestName(id)
+	data, _ := json.Marshal(protocol.Request{
+		SchemaVersion: protocol.SchemaVersion, ID: id, Type: "pip.install",
+		CreatedAt: time.Now().UTC(), Params: json.RawMessage("{}"),
+	})
+	if err := protocol.Deliver(ctx, fs, tree.Outbox(), name, data); err != nil {
+		t.Fatal(err)
+	}
+	if err := disp.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	var sawStarted, sawClear, sawServiced bool
+	for drain := true; drain; {
+		select {
+		case m := <-events:
+			switch msg := m.(type) {
+			case activity.Event:
+				switch msg.Kind {
+				case activity.KindStarted:
+					sawStarted = true
+				case activity.KindServiced:
+					sawServiced = true
+				}
+			case tui.ClearServingMsg:
+				sawClear = true
+			}
+		default:
+			drain = false
+		}
+	}
+	if !sawStarted {
+		t.Error("a denied request should still emit a started (pickup) event")
+	}
+	if !sawClear {
+		t.Error("a gate-denied request must emit ClearServingMsg so the indicator clears")
+	}
+	if sawServiced {
+		t.Error("a gate-denied request must NOT emit a serviced event")
+	}
+	evs, _ := activity.Read(logPath)
+	if s, _, _ := activity.Counts(evs); s != 0 {
+		t.Errorf("durable serviced count = %d, want 0 (a denial isn't serviced)", s)
 	}
 }

@@ -200,6 +200,14 @@ the footer shows a **live progress meter** — a spinner, the current phase
 the transfer (or an `(i/n)` count for pip packages; npm/maven show a phase
 spinner), and the **transfer mode** (`· via exec` or `· via sftp`). The `iceclimber install …` CLI shows the same
 progress on a terminal (a single updating line; plain phase lines when piped).
+Requests the **agent** issues are shown **1:1 as they happen**: a pinned
+`▸ servicing <type> · <elapsed>` banner appears under the header the moment Popo
+picks an agent request up, and clears on completion, with the same byte bar/ETA for
+an agent-driven transfer. (Operator-initiated installs from the `i`/`a`/`b` forms
+show their progress in the **footer meter** instead, so an agent request and an
+operator action can be in flight at once without colliding.) Headless `serve` prints
+a `▸ <type> …` receipt line at pickup and the serviced line (with its elapsed time)
+on completion.
 
 ```sh
 ./iceclimber                    # the console (serve + watch + approve + manage)

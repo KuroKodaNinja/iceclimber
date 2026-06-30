@@ -16,11 +16,14 @@ import (
 )
 
 // ProgressMsg is one live install-progress sample pushed onto the console's event
-// channel by the executor (with the active transport label). It drives the footer
-// meter.
+// channel by the executor (with the active transport label). Operator-initiated
+// samples drive the footer meter; agent-initiated ones (Agent=true) drive the
+// in-flight serving banner — routed by origin, not by what's running, since an
+// operator action and an agent request can transfer concurrently.
 type ProgressMsg struct {
 	progress.Event
 	Transport string // "sftp" | "exec" — how the transfer is happening
+	Agent     bool   // true = a Nana-issued request's transfer (serving banner, not footer)
 }
 
 // required is a huh validator that rejects blank/whitespace input.
@@ -120,7 +123,7 @@ type OpRunner interface {
 type StatusSnapshot struct {
 	Sandbox   string
 	Heartbeat string // "seq 42 · ~3s ago" or "none yet"
-	Queue     string // "1 awaiting · 0 unread"
+	Queue     string // "1 awaiting · 0 delivered"
 	Runtimes  []string
 	Caps      string // "" if the agent hasn't reported
 	Err       string // set when the sandbox is unreachable (SSH dropped); panel shows it
@@ -343,15 +346,16 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return c, c.waitEvent()
 	case ProgressMsg:
 		m := msg
-		// Route by what's in flight: an operator action owns the footer meter; otherwise
-		// an agent request's transfer drives the serving banner (#3).
-		if c.running != "" {
+		// Route by ORIGIN, not by what's running: an operator action and an agent request
+		// can transfer concurrently, so an agent sample must reach the serving banner even
+		// while an operator op owns the footer meter (#3).
+		if msg.Agent {
+			c.servingProg = &m
+		} else {
 			if msg.Phase != c.progPhase() {
 				c.progStart = time.Now() // new phase → reset the ETA clock
 			}
 			c.prog = &m
-		} else if c.serving != "" {
-			c.servingProg = &m
 		}
 		return c, c.waitEvent()
 	case spinner.TickMsg:

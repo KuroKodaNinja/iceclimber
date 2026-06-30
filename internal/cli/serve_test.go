@@ -1,10 +1,19 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/probe"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
+	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
+	"github.com/KuroKodaNinja/iceclimber/internal/remotefs/remotefstest"
 )
 
 func TestServiceDetail(t *testing.T) {
@@ -59,5 +68,37 @@ func TestServiceDetail(t *testing.T) {
 				t.Errorf("serviceDetail(%q) = %q, want %q", tt.reqType, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestServeDispatcher_PickupLine: the headless serve dispatcher prints a "▸ <type> …"
+// receipt line at pickup (ephemeral — not appended to the JSONL), then the serviced
+// line on completion.
+func TestServeDispatcher_PickupLine(t *testing.T) {
+	ctx := context.Background()
+	fs := remotefs.NewExecFS(remotefstest.LocalRunner{})
+	tree := protocol.Tree{Root: t.TempDir()}
+	if err := protocol.EnsureTree(ctx, fs, tree); err != nil {
+		t.Fatalf("EnsureTree: %v", err)
+	}
+	sess := &session{fs: fs, tree: tree, transport: "exec", sandboxID: "s", fp: &probe.Fingerprint{}}
+	cfg := &config.Config{SandboxID: "s", ActivityLog: filepath.Join(t.TempDir(), "activity.jsonl")}
+	var out bytes.Buffer
+	disp := buildServeDispatcher(ctx, sess, cfg, nil, &out, false)
+
+	id := protocol.NewID()
+	name := protocol.RequestName(id)
+	data, _ := json.Marshal(protocol.Request{
+		SchemaVersion: protocol.SchemaVersion, ID: id, Type: "ping",
+		CreatedAt: time.Now().UTC(), Params: json.RawMessage("{}"),
+	})
+	if err := protocol.Deliver(ctx, fs, tree.Outbox(), name, data); err != nil {
+		t.Fatal(err)
+	}
+	if err := disp.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if s := out.String(); !strings.Contains(s, "▸ ping …") {
+		t.Errorf("serve should print a pickup line; got %q", s)
 	}
 }

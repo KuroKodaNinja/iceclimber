@@ -43,7 +43,9 @@ type ServiceEvent struct {
 // StartEvent reports a request being picked up — fired the moment the dispatcher
 // reads it from cur/, before the handler (or gate) runs. It lets an observer show a
 // request in-progress 1:1, rather than only after completion (which ServiceEvent
-// reports). Primitives only, same decoupling as ServiceEvent.
+// reports). It carries the request file name and the parsed Request; like
+// ServiceEvent it stays free of logging coupling (the cli layer turns it into an
+// activity event).
 type StartEvent struct {
 	Name string // the request file name (<id>.json)
 	Req  Request

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
@@ -144,18 +145,18 @@ func TestConsole_ServingIndicatorSetAndClear(t *testing.T) {
 	}
 }
 
-// TestConsole_ServingProgressBar: a transfer sample for an agent request (no operator
-// action running) drives the serving banner's byte bar (#3) — not the operator footer
-// meter — and is cleared when the request completes.
+// TestConsole_ServingProgressBar: an agent transfer sample (Agent=true) drives the
+// serving banner's byte bar (#3) — not the operator footer meter — and is cleared when
+// the request completes.
 func TestConsole_ServingProgressBar(t *testing.T) {
 	c := NewConsole("sbx", make(chan tea.Msg, 8), "", nil)
 	u, _ := c.Update(activity.Event{TS: "2026-06-28T18:00:00Z", Kind: activity.KindStarted, ID: "r1", Type: "python.install"})
 	c = u.(Console)
 
-	u, _ = c.Update(ProgressMsg{Event: progress.Event{Phase: "transferring", Cur: 5 << 20, Total: 10 << 20, Unit: progress.Bytes}, Transport: "sftp"})
+	u, _ = c.Update(ProgressMsg{Event: progress.Event{Phase: "transferring", Cur: 5 << 20, Total: 10 << 20, Unit: progress.Bytes}, Transport: "sftp", Agent: true})
 	c = u.(Console)
 	if c.servingProg == nil {
-		t.Fatal("a progress sample while serving should set servingProg")
+		t.Fatal("an agent progress sample should set servingProg")
 	}
 	if c.prog != nil {
 		t.Error("agent-request progress must not drive the operator footer meter")
@@ -169,6 +170,59 @@ func TestConsole_ServingProgressBar(t *testing.T) {
 	c = u.(Console)
 	if c.servingProg != nil {
 		t.Error("serviced should clear servingProg")
+	}
+}
+
+// TestConsole_ProgressRoutesByOrigin: progress is routed by ORIGIN, not by what's
+// running — an operator action and an agent request can transfer concurrently, so an
+// agent sample (Agent=true) must reach the serving banner while an operator sample
+// drives the footer meter, regardless of overlap.
+func TestConsole_ProgressRoutesByOrigin(t *testing.T) {
+	c := NewConsole("sbx", make(chan tea.Msg, 8), "", nil)
+	// Arm an agent request (serving) and pretend an operator action is also running.
+	u, _ := c.Update(activity.Event{TS: "2026-06-28T18:00:00Z", Kind: activity.KindStarted, ID: "r1", Type: "pip.install"})
+	c = u.(Console)
+	c.running = "install python" // operator op concurrently in flight
+
+	// Operator sample → footer meter.
+	u, _ = c.Update(ProgressMsg{Event: progress.Event{Phase: "downloading", Cur: 1, Total: 2, Unit: progress.Bytes}})
+	c = u.(Console)
+	// Agent sample → serving banner, even though running != "".
+	u, _ = c.Update(ProgressMsg{Event: progress.Event{Phase: "transferring", Cur: 3, Total: 4, Unit: progress.Bytes}, Agent: true})
+	c = u.(Console)
+
+	if c.prog == nil || c.prog.Agent {
+		t.Errorf("operator sample should drive c.prog; got %+v", c.prog)
+	}
+	if c.servingProg == nil || !c.servingProg.Agent {
+		t.Errorf("agent sample should drive c.servingProg even while running; got %+v", c.servingProg)
+	}
+}
+
+// TestConsole_SpinnerSingleLoopAndStop: a single tick loop is shared by the operator
+// meter and the serving banner (no double-animation), and it stops once both are idle.
+func TestConsole_SpinnerSingleLoopAndStop(t *testing.T) {
+	c := NewConsole("sbx", make(chan tea.Msg, 8), "", nil)
+	// A started request arms serving and starts the spinner loop.
+	u, _ := c.Update(activity.Event{TS: "2026-06-28T18:00:00Z", Kind: activity.KindStarted, ID: "r1", Type: "ping"})
+	c = u.(Console)
+	if !c.spinning {
+		t.Fatal("a started request should start the spinner loop")
+	}
+	// A concurrent operator op must NOT start a second loop.
+	if cmd := c.tickSpinner(); cmd != nil {
+		t.Error("tickSpinner must be a no-op while already spinning (no double loop)")
+	}
+	// Completion clears serving; with nothing else in flight, a tick stops the loop.
+	u, _ = c.Update(activity.Event{TS: "2026-06-28T18:00:01Z", Kind: activity.KindServiced, ID: "r1", Type: "ping", Status: "ok"})
+	c = u.(Console)
+	u, cmd := c.Update(spinner.TickMsg{})
+	c = u.(Console)
+	if c.spinning {
+		t.Error("the spinner loop should stop once running and serving are both idle")
+	}
+	if cmd != nil {
+		t.Error("an idle tick should return a nil cmd (loop stopped)")
 	}
 }
 

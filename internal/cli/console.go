@@ -778,7 +778,7 @@ func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Conf
 	// transport label is this connection's (the dispatcher is rebuilt on reconnect).
 	pr := func(e progress.Event) {
 		select {
-		case events <- tui.ProgressMsg{Event: e, Transport: sess.transport}:
+		case events <- tui.ProgressMsg{Event: e, Transport: sess.transport, Agent: true}:
 		default:
 		}
 	}
