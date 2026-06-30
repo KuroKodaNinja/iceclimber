@@ -1,17 +1,22 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"path"
 	"strings"
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/popobin"
+	"github.com/KuroKodaNinja/iceclimber/internal/probe"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
 	"github.com/KuroKodaNinja/iceclimber/internal/skill"
 	"github.com/spf13/cobra"
 )
@@ -19,6 +24,7 @@ import (
 func newBootstrapCmd() *cobra.Command {
 	var transport string
 	var force bool
+	var runtimeSource string
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Create the sandbox protocol tree and run a smoke test",
@@ -38,13 +44,21 @@ func newBootstrapCmd() *cobra.Command {
 			}
 			defer sess.Close()
 
+			// Detect system runtimes, resolve the per-language source (flag > config >
+			// persisted > interactive prompt > managed), and persist the choice. Install
+			// behavior is unchanged here — this only records intent for install/serve.
+			src, err := resolveAndPersistRuntimes(cmd, cfg, sess.fp, runtimeSource)
+			if err != nil {
+				return err
+			}
+
 			if err := provision(ctx, sess); err != nil {
 				return err
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"bootstrap ok\n  sandbox:    %s\n  root:       %s\n  transport:  %s\n  smoke test: ping/pong round-trip passed\n  skill:      wrote %s\n",
-				cfg.SandboxID, sess.tree.Root, sess.transport, sess.tree.SkillFile())
+				"bootstrap ok\n  sandbox:    %s\n  root:       %s\n  transport:  %s\n  smoke test: ping/pong round-trip passed\n  skill:      wrote %s\n  runtimes:   %s\n",
+				cfg.SandboxID, sess.tree.Root, sess.transport, sess.tree.SkillFile(), src.Summary())
 			fmt.Fprintf(cmd.OutOrStdout(),
 				"  next:       wire NANA.md into your sandbox agent's instructions (manual — `iceclimber skill print`)\n")
 			return nil
@@ -52,7 +66,58 @@ func newBootstrapCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().BoolVar(&force, "force", false, "re-run bootstrap (tree creation is idempotent)")
+	cmd.Flags().StringVar(&runtimeSource, "runtime-source", "", "per-language runtime source, e.g. python=system,node=managed")
 	return cmd
+}
+
+// resolveAndPersistRuntimes merges the runtime-source choice across layers (flag >
+// config > persisted > interactive prompt > managed default), persists it
+// controller-side, and returns it. The prompt fires only on an interactive terminal
+// for a language with a detected system runtime and no explicit choice — so a
+// headless bootstrap is unattended (defaults to managed) and never blocks.
+func resolveAndPersistRuntimes(cmd *cobra.Command, cfg *config.Config, fp *probe.Fingerprint, flagStr string) (runtimes.Sources, error) {
+	flagSrc, err := runtimes.ParseFlag(flagStr)
+	if err != nil {
+		return nil, err
+	}
+	store := runtimesStore(cfg)
+	persisted, err := store.Load()
+	if err != nil {
+		return nil, err
+	}
+	detected := map[string]bool{}
+	for _, rt := range fp.Runtimes {
+		detected[rt.Lang] = true
+	}
+
+	var prompt func(string) runtimes.Source
+	if isTerminal(os.Stdin) {
+		reader := bufio.NewReader(os.Stdin)
+		prompt = func(lang string) runtimes.Source {
+			return promptRuntimeChoice(cmd.OutOrStdout(), reader, lang, fp)
+		}
+	}
+
+	resolved := runtimes.Resolve(flagSrc, configRuntimeSources(cfg.Runtimes), persisted, detected, prompt)
+	if err := store.Save(resolved); err != nil {
+		return nil, err
+	}
+	return resolved, nil
+}
+
+// promptRuntimeChoice asks the operator whether to use a detected system runtime.
+// Anything other than "system"/"s" keeps the managed default.
+func promptRuntimeChoice(w io.Writer, r *bufio.Reader, lang string, fp *probe.Fingerprint) runtimes.Source {
+	rt, _ := fp.Runtime(lang)
+	fmt.Fprintf(w, "Found system %s %s at %s.\n", lang, rt.Version, rt.Path)
+	fmt.Fprintf(w, "Use this system %s, or install an iceclimber-managed one? [system/managed] (default managed): ", lang)
+	line, _ := r.ReadString('\n')
+	switch strings.TrimSpace(strings.ToLower(line)) {
+	case "system", "s":
+		return runtimes.Source{Mode: runtimes.ModeSystem}
+	default:
+		return runtimes.Source{Mode: runtimes.ModeManaged}
+	}
 }
 
 // provision runs the idempotent setup steps shared by `bootstrap` and the console's

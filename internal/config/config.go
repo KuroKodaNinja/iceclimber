@@ -47,6 +47,26 @@ type Config struct {
 	// ApprovalsFile is the operator-owned allow/deny rule file (never Nana-writable).
 	// Empty means ~/.iceclimber/<sandbox_id>/approvals.json; pending lives alongside.
 	ApprovalsFile string `yaml:"approvals_file"`
+	// Runtimes optionally pins where each language runtime comes from (managed vs a
+	// pre-existing system runtime). An explicit override of the bootstrap choice;
+	// unset languages default to managed. (§ pre-existing runtimes)
+	Runtimes RuntimesConfig `yaml:"runtimes"`
+}
+
+// RuntimesConfig is the operator's per-language runtime-source override.
+type RuntimesConfig struct {
+	Python RuntimePref `yaml:"python"`
+	Node   RuntimePref `yaml:"node"`
+	Java   RuntimePref `yaml:"java"`
+}
+
+// RuntimePref pins one language's runtime source. Source is "managed" | "system"
+// (empty = unset). Path optionally pins a system interpreter; EnvManager picks the
+// isolation tool for system mode (python: "venv" | "conda").
+type RuntimePref struct {
+	Source     string `yaml:"source"`
+	Path       string `yaml:"path"`
+	EnvManager string `yaml:"env_manager"`
 }
 
 // Network routes web.fetch venues and governs unlisted URLs (§3, §6.1).
@@ -168,6 +188,13 @@ func (c *Config) validate(selectSandbox string) error {
 	}
 	if selectSandbox != "" && selectSandbox != c.SandboxID {
 		return fmt.Errorf("--sandbox %q does not match configured sandbox_id %q", selectSandbox, c.SandboxID)
+	}
+	for lang, pref := range map[string]RuntimePref{"python": c.Runtimes.Python, "node": c.Runtimes.Node, "java": c.Runtimes.Java} {
+		switch pref.Source {
+		case "", "managed", "system":
+		default:
+			return fmt.Errorf("runtimes.%s.source %q must be \"managed\" or \"system\"", lang, pref.Source)
+		}
 	}
 	return nil
 }

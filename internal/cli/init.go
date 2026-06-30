@@ -41,6 +41,15 @@ remote_root: ""
 
 # Local wheel/runtime cache, shared across sandboxes by platform fingerprint.
 cache_dir: ~/.iceclimber-cache
+
+# Where each language runtime comes from. Omitted = iceclimber installs a managed
+# build (the default). Set source: system to use a runtime already on the sandbox
+# (brownfield); bootstrap also detects and offers this. Optional path pins the
+# interpreter; env_manager (python) picks venv or conda.
+# runtimes:
+#   python:
+#     source: system        # managed | system
+#     env_manager: venv     # venv | conda
 `
 
 func newInitCmd() *cobra.Command {

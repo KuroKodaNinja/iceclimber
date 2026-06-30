@@ -116,6 +116,37 @@ ssh:
 	}
 }
 
+func TestLoad_Runtimes(t *testing.T) {
+	path := writeTemp(t, `sandbox_id: box-1
+ssh:
+  host: prod
+runtimes:
+  python:
+    source: system
+    env_manager: conda
+  node:
+    source: managed
+`)
+	cfg, err := Load(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtimes.Python.Source != "system" || cfg.Runtimes.Python.EnvManager != "conda" {
+		t.Errorf("python runtime pref = %+v", cfg.Runtimes.Python)
+	}
+	if cfg.Runtimes.Node.Source != "managed" {
+		t.Errorf("node runtime source = %q", cfg.Runtimes.Node.Source)
+	}
+	if cfg.Runtimes.Java.Source != "" {
+		t.Errorf("java runtime source should be unset, got %q", cfg.Runtimes.Java.Source)
+	}
+
+	bad := writeTemp(t, "sandbox_id: box-1\nssh:\n  host: prod\nruntimes:\n  python:\n    source: bogus\n")
+	if _, err := Load(bad, ""); err == nil {
+		t.Error("an invalid runtimes source should be rejected")
+	}
+}
+
 func TestLoad_SandboxMismatch(t *testing.T) {
 	path := writeTemp(t, "sandbox_id: box-1\nssh:\n  host: h\n  user: u\n")
 	if _, err := Load(path, "box-2"); err == nil {

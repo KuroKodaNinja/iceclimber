@@ -14,6 +14,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
 	"github.com/KuroKodaNinja/iceclimber/internal/webfetch"
 	"github.com/pkg/sftp"
 )
@@ -200,6 +201,33 @@ func activityPath(cfg *config.Config) string {
 		return ""
 	}
 	return filepath.Join(home, ".iceclimber", cfg.SandboxID, "activity.jsonl")
+}
+
+// runtimesStore is the controller-side store of the operator's per-language
+// runtime-source choice (~/.iceclimber/<sandbox_id>/runtimes.json), written at
+// bootstrap and read by install/serve to pick the env strategy.
+func runtimesStore(cfg *config.Config) *runtimes.Store {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return runtimes.NewStore(filepath.Join(home, ".iceclimber", cfg.SandboxID, "runtimes.json"))
+}
+
+// configRuntimeSources converts the operator config's runtimes block into the
+// runtimes model (only languages with an explicit source are included).
+func configRuntimeSources(rc config.RuntimesConfig) runtimes.Sources {
+	out := runtimes.Sources{}
+	add := func(lang string, p config.RuntimePref) {
+		if p.Source == "" {
+			return
+		}
+		out[lang] = runtimes.Source{Mode: runtimes.Mode(p.Source), Path: p.Path, EnvManager: p.EnvManager}
+	}
+	add("python", rc.Python)
+	add("node", rc.Node)
+	add("java", rc.Java)
+	return out
 }
 
 // agentLogPath is the controller-side file the serve loop bridges the sandbox agent

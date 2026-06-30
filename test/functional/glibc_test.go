@@ -3,10 +3,16 @@
 package functional
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/probe"
+	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 )
 
 // TestGlibcProbe verifies the glibc sandbox fixture: probe must report glibc (so
@@ -38,6 +44,43 @@ func TestGlibcProbe(t *testing.T) {
 	}
 	if _, ok := fp.Runtime("java"); !ok {
 		t.Error("no system java discovered on the glibc box")
+	}
+}
+
+// TestBootstrapRuntimeSourceFlag: `bootstrap --runtime-source` resolves the choice,
+// reports it, and persists it controller-side. Runs under a private HOME so the
+// runtimes.json is isolated. (Wiring check — install behavior is exercised later.)
+func TestBootstrapRuntimeSourceFlag(t *testing.T) {
+	sb := requireGlibcSandbox(t)
+	root := "/tmp/iceclimber-rt-" + protocol.NewID()
+	cfg := writeConfigFor(t, sb, root)
+
+	home := t.TempDir()
+	var out bytes.Buffer
+	cmd := exec.Command(iceclimberBin, "bootstrap",
+		"--runtime-source", "python=system,node=managed", "--config", cfg, "--transport", "sftp")
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("bootstrap: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "python=system") {
+		t.Errorf("bootstrap summary missing python=system:\n%s", out.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".iceclimber", sb.Name, "runtimes.json"))
+	if err != nil {
+		t.Fatalf("runtimes.json not persisted: %v", err)
+	}
+	var got map[string]struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("parse runtimes.json: %v\n%s", err, data)
+	}
+	if got["python"].Mode != "system" || got["node"].Mode != "managed" {
+		t.Errorf("persisted sources = %+v, want python=system node=managed", got)
 	}
 }
 
