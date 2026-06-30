@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"bytes"
 	"encoding/json"
 	"os"
@@ -138,5 +139,11 @@ func TestResolveRoot_EnvWins(t *testing.T) {
 	t.Setenv("ICECLIMBER_HOME", "/custom/root")
 	if r, err := resolveRoot(); err != nil || r != "/custom/root" {
 		t.Errorf("resolveRoot = %q, %v; want /custom/root", r, err)
+	}
+}
+
+func TestHelp_ListsShellenv(t *testing.T) {
+	if h := helpText(""); !strings.Contains(h, "shellenv") {
+		t.Errorf("`popo help` should list shellenv:\n%s", h)
 	}
 }

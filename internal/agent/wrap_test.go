@@ -75,3 +75,53 @@ func TestWrap_BinNotFound(t *testing.T) {
 		t.Fatalf("want a not-found error suggesting --bin, got %v", err)
 	}
 }
+
+// TestWrap_WritesEnvWhenToken covers the wrap+token path (the rest of the suite
+// uses --skip-auth): the 0600 env.sh is written with the token export.
+func TestWrap_WritesEnvWhenToken(t *testing.T) {
+	inst, root := wrapInstaller(t)
+	d := Descriptor{Name: "t", Bin: "echo", TokenEnv: "TEST_TOKEN", VersionArgs: []string{"ok"}}
+
+	res, err := inst.Wrap(context.Background(), d, "tok-abc", "/bin/echo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.AuthConfigured {
+		t.Error("AuthConfigured should be true when a token is given")
+	}
+	env := filepath.Join(root, "agent", "t", "env.sh")
+	fi, err := os.Stat(env)
+	if err != nil {
+		t.Fatalf("env.sh not written: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("env.sh perms = %v, want 0600", fi.Mode().Perm())
+	}
+	if b, _ := os.ReadFile(env); !strings.Contains(string(b), "export TEST_TOKEN='tok-abc'") {
+		t.Errorf("env.sh missing token export:\n%s", b)
+	}
+}
+
+// TestWrap_RejectsRelativeBin enforces the documented absolute-path invariant.
+func TestWrap_RejectsRelativeBin(t *testing.T) {
+	inst, _ := wrapInstaller(t)
+	d := Descriptor{Name: "t", Bin: "echo", VersionArgs: []string{"ok"}}
+	if _, err := inst.Wrap(context.Background(), d, "", "bin/echo"); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("relative --bin must be rejected, got %v", err)
+	}
+}
+
+// TestWrap_VerifyFails: a binary that exists but exits non-zero fails the wrap with
+// a clear error — after the launcher + nana were written (partial Result).
+func TestWrap_VerifyFails(t *testing.T) {
+	inst, _ := wrapInstaller(t)
+	// `false` exits 1, so verify fails regardless of args.
+	d := Descriptor{Name: "t", Bin: "false", VersionArgs: []string{"--version"}}
+	res, err := inst.Wrap(context.Background(), d, "", "/usr/bin/false")
+	if err == nil || !strings.Contains(err.Error(), "failed to run") {
+		t.Fatalf("want a verify failure, got %v", err)
+	}
+	if res.Launcher == "" {
+		t.Error("the launcher should still be recorded on a verify failure (partial Result)")
+	}
+}

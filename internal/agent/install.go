@@ -112,11 +112,13 @@ func (i *Installer) Wrap(ctx context.Context, d Descriptor, token, binPath strin
 		}
 		binPath = p
 	}
-	dir := path.Join(i.cfg.Root, "agent", d.Name)
-	if err := i.cfg.FS.Mkdir(ctx, dir); err != nil {
-		return Result{}, fmt.Errorf("create agent dir: %w", err)
+	// The launcher bakes binPath and execs it with no cwd guarantee, so it must be
+	// absolute — reject a relative --bin or a bare `command -v` builtin/name.
+	if !path.IsAbs(binPath) {
+		return Result{}, fmt.Errorf("agent binary path must be absolute, got %q (pass an absolute --bin)", binPath)
 	}
-	return i.wire(ctx, d, token, dir, binPath)
+	// wire's first write (env.sh or run) mkdir -p's the agent dir, so no Mkdir here.
+	return i.wire(ctx, d, token, path.Join(i.cfg.Root, "agent", d.Name), binPath)
 }
 
 // locateBin resolves bin to an absolute path on the sandbox via `command -v`.
