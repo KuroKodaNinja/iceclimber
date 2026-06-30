@@ -18,13 +18,19 @@ import (
 	"time"
 )
 
-const sandboxName = "iceclimber-sandbox"
+const (
+	sandboxName      = "iceclimber-sandbox"       // the default musl (Alpine) box
+	glibcSandboxName = "iceclimber-sandbox-glibc" // the glibc (Ubuntu) brownfield box
+)
 
 // iceclimberBin is the path to the binary built once in TestMain.
 var iceclimberBin string
 
-// sandboxConn is everything needed to point iceclimber at the Lima VM.
+// sandboxConn is everything needed to point iceclimber at the Lima VM. Name is the
+// Lima instance (and the sandbox_id used in generated configs), so a test can target
+// either the musl or the glibc box.
 type sandboxConn struct {
+	Name         string
 	Host         string
 	Port         int
 	User         string
@@ -48,11 +54,11 @@ var (
 	sandboxErr  error
 )
 
-// requireSandbox returns connection details for the running Lima sandbox, or
+// requireSandbox returns connection details for the running musl Lima sandbox, or
 // skips the test with an actionable message when it isn't available.
 func requireSandbox(t *testing.T) sandboxConn {
 	t.Helper()
-	sandboxOnce.Do(func() { sandboxInfo, sandboxSkip, sandboxErr = discoverSandbox() })
+	sandboxOnce.Do(func() { sandboxInfo, sandboxSkip, sandboxErr = discoverNamed(sandboxName, "make sandbox-up") })
 	if sandboxErr != nil {
 		t.Fatalf("sandbox setup: %v", sandboxErr)
 	}
@@ -62,19 +68,43 @@ func requireSandbox(t *testing.T) sandboxConn {
 	return sandboxInfo
 }
 
-func discoverSandbox() (sandboxConn, string, error) {
-	if _, err := exec.LookPath("limactl"); err != nil {
-		return sandboxConn{}, "limactl not found; install Lima and run `make sandbox-up`", nil
+// glibc box discovery (its own once, so it's independent of the musl box).
+var (
+	glibcOnce sync.Once
+	glibcInfo sandboxConn
+	glibcSkip string
+	glibcErr  error
+)
+
+// requireGlibcSandbox returns connection details for the running glibc Lima sandbox
+// (brownfield/manylinux fixture), or skips when it isn't available.
+func requireGlibcSandbox(t *testing.T) sandboxConn {
+	t.Helper()
+	glibcOnce.Do(func() { glibcInfo, glibcSkip, glibcErr = discoverNamed(glibcSandboxName, "make sandbox-glibc-up") })
+	if glibcErr != nil {
+		t.Fatalf("glibc sandbox setup: %v", glibcErr)
 	}
-	inst, err := limaInstance(sandboxName)
+	if glibcSkip != "" {
+		t.Skip(glibcSkip)
+	}
+	return glibcInfo
+}
+
+// discoverNamed resolves a Lima instance by name into a sandboxConn, returning a
+// skip message (with the given bring-up hint) when limactl/the VM isn't ready.
+func discoverNamed(name, upHint string) (sandboxConn, string, error) {
+	if _, err := exec.LookPath("limactl"); err != nil {
+		return sandboxConn{}, "limactl not found; install Lima and run `" + upHint + "`", nil
+	}
+	inst, err := limaInstance(name)
 	if err != nil {
-		return sandboxConn{}, fmt.Sprintf("sandbox %q not found (%v); run `make sandbox-up`", sandboxName, err), nil
+		return sandboxConn{}, fmt.Sprintf("sandbox %q not found (%v); run `%s`", name, err, upHint), nil
 	}
 	if inst.Status != "Running" {
-		return sandboxConn{}, fmt.Sprintf("sandbox %q is %q, not Running; run `make sandbox-up`", sandboxName, inst.Status), nil
+		return sandboxConn{}, fmt.Sprintf("sandbox %q is %q, not Running; run `%s`", name, inst.Status, upHint), nil
 	}
 	if inst.SSHLocalPort == 0 {
-		return sandboxConn{}, fmt.Sprintf("sandbox %q has no ssh port yet; is it still booting?", sandboxName), nil
+		return sandboxConn{}, fmt.Sprintf("sandbox %q has no ssh port yet; is it still booting?", name), nil
 	}
 
 	host := sshConfigField(inst.Dir, "Hostname")
@@ -97,7 +127,7 @@ func discoverSandbox() (sandboxConn, string, error) {
 	if err != nil {
 		return sandboxConn{}, "", err
 	}
-	return sandboxConn{Host: host, Port: inst.SSHLocalPort, User: usr, IdentityFile: identity, KnownHosts: known}, "", nil
+	return sandboxConn{Name: name, Host: host, Port: inst.SSHLocalPort, User: usr, IdentityFile: identity, KnownHosts: known}, "", nil
 }
 
 func limaInstance(name string) (limaJSON, error) {
@@ -196,8 +226,40 @@ func repoRoot() string {
 
 // scheduleRootCleanup removes a test's sandbox root at test end so repeated runs
 // don't accumulate ~210MB python installs and fill the VM disk. Best-effort.
+// Defaults to the musl box; use scheduleRootCleanupOn for a different instance.
 func scheduleRootCleanup(t *testing.T, root string) {
+	scheduleRootCleanupOn(t, sandboxName, root)
+}
+
+// scheduleRootCleanupOn is scheduleRootCleanup against a named Lima instance.
+func scheduleRootCleanupOn(t *testing.T, name, root string) {
 	t.Cleanup(func() {
-		_ = exec.Command("limactl", "shell", sandboxName, "--", "rm", "-rf", root).Run()
+		_ = exec.Command("limactl", "shell", name, "--", "rm", "-rf", root).Run()
 	})
+}
+
+// writeConfigFor writes an iceclimber.yaml for an arbitrary sandbox (musl or glibc),
+// using sb.Name as the sandbox_id and instance. A non-empty root pins remote_root and
+// schedules its cleanup; an empty root omits it (e.g. for a probe-only test).
+func writeConfigFor(t *testing.T, sb sandboxConn, root string) string {
+	t.Helper()
+	var b strings.Builder
+	fmt.Fprintf(&b, `sandbox_id: %s
+ssh:
+  host: %s
+  port: %d
+  user: %s
+  identity_file: %s
+  known_hosts: %s
+  use_ssh_config: false
+`, sb.Name, sb.Host, sb.Port, sb.User, sb.IdentityFile, sb.KnownHosts)
+	if root != "" {
+		fmt.Fprintf(&b, "remote_root: %s\n", root)
+		scheduleRootCleanupOn(t, sb.Name, root)
+	}
+	path := filepath.Join(t.TempDir(), "iceclimber.yaml")
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

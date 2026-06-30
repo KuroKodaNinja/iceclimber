@@ -1,0 +1,57 @@
+# Lima template for the iceclimber glibc functional-test sandbox.
+#
+# A Ubuntu box (glibc + GNU userland) that, unlike the minimal Alpine sandbox,
+# PRE-INSTALLS a system toolchain (python3 + python3-venv, node + npm, a JDK).
+# This is the brownfield fixture: it lets functional tests exercise "use a
+# pre-existing runtime" mode, and — being glibc — it can run manylinux wheels
+# (e.g. PyTorch) that have no musllinux build.
+#
+# Usage (via the Makefile):
+#   make sandbox-glibc-up      # limactl start --name iceclimber-sandbox-glibc test/lima/sandbox-glibc.yaml
+#   make e2e-glibc
+#   make sandbox-glibc-down
+minimumLimaVersion: 2.0.0
+
+base:
+- template:_images/ubuntu-24.04
+
+# Apple Virtualization.framework — fast on Apple Silicon (same as the musl box).
+vmType: vz
+
+# PyTorch CPU wheels are large (~200MB download, ~1GB installed) and `import torch`
+# wants real memory, so this box is sized larger than the minimal musl sandbox.
+cpus: 2
+memory: 4GiB
+disk: 14GiB
+
+containerd:
+  system: false
+  user: false
+
+mounts: []
+
+# First boot (network still open): install the system toolchain a brownfield box
+# would already ship. python3 is present on Ubuntu but python3-venv is a SEPARATE
+# package (the classic Debian split that makes `python3 -m venv` fail otherwise) —
+# installing it is exactly what makes the "system Python via venv" path viable.
+provision:
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends \
+      python3 python3-venv python3-pip \
+      nodejs npm \
+      openjdk-17-jdk-headless \
+      ca-certificates curl
+- mode: system
+  script: |
+    #!/bin/bash
+    # Smoke-check the toolchain so a broken provision fails `make sandbox-glibc-up`.
+    set -eux
+    python3 --version
+    python3 -m venv --help >/dev/null
+    node --version
+    java -version

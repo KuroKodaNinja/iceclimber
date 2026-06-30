@@ -5,12 +5,14 @@
 # are gated behind the `functional` build tag, so plain `go test ./...` skips
 # them entirely. See test/README.md.
 
-SANDBOX     := iceclimber-sandbox
-SANDBOX_TPL := test/lima/sandbox.yaml
-DEMO        := iceclimber-demo
-DEMO_TPL    := test/lima/demo.yaml
-DEMO_CFG    := .demo/config.yaml
-BIN         := iceclimber
+SANDBOX           := iceclimber-sandbox
+SANDBOX_TPL       := test/lima/sandbox.yaml
+SANDBOX_GLIBC     := iceclimber-sandbox-glibc
+SANDBOX_GLIBC_TPL := test/lima/sandbox-glibc.yaml
+DEMO              := iceclimber-demo
+DEMO_TPL          := test/lima/demo.yaml
+DEMO_CFG          := .demo/config.yaml
+BIN               := iceclimber
 
 # Release versioning: the nearest git tag (e.g. v0.2.0), else a short commit, with a
 # -dirty suffix if the tree has uncommitted changes. Override with `make release VERSION=…`.
@@ -21,7 +23,8 @@ LDFLAGS  := -s -w -X $(PKG)/internal/cli.version=$(VERSION)
 # linux/{amd64,arm64} (built host-independently by popo-bins) — see the `release` recipe.
 RELEASE_PLATFORMS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
 
-.PHONY: build popo-bins fmt vet test test-functional tui-functional scenario e2e sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
+.PHONY: build popo-bins fmt vet test test-functional tui-functional scenario e2e e2e-glibc sandbox-up sandbox-down sandbox-status sandbox-config sandbox-shell \
+	sandbox-glibc-up sandbox-glibc-down sandbox-glibc-status sandbox-glibc-config sandbox-glibc-shell \
 	demo-up demo-down demo-status demo-firewall demo-firewall-down demo-shell \
 	demo demo-live demo-console demo-config demo-bootstrap demo-agent demo-verify demo-reset demo-logs demo-tui release gh-release clean
 
@@ -69,6 +72,10 @@ scenario: build sandbox-up
 # One-shot: bring the sandbox up, then run the functional suite.
 e2e: sandbox-up test-functional
 
+# One-shot for the glibc box: bring it up, then run the functional suite (the
+# glibc-only tests engage; tests gated on the musl box skip cleanly if it's down).
+e2e-glibc: sandbox-glibc-up test-functional
+
 sandbox-up:
 	@limactl list --quiet 2>/dev/null | grep -qx $(SANDBOX) \
 		&& echo "sandbox '$(SANDBOX)' already exists; starting if stopped" \
@@ -89,6 +96,26 @@ sandbox-config:
 # Open an interactive shell inside the sandbox (Nana's view).
 sandbox-shell:
 	@limactl shell $(SANDBOX)
+
+# --- glibc sandbox (Ubuntu; brownfield + manylinux/PyTorch fixture) ---
+sandbox-glibc-up:
+	@limactl list --quiet 2>/dev/null | grep -qx $(SANDBOX_GLIBC) \
+		&& echo "sandbox '$(SANDBOX_GLIBC)' already exists; starting if stopped" \
+		&& limactl start $(SANDBOX_GLIBC) --tty=false \
+		|| limactl start --name=$(SANDBOX_GLIBC) $(SANDBOX_GLIBC_TPL) --tty=false
+
+sandbox-glibc-down:
+	-limactl stop $(SANDBOX_GLIBC)
+	-limactl delete $(SANDBOX_GLIBC)
+
+sandbox-glibc-status:
+	limactl list $(SANDBOX_GLIBC)
+
+sandbox-glibc-config:
+	@bash test/lima/gen-config.sh $(SANDBOX_GLIBC) iceclimber-glibc.yaml
+
+sandbox-glibc-shell:
+	@limactl shell $(SANDBOX_GLIBC)
 
 # --- Acceptance demo: a real Claude agent in an air-gapped sandbox (see DEMO.md) ---
 
