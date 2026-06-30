@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 )
@@ -17,6 +18,7 @@ func TestDialConfigMapping(t *testing.T) {
 	cfg := &config.Config{SSH: config.SSH{
 		Host: "h", Port: 2200, User: "u", IdentityFile: "/k", KnownHosts: "/kh",
 		SSHConfigFile: "/cfg", UseSSHConfig: &yes, PasswordAuth: true, KeyboardInteractive: true,
+		KeepAliveInterval: 45,
 	}}
 	dc := dialConfig(cfg)
 	switch {
@@ -28,6 +30,8 @@ func TestDialConfigMapping(t *testing.T) {
 		t.Errorf("use_ssh_config not mapped: %+v", dc.UseSSHConfig)
 	case !dc.AllowPassword || !dc.AllowKeyboardInteractive:
 		t.Errorf("password/keyboard-interactive opt-ins not mapped: %+v", dc)
+	case dc.KeepAlive != 45*time.Second:
+		t.Errorf("keepalive_interval (seconds) not mapped: %v", dc.KeepAlive)
 	}
 }
 

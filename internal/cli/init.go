@@ -30,6 +30,10 @@ ssh:
   # no-echo on the terminal — works headless too, as long as a terminal exists.
   # password_auth: false
   # keyboard_interactive: false
+  # SSH keepalive ping interval (seconds). Omitted/0 = 20s; negative disables.
+  # Keeps the link warm through idle windows so a corporate firewall/NAT/bastion
+  # doesn't silently drop it; serve also auto-reconnects if a drop happens anyway.
+  # keepalive_interval: 20
 
 # Where the iceclimber tree lives in the sandbox. Leave empty to let bootstrap
 # choose the first writable candidate ($HOME/.iceclimber, then /opt/iceclimber).

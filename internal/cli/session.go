@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/egress"
@@ -64,6 +65,7 @@ func dialConfig(cfg *config.Config) remote.DialConfig {
 		UseSSHConfig:             cfg.SSH.UseSSHConfig,
 		AllowPassword:            cfg.SSH.PasswordAuth,
 		AllowKeyboardInteractive: cfg.SSH.KeyboardInteractive,
+		KeepAlive:                time.Duration(cfg.SSH.KeepAliveInterval) * time.Second,
 	}
 }
 

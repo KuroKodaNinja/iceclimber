@@ -115,6 +115,11 @@ type SSH struct {
 	UseSSHConfig *bool `yaml:"use_ssh_config"`
 	// SSHConfigFile overrides the ssh config path used for resolution (ssh -F).
 	SSHConfigFile string `yaml:"ssh_config_file"`
+	// KeepAliveInterval is the SSH keepalive ping interval in seconds. 0 uses the
+	// 20s default; a negative value disables keepalives. Keeps the connection warm
+	// through idle windows (long controller-side downloads, slow fetches) so a
+	// corporate firewall/NAT/bastion doesn't silently drop it.
+	KeepAliveInterval int `yaml:"keepalive_interval"`
 }
 
 // Load reads, parses, and validates the config at path. When selectSandbox is

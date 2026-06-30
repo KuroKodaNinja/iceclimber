@@ -16,7 +16,7 @@ import (
 // It is produced by buildDialPlan and consumed by Dial and FetchHostKey so all
 // connection paths agree on the resolved target.
 type dialPlan struct {
-	host          string   // resolved HostName — the dial target AND the known_hosts key
+	host          string // resolved HostName — the dial target AND the known_hosts key
 	port          int
 	user          string
 	identityFiles []string // explicit key file first, then ssh-config IdentityFiles
@@ -136,6 +136,16 @@ func Dial(ctx context.Context, cfg DialConfig) (*SSHRunner, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
+
+	// Resolve the keepalive interval: 0 → default, negative → disabled.
+	ka := resolveKeepAlive(cfg.KeepAlive)
+	// TCP keepalive on the OS/NAT layer (direct dial only — a ProxyCommand conn
+	// isn't a *net.TCPConn, and SSH-level keepalive covers that path).
+	if tcp, ok := conn.(*net.TCPConn); ok && ka > 0 {
+		_ = tcp.SetKeepAlive(true)
+		_ = tcp.SetKeepAlivePeriod(ka)
+	}
+
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, clientCfg)
 	if err != nil {
 		conn.Close()
@@ -145,7 +155,12 @@ func Dial(ctx context.Context, cfg DialConfig) (*SSHRunner, error) {
 		}
 		return nil, fmt.Errorf("ssh handshake %s: %w%s", addr, err, proxyDetail(conn))
 	}
-	return &SSHRunner{client: ssh.NewClient(sshConn, chans, reqs)}, nil
+	r := &SSHRunner{client: ssh.NewClient(sshConn, chans, reqs)}
+	// SSH-level keepalive keeps the link warm and makes a real drop detected fast.
+	if ka > 0 {
+		r.stopKA = startKeepAlive(r.client, ka)
+	}
+	return r, nil
 }
 
 // ResolveTarget reports the effective host/port/known_hosts for cfg — so the
