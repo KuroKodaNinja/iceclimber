@@ -1,5 +1,6 @@
-# Compiled binary
+# Compiled binaries
 /iceclimber
+/popo          # stray from `go build ./cmd/popo` (the embedded bins live in internal/popobin/bin/)
 
 # Local operator config and caches (may contain host/path details)
 /iceclimber.yaml
