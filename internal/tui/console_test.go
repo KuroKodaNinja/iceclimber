@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -115,6 +116,69 @@ func TestEventToLine_ShowsDuration(t *testing.T) {
 	l0 := eventToLine(activity.Event{Kind: activity.KindServiced, Type: "ping", Status: "ok"})
 	if strings.HasSuffix(l0.plain, " ") || strings.Contains(l0.plain, "· ") {
 		t.Errorf("zero-duration line should not show a duration: %q", l0.plain)
+	}
+}
+
+func TestConsole_ServingIndicatorSetAndClear(t *testing.T) {
+	c := NewConsole("sbx", make(chan tea.Msg, 8), "", nil)
+
+	// A started event arms the in-flight indicator — no counter bump, no scrollback line.
+	u, _ := c.Update(activity.Event{TS: "2026-06-28T18:00:00Z", Kind: activity.KindStarted, ID: "r1", Type: "pip.install"})
+	c = u.(Console)
+	if c.serving != "pip.install" || c.servingID != "r1" {
+		t.Fatalf("serving=%q id=%q, want pip.install/r1", c.serving, c.servingID)
+	}
+	if c.served != 0 || len(c.popoLines) != 0 {
+		t.Errorf("started must not count or add a scrollback line: served=%d lines=%d", c.served, len(c.popoLines))
+	}
+
+	// The matching serviced event clears the indicator and now counts + renders.
+	u, _ = c.Update(activity.Event{TS: "2026-06-28T18:00:01Z", Kind: activity.KindServiced, ID: "r1", Type: "pip.install", Status: "ok"})
+	c = u.(Console)
+	if c.serving != "" {
+		t.Errorf("serviced should clear serving, got %q", c.serving)
+	}
+	if c.served != 1 || len(c.popoLines) != 1 {
+		t.Errorf("after serviced: served=%d lines=%d, want 1/1", c.served, len(c.popoLines))
+	}
+}
+
+func TestConsole_ServingClearedByGateDeny(t *testing.T) {
+	// A gate-denied request produces no serviced event; ClearServingMsg must clear the
+	// in-flight indicator so it never sticks on the last request.
+	c := NewConsole("sbx", make(chan tea.Msg, 4), "", nil)
+	u, _ := c.Update(activity.Event{TS: "2026-06-28T18:00:00Z", Kind: activity.KindStarted, ID: "r9", Type: "python.install"})
+	c = u.(Console)
+	if c.serving == "" {
+		t.Fatal("started should arm serving")
+	}
+	u, _ = c.Update(ClearServingMsg{})
+	c = u.(Console)
+	if c.serving != "" || c.servingID != "" {
+		t.Errorf("ClearServingMsg should clear serving, got %q/%q", c.serving, c.servingID)
+	}
+}
+
+func TestEventToLine_StartedStyle(t *testing.T) {
+	l := eventToLine(activity.Event{Kind: activity.KindStarted, Type: "pip.install"})
+	if !strings.Contains(l.plain, "▸") || !strings.Contains(l.plain, "pip.install") {
+		t.Errorf("started line should be a ▸ in-progress form; got %q", l.plain)
+	}
+}
+
+// TestDashboard_ServingAndRunningCoexist: the agent in-flight banner and the operator
+// footer meter are independent — both must render in the same frame (an operator action
+// and an agent request can be in flight at once) without clobbering each other.
+func TestDashboard_ServingAndRunningCoexist(t *testing.T) {
+	out := dashboard(120, 40, "sbx", 0, 0, 0, time.Time{}, ConnConnected, hbStatus{},
+		servingLine("⠋", "pip.install", 3*time.Second), // agent in-flight banner
+		nil, nil, true, false, true,
+		"install python", "⠋ install python · transferring") // operator running + meter
+	if !strings.Contains(out, "▸ servicing pip.install") {
+		t.Error("agent serving banner missing from the frame")
+	}
+	if !strings.Contains(out, "install python") {
+		t.Error("operator footer meter missing from the frame")
 	}
 }
 

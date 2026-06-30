@@ -221,6 +221,30 @@ func TestFlow_ServicedEventToPopo(t *testing.T) {
 	}
 }
 
+// TestFlow_ServingIndicator: a started event pins the in-flight banner ("▸ servicing
+// <type>") in a real render; the matching serviced event clears it and lands the
+// serviced line. The banner is asserted on the live stream; the post-serviced state is
+// asserted on the final model + its View (the live spinner floods frames, which makes
+// scraping the post-clear frame out of the stream racy — the model/render is correct,
+// as TestConsole_ServingIndicatorSetAndClear proves deterministically).
+func TestFlow_ServingIndicator(t *testing.T) {
+	tm := startConsole(t, nil)
+	tm.Send(activity.Event{TS: "2026-06-28T18:00:00Z", Kind: activity.KindStarted, ID: "r1", Type: "pip.install"})
+	waitText(t, tm, "▸ servicing pip.install")
+	tm.Send(activity.Event{
+		TS: "2026-06-28T18:00:01Z", Kind: activity.KindServiced,
+		ID: "r1", Type: "pip.install", Status: "ok", Detail: "requests 2.32.3",
+	})
+	c := finalConsole(t, tm)
+	if c.serving != "" {
+		t.Errorf("serving should be cleared after serviced, got %q", c.serving)
+	}
+	if c.served != 1 || len(c.popoLines) != 1 || !strings.Contains(c.popoLines[0].plain, "requests 2.32.3") {
+		t.Errorf("serviced should clear the banner and land the line; served=%d lines=%+v", c.served, c.popoLines)
+	}
+	// serving == "" guarantees View renders no banner (it's gated on c.serving != "").
+}
+
 func TestFlow_SandboxEchoToNana(t *testing.T) {
 	tm := startConsole(t, nil)
 	tm.Send(activity.Event{

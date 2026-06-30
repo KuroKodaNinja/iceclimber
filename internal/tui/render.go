@@ -19,12 +19,13 @@ var (
 	cDim   = lipgloss.Color("243") // grey
 	cTitle = lipgloss.Color("231") // near-white
 
-	dimStyle   = lipgloss.NewStyle().Foreground(cDim)
-	okStyle    = lipgloss.NewStyle().Foreground(cNana)
-	errStyle   = lipgloss.NewStyle().Foreground(cErr)
-	warnStyle  = lipgloss.NewStyle().Foreground(cWarn)
-	plainStyle = lipgloss.NewStyle()
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(cTitle)
+	dimStyle     = lipgloss.NewStyle().Foreground(cDim)
+	okStyle      = lipgloss.NewStyle().Foreground(cNana)
+	errStyle     = lipgloss.NewStyle().Foreground(cErr)
+	warnStyle    = lipgloss.NewStyle().Foreground(cWarn)
+	plainStyle   = lipgloss.NewStyle()
+	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(cTitle)
+	servingStyle = lipgloss.NewStyle().Foreground(cPopo) // in-flight request indicator
 )
 
 // eventToLine renders one activity event into a plain string + a colour by kind/status.
@@ -41,6 +42,14 @@ func eventToLine(e activity.Event) popoLine {
 			st = errStyle
 		}
 		return popoLine{plain: strings.TrimRight(fmt.Sprintf("%s  ⚙ %-15s %s", ts, e.Type, e.Detail), " "), style: st}
+	case activity.KindStarted:
+		// Live-only; rendered as the pinned serving banner, not the scrollback. This
+		// case handles a stray line defensively (it isn't normally written to disk).
+		typ := e.Type
+		if typ == "" {
+			typ = "?"
+		}
+		return popoLine{plain: fmt.Sprintf("%s  ▸ %s …", ts, typ), style: dimStyle}
 	case activity.KindServiced:
 		typ := e.Type
 		if typ == "" {
@@ -84,7 +93,7 @@ type hbStatus struct {
 	age   time.Duration
 }
 
-func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, conn ConnState, hb hbStatus, popoLines []popoLine, nanaLines []string, showNana, hasAgentLog, hasOps bool, running, meter string) string {
+func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, conn ConnState, hb hbStatus, serving string, popoLines []popoLine, nanaLines []string, showNana, hasAgentLog, hasOps bool, running, meter string) string {
 	if w < 40 {
 		w = 40
 	}
@@ -93,17 +102,42 @@ func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS 
 	}
 	hdr := header(w, sandboxID, served, approved, denied, lastTS, conn, hb)
 	ftr := footer(w, hasOps, running, meter)
-	bodyH := h - lipgloss.Height(hdr) - lipgloss.Height(ftr)
+	// A pinned in-flight banner under the header (independent of the operator footer
+	// meter), shown only while the dispatcher is servicing a request.
+	banner, bannerH := "", 0
+	if serving != "" {
+		banner = lipgloss.NewStyle().Width(w).Render(serving)
+		bannerH = lipgloss.Height(banner)
+	}
+	bodyH := h - lipgloss.Height(hdr) - lipgloss.Height(ftr) - bannerH
 	if bodyH < 4 {
 		bodyH = 4
 	}
+	var body string
 	if showNana {
 		lw := (w - 1) / 2
 		rw := w - 1 - lw
-		body := lipgloss.JoinHorizontal(lipgloss.Top, popoPane(lw, bodyH, popoLines), " ", nanaPane(rw, bodyH, hasAgentLog, nanaLines))
-		return lipgloss.JoinVertical(lipgloss.Left, hdr, body, ftr)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, popoPane(lw, bodyH, popoLines), " ", nanaPane(rw, bodyH, hasAgentLog, nanaLines))
+	} else {
+		body = popoPane(w, bodyH, popoLines)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, hdr, popoPane(w, bodyH, popoLines), ftr)
+	rows := []string{hdr}
+	if banner != "" {
+		rows = append(rows, banner)
+	}
+	rows = append(rows, body, ftr)
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// servingLine renders the in-flight indicator for the request the dispatcher is
+// currently servicing: spinner + request type + elapsed. Distinct from the operator
+// footer meter, so an agent-driven request and an operator action can show in-flight at
+// the same time. A trailing meter (byte/items bar) is appended by the caller once a
+// transfer-progress sample is available.
+func servingLine(spin, typ string, elapsed time.Duration) string {
+	return " " + dimStyle.Render(spin) + " " +
+		servingStyle.Render("▸ servicing "+typ) +
+		dimStyle.Render(" · "+progress.HumanDur(elapsed))
 }
 
 func header(w int, sandboxID string, served, approved, denied int, lastTS time.Time, conn ConnState, hb hbStatus) string {

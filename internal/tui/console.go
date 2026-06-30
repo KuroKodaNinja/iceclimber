@@ -193,16 +193,25 @@ type Console struct {
 	formKind  string // "install" | "bootstrap" while a form is open
 	running   string // label of an in-flight operator action ("" = idle)
 	spin      spinner.Model
+	spinning  bool         // a spinner tick loop is live (so running + serving share ONE loop)
 	prog      *ProgressMsg // latest progress sample for the in-flight action ("" running = ignored)
 	progStart time.Time    // when the current phase began (for ETA)
-	panel     string       // "" | "status" | "egress" — an open read/manage panel
-	status    *StatusSnapshot
-	egress    EgressSnapshot
-	cursor    int    // selected row in the egress panel
-	panelErr  string // last egress action error, shown in the panel ("" = none)
-	width     int
-	height    int
-	connState ConnState // SSH link state (connected vs reconnecting)
+	// serving is the in-flight request the dispatcher is currently servicing — distinct
+	// from operator `running` so an agent-driven request and an operator action can show
+	// in-flight at once. Latest-wins: a KindStarted sets it, the matching serviced/denied
+	// (or a ClearServingMsg) clears it. Safe because the dispatcher services one request
+	// at a time (a future dispatch-parallelism epic would need ID-keyed tracking).
+	serving      string
+	servingID    string
+	servingStart time.Time
+	panel        string // "" | "status" | "egress" — an open read/manage panel
+	status       *StatusSnapshot
+	egress       EgressSnapshot
+	cursor       int    // selected row in the egress panel
+	panelErr     string // last egress action error, shown in the panel ("" = none)
+	width        int
+	height       int
+	connState    ConnState // SSH link state (connected vs reconnecting)
 	// Heartbeat freshness — distinct from the link: a connected-but-wedged dispatcher
 	// stops advancing the seq, which the header surfaces as "stale".
 	lastHeartbeat time.Time
@@ -312,13 +321,21 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.status = &s
 		return c, nil
 	case activity.Event:
+		wasServing := c.serving != ""
 		c.applyEvent(msg)
+		// A request just entered service → start the spinner if it isn't already running.
+		if c.serving != "" && !wasServing {
+			return c, tea.Batch(c.waitEvent(), c.tickSpinner())
+		}
 		return c, c.waitEvent()
 	case *ApprovalRequest:
 		c.modal = msg
 		return c, c.waitEvent()
 	case ConnStateMsg:
 		c.connState = msg.State
+		return c, c.waitEvent()
+	case ClearServingMsg:
+		c.serving, c.servingID = "", ""
 		return c, c.waitEvent()
 	case HeartbeatMsg:
 		c.lastHeartbeat, c.heartbeatSeq = msg.At, msg.Seq
@@ -331,8 +348,9 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.prog = &m
 		return c, c.waitEvent()
 	case spinner.TickMsg:
-		if c.running == "" {
-			return c, nil // stop animating when idle (restarted when an action begins)
+		if c.running == "" && c.serving == "" {
+			c.spinning = false // both idle → stop the loop (restarted when an action begins)
+			return c, nil
 		}
 		var cmd tea.Cmd
 		c.spin, cmd = c.spin.Update(msg)
@@ -463,12 +481,16 @@ func (c Console) View() string {
 	if c.running != "" {
 		meter = c.renderMeter()
 	}
+	serving := ""
+	if c.serving != "" {
+		serving = servingLine(c.spin.View(), c.serving, time.Since(c.servingStart))
+	}
 	hb := hbStatus{}
 	if !c.lastHeartbeat.IsZero() {
 		hb = hbStatus{known: true, seq: c.heartbeatSeq, age: time.Since(c.lastHeartbeat)}
 	}
 	return dashboard(c.width, c.height, c.sandboxID, c.served, c.approved, c.denied,
-		c.lastTS, c.connState, hb, c.popoLines, c.nanaLines, true, c.nana != nil, c.ops != nil, c.running, meter)
+		c.lastTS, c.connState, hb, serving, c.popoLines, c.nanaLines, true, c.nana != nil, c.ops != nil, c.running, meter)
 }
 
 // openForm builds and focuses the named operator form.
@@ -516,7 +538,7 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 		// Batch the spinner tick so the in-flight footer animates while the op runs.
 		return c, tea.Batch(c.ops.RunInstall(InstallRequest{
 			Lang: c.st.lang, Version: c.st.version, Pkgs: c.st.pkgs,
-		}), c.spin.Tick)
+		}), c.tickSpinner())
 	case "agent":
 		if c.st.agentName == "" {
 			return c, nil
@@ -532,7 +554,7 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 			Wrap:     c.st.agentMode == "wrap",
 			Bin:      c.st.agentBin,
 			SkipAuth: c.st.agentAuth == "skip",
-		}), c.spin.Tick)
+		}), c.tickSpinner())
 	case "bootstrap":
 		if !c.st.confirm {
 			return c, nil // operator declined at the confirm
@@ -543,9 +565,21 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 		}
 		c.running = "bootstrap"
 		c.progStart = time.Now()
-		return c, tea.Batch(c.ops.RunBootstrap(), c.spin.Tick)
+		return c, tea.Batch(c.ops.RunBootstrap(), c.tickSpinner())
 	}
 	return c, nil
+}
+
+// tickSpinner starts the spinner animation loop, but only if one isn't already live —
+// so a concurrent operator action (`running`) and agent request (`serving`) share a
+// single tick loop instead of double-animating (two loops would spin at 2× speed). The
+// loop stops itself in the spinner.TickMsg handler once both indicators are idle.
+func (c *Console) tickSpinner() tea.Cmd {
+	if c.spinning {
+		return nil
+	}
+	c.spinning = true
+	return c.spin.Tick
 }
 
 // progPhase is the current progress phase, or "" when none.
@@ -692,12 +726,19 @@ func (c *Console) applyEvent(e activity.Event) {
 		return
 	}
 	switch e.Kind {
+	case activity.KindStarted:
+		// Live-only in-progress indicator: arm it (latest-wins) and stop — it's not a
+		// scrollback line and not a counter. The matching serviced/denied clears it.
+		c.serving, c.servingID, c.servingStart = e.Type, e.ID, time.Now()
+		return
 	case activity.KindServiced:
 		c.served++
+		c.serving, c.servingID = "", "" // completed → clear in-progress
 	case activity.KindApproved:
 		c.approved++
 	case activity.KindDenied:
 		c.denied++
+		c.serving, c.servingID = "", "" // denied → clear in-progress
 	}
 	c.popoLines = append(c.popoLines, eventToLine(e))
 	if len(c.popoLines) > maxLines {
