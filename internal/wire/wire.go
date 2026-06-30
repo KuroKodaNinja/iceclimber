@@ -110,6 +110,80 @@ func (t Tree) SkillFile() string    { return path.Join(t.Skill(), "NANA.md") }
 func (t Tree) ProtocolFile() string { return path.Join(t.Skill(), "PROTOCOL.md") }
 func (t Tree) Capabilities() string { return path.Join(t.protocolDir(), "capabilities.json") }
 
+// CapabilitiesSchema is the version of the capabilities.json self-report.
+const CapabilitiesSchema = 1
+
+// Capabilities is Nana's self-report, written to Tree.Capabilities(): the sandbox
+// host facts (written by bootstrap) and the installed coding agent's identity
+// (written by agent install/wrap). The two blocks are updated independently via a
+// read-modify-write, so neither writer clobbers the other. The status panel renders
+// Summary().
+type Capabilities struct {
+	SchemaVersion int       `json:"schema_version"`
+	WrittenAt     string    `json:"written_at"`
+	Host          CapHost   `json:"host"`
+	Agent         *CapAgent `json:"agent,omitempty"`
+}
+
+// CapHost is the sandbox platform (written by bootstrap from the probe fingerprint).
+type CapHost struct {
+	OS   string `json:"os,omitempty"`
+	Arch string `json:"arch,omitempty"`
+	Libc string `json:"libc,omitempty"`
+}
+
+// CapAgent is the installed coding agent's self-declared identity (written by
+// agent install/wrap — the only place the agent name/version/auth is known).
+type CapAgent struct {
+	Name           string `json:"name"`
+	DisplayName    string `json:"display_name"`
+	Version        string `json:"version,omitempty"`
+	AuthConfigured bool   `json:"auth_configured"`
+}
+
+// Summary renders the one-line status report: the agent identity (or "no agent yet")
+// with the host platform as trailing context, e.g.
+// "Claude Code 1.2.3 · auth ✓ · linux/arm64 (glibc)".
+func (c Capabilities) Summary() string {
+	var parts []string
+	if c.Agent != nil {
+		name := c.Agent.DisplayName
+		if name == "" {
+			name = c.Agent.Name
+		}
+		s := name
+		if c.Agent.Version != "" {
+			s += " " + c.Agent.Version
+		}
+		auth := "auth ✗"
+		if c.Agent.AuthConfigured {
+			auth = "auth ✓"
+		}
+		parts = append(parts, s+" · "+auth)
+	} else {
+		parts = append(parts, "no agent yet")
+	}
+	if h := c.Host.String(); h != "" {
+		parts = append(parts, h)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// String renders the host platform compactly, e.g. "linux/arm64 (glibc)".
+func (h CapHost) String() string {
+	s := h.OS
+	if h.Arch != "" {
+		if s != "" {
+			s += "/"
+		}
+		s += h.Arch
+	}
+	if h.Libc != "" && s != "" {
+		s += " (" + h.Libc + ")"
+	}
+	return s
+}
+
 // Maildir is one tmp/new/cur triple.
 type Maildir struct{ base string }
 
