@@ -43,6 +43,12 @@ $ICECLIMBER_HOME/
 3. **Wait for the response.** Poll for `$ICECLIMBER_HOME/protocol/inbox/new/<id>.json` (same id);
    read and parse it when it appears.
 
+4. **Collect it.** After reading the response, mark it collected so Popo can prune the
+   request/response pair and the operator's "awaiting collection" count stays honest:
+   run `popo collect <id>`, or — if you can't run `popo` — move it yourself by renaming
+   `inbox/new/<id>.json` → `inbox/cur/<id>.json`. Best-effort: skipping it only leaves the
+   response counted as uncollected (and eventually GC'd by the retention sweep).
+
 ## Responses
 
 ```json
@@ -91,5 +97,6 @@ install`/`wrap` — to inform the operator's `status` view. **You don't write it
 Notes: run installed runtimes by the absolute `path`/`node_path`/`classpath`
 returned. `body_blob` is a `$ICECLIMBER_HOME`-relative path — read the body at `$ICECLIMBER_HOME/<body_blob>`.
 For Node, export `NODE_PATH=<node_path>`. Java 11+ runs a single source file directly
-(`<java> Program.java`). One request, one response, matched by `id`; you never touch
-`cur/`.
+(`<java> Program.java`). One request, one response, matched by `id`. Popo owns
+`outbox/cur` (its pickup lock — never write there); you write `outbox/new` and read from
+`inbox/new`, then collect into `inbox/cur` (step 4).

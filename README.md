@@ -237,7 +237,7 @@ operation the agent requests, with context, and you approve inline:
 
 | Command | What it does |
 |---|---|
-| `status` | Liveness (heartbeat freshness), queue depth (awaiting + delivered), **health-probed** runtimes (✓ runs / ✗ won't), and the sandbox's **capabilities self-report** — the host platform (written at bootstrap) and the installed agent's identity/version/auth (`Claude Code 1.2.3 · auth ✓ · linux/arm64 (glibc)`, or `no agent yet · …` before one is installed). The console header shows the SSH link and heartbeat health as **separate** signals, so a connected-but-wedged Popo reads as stale, not green |
+| `status` | Liveness (heartbeat freshness), queue depth (awaiting service + **awaiting collection** — a real uncollected count: the agent collects each response on read and Popo GCs collected/abandoned pairs, with a configurable `maildir_retention` sweep), **health-probed** runtimes (✓ runs / ✗ won't), and the sandbox's **capabilities self-report** — the host platform (written at bootstrap) and the installed agent's identity/version/auth (`Claude Code 1.2.3 · auth ✓ · linux/arm64 (glibc)`, or `no agent yet · …` before one is installed). The console header shows the SSH link and heartbeat health as **separate** signals, so a connected-but-wedged Popo reads as stale, not green |
 | `logs -f` | Tail Popo's activity (`[POPO]`) merged with the agent's stream (`[NANA]`, bridged automatically; `--agent-log <file>` overrides) |
 | `tui` | A live split-pane `[POPO]`/`[NANA]` dashboard (`[NANA]` bridged automatically; `--snapshot` for one static frame) |
 | `pending` / `approve <id>` / `deny <id>` | Async egress approval (when not serving on a TTY) |
