@@ -98,6 +98,73 @@ func TestDispatch_Dedup(t *testing.T) {
 	}
 }
 
+func TestDispatch_ObserveStart_FiresAtPickup(t *testing.T) {
+	// The start hook must fire once per request, BEFORE the terminal observer, for both
+	// the drainNew path and the recover (stranded-in-cur) path — covering agent- and
+	// operator-initiated requests alike (the dispatcher doesn't distinguish them).
+	run := func(t *testing.T, seed func(ctx context.Context, fs remotefs.FS, tree Tree, name string, data []byte)) StartEvent {
+		ctx, fs, tree, d := setup(t)
+		id := NewID()
+		name := RequestName(id)
+		var order []string
+		var got StartEvent
+		var startCount int
+		d.ObserveStart(func(ev StartEvent) {
+			order = append(order, "start")
+			got = ev
+			startCount++
+		})
+		d.Observe(func(ServiceEvent) { order = append(order, "done") })
+		seed(ctx, fs, tree, name, request(id, "ping"))
+		if err := d.RunOnce(ctx); err != nil {
+			t.Fatalf("RunOnce: %v", err)
+		}
+		if startCount != 1 {
+			t.Fatalf("ObserveStart fired %d times, want 1", startCount)
+		}
+		if len(order) != 2 || order[0] != "start" || order[1] != "done" {
+			t.Errorf("event order = %v, want [start done]", order)
+		}
+		if got.Name != name || got.Req.ID != id || got.Req.Type != "ping" {
+			t.Errorf("StartEvent = %+v, want name=%s id=%s type=ping", got, name, id)
+		}
+		return got
+	}
+
+	t.Run("drainNew", func(t *testing.T) {
+		run(t, func(ctx context.Context, fs remotefs.FS, tree Tree, name string, data []byte) {
+			if err := Deliver(ctx, fs, tree.Outbox(), name, data); err != nil {
+				t.Fatal(err)
+			}
+		})
+	})
+	t.Run("recover", func(t *testing.T) {
+		run(t, func(ctx context.Context, fs remotefs.FS, tree Tree, name string, data []byte) {
+			// Stranded in cur/ (picked up but never answered before a crash).
+			if err := fs.WriteFile(ctx, path.Join(tree.Outbox().Cur(), name), data); err != nil {
+				t.Fatal(err)
+			}
+		})
+	})
+
+	t.Run("fires without a terminal observer", func(t *testing.T) {
+		ctx, fs, tree, d := setup(t)
+		id := NewID()
+		name := RequestName(id)
+		fired := false
+		d.ObserveStart(func(StartEvent) { fired = true })
+		if err := Deliver(ctx, fs, tree.Outbox(), name, request(id, "ping")); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.RunOnce(ctx); err != nil {
+			t.Fatalf("RunOnce: %v", err)
+		}
+		if !fired {
+			t.Error("ObserveStart did not fire when the terminal observer was nil")
+		}
+	})
+}
+
 func TestDispatch_RecoversStrandedRequest(t *testing.T) {
 	ctx, fs, tree, d := setup(t)
 	id := NewID()

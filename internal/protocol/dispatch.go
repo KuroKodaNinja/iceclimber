@@ -15,13 +15,14 @@ import (
 // Dispatcher services requests for one sandbox tree over a remotefs.FS. It is the
 // engine behind both `serve` and `bootstrap`'s smoke test.
 type Dispatcher struct {
-	fs          remotefs.FS
-	tree        Tree
-	registry    Registry
-	seq         int64 // written only by the heartbeat goroutine (sole writer)
-	observe     func(ServiceEvent)
-	gate        func(context.Context, Request) error
-	onHeartbeat func(seq int64)
+	fs           remotefs.FS
+	tree         Tree
+	registry     Registry
+	seq          int64 // written only by the heartbeat goroutine (sole writer)
+	observe      func(ServiceEvent)
+	observeStart func(StartEvent)
+	gate         func(context.Context, Request) error
+	onHeartbeat  func(seq int64)
 }
 
 // CodeOperatorDenied is the error code on a response the gate rejected before the
@@ -39,6 +40,15 @@ type ServiceEvent struct {
 	Dur  time.Duration
 }
 
+// StartEvent reports a request being picked up — fired the moment the dispatcher
+// reads it from cur/, before the handler (or gate) runs. It lets an observer show a
+// request in-progress 1:1, rather than only after completion (which ServiceEvent
+// reports). Primitives only, same decoupling as ServiceEvent.
+type StartEvent struct {
+	Name string // the request file name (<id>.json)
+	Req  Request
+}
+
 // NewDispatcher builds a dispatcher.
 func NewDispatcher(fs remotefs.FS, tree Tree, reg Registry) *Dispatcher {
 	return &Dispatcher{fs: fs, tree: tree, registry: reg}
@@ -48,6 +58,12 @@ func NewDispatcher(fs remotefs.FS, tree Tree, reg Registry) *Dispatcher {
 // response is delivered). Used by `serve` to feed the activity log. Optional —
 // a nil observer is silent.
 func (d *Dispatcher) Observe(fn func(ServiceEvent)) { d.observe = fn }
+
+// ObserveStart registers a callback invoked when a request is picked up, before its
+// handler runs (the sibling of Observe). Fires for every serviced request — from both
+// drainNew and recover, agent- and operator-initiated alike — so the console can show
+// it in-progress. Optional; a nil callback is silent.
+func (d *Dispatcher) ObserveStart(fn func(StartEvent)) { d.observeStart = fn }
 
 // SetGate registers a pre-execution gate consulted just before a request's
 // handler runs. A non-nil error short-circuits the request to an
@@ -198,6 +214,11 @@ func (d *Dispatcher) serviceCur(ctx context.Context, name string) error {
 	data, err := d.fs.ReadFile(ctx, path.Join(d.tree.Outbox().Cur(), name))
 	if err != nil {
 		return fmt.Errorf("read %s: %w", name, err)
+	}
+	if d.observeStart != nil {
+		var req Request // best-effort: the request may not parse, but we still mark pickup
+		_ = json.Unmarshal(data, &req)
+		d.observeStart(StartEvent{Name: name, Req: req})
 	}
 	start := time.Now()
 	resp := d.dispatch(ctx, name, data)
