@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
@@ -82,6 +83,16 @@ func printFingerprint(cmd *cobra.Command, cfg *config.Config, fp *probe.Fingerpr
 	}
 	if v := fp.FirstViableRoot(); v != "" {
 		fmt.Fprintf(w, "would install to: %s\n", v)
+	}
+	if len(fp.Runtimes) > 0 {
+		fmt.Fprintln(w, "system runtimes (brownfield):")
+		for _, rt := range fp.Runtimes {
+			extra := ""
+			if len(rt.EnvManagers) > 0 {
+				extra = "  env: " + strings.Join(rt.EnvManagers, ",")
+			}
+			fmt.Fprintf(w, "  %-7s %-10s %s%s\n", rt.Lang, orUnknown(rt.Version), rt.Path, extra)
+		}
 	}
 	fmt.Fprintf(w, "existing tree:    %v\n", fp.HasExistingTree)
 	if len(fp.Warnings) > 0 {

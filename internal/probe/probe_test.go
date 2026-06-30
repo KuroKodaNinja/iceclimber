@@ -71,6 +71,67 @@ func TestDetectLibc(t *testing.T) {
 	}
 }
 
+func TestDetectRuntimes(t *testing.T) {
+	t.Run("python with venv+conda, node, java", func(t *testing.T) {
+		kv := map[string]string{
+			"PY_PATH": "/usr/bin/python3", "PY_VER": "Python 3.11.2",
+			"PY_VENV": "yes", "PY_ENSUREPIP": "yes", "CONDA_PATH": "/opt/conda/bin/conda",
+			"NODE_PATH": "/usr/bin/node", "NODE_VER": "v20.1.0",
+			"JAVA_PATH": "/usr/bin/java", "JAVA_VER": `openjdk version "17.0.1" 2021-10-19`,
+		}
+		rts := detectRuntimes(kv)
+		if len(rts) != 3 {
+			t.Fatalf("got %d runtimes, want 3: %+v", len(rts), rts)
+		}
+		py := rts[0]
+		if py.Lang != "python" || py.Path != "/usr/bin/python3" || py.Version != "3.11.2" {
+			t.Errorf("python = %+v", py)
+		}
+		if strings.Join(py.EnvManagers, ",") != "venv,conda" {
+			t.Errorf("python env managers = %v, want [venv conda]", py.EnvManagers)
+		}
+		if rts[1].Version != "20.1.0" {
+			t.Errorf("node version = %q, want 20.1.0", rts[1].Version)
+		}
+		if rts[2].Version != "17.0.1" {
+			t.Errorf("java version = %q, want 17.0.1", rts[2].Version)
+		}
+	})
+
+	t.Run("python without a working venv lists no venv manager", func(t *testing.T) {
+		// Debian ships python3 where `import venv` works but ensurepip is missing.
+		kv := map[string]string{"PY_PATH": "/usr/bin/python3", "PY_VER": "Python 3.12.0", "PY_VENV": "yes"}
+		rts := detectRuntimes(kv)
+		if len(rts) != 1 || len(rts[0].EnvManagers) != 0 {
+			t.Errorf("want python with no env managers (ensurepip missing), got %+v", rts)
+		}
+	})
+
+	t.Run("nothing on PATH", func(t *testing.T) {
+		if rts := detectRuntimes(map[string]string{}); len(rts) != 0 {
+			t.Errorf("want no runtimes, got %+v", rts)
+		}
+	})
+}
+
+func TestParseRuntimeVersions(t *testing.T) {
+	if got := parsePythonVersion("Python 3.11.2"); got != "3.11.2" {
+		t.Errorf("python = %q", got)
+	}
+	if got := parseNodeVersion("v20.1.0"); got != "20.1.0" {
+		t.Errorf("node = %q", got)
+	}
+	if got := parseJavaVersion(`java version "1.8.0_292"`); got != "1.8.0_292" {
+		t.Errorf("java (legacy) = %q", got)
+	}
+	if got := parseJavaVersion(`openjdk version "17.0.1" 2021-10-19`); got != "17.0.1" {
+		t.Errorf("java (modern) = %q", got)
+	}
+	if got := parseJavaVersion("garbage"); got != "" {
+		t.Errorf("java (unparseable) = %q, want empty", got)
+	}
+}
+
 func TestParseDFAvail(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -165,6 +226,29 @@ func TestRun_GlibcLinuxHappyPath(t *testing.T) {
 	}
 	if len(fp.Warnings) != 0 {
 		t.Errorf("unexpected warnings: %v", fp.Warnings)
+	}
+}
+
+func TestRun_DiscoversSystemRuntimes(t *testing.T) {
+	fr := &fakeRunner{
+		system: "OS=Linux\nARCH=x86_64\nHOME=/home/agent\nGLIBC=glibc 2.31\n" +
+			"PY_PATH=/usr/bin/python3\nPY_VER=Python 3.11.2\nPY_VENV=yes\nPY_ENSUREPIP=yes\n" +
+			"NODE_PATH=/usr/bin/node\nNODE_VER=v20.1.0\n",
+		writable: map[string]bool{"/home/agent/.iceclimber": true},
+	}
+	fp, err := Run(context.Background(), fr, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	py, ok := fp.Runtime("python")
+	if !ok || py.Version != "3.11.2" || len(py.EnvManagers) != 1 || py.EnvManagers[0] != "venv" {
+		t.Errorf("python runtime = %+v (ok=%v)", py, ok)
+	}
+	if _, ok := fp.Runtime("node"); !ok {
+		t.Error("node runtime not discovered")
+	}
+	if _, ok := fp.Runtime("java"); ok {
+		t.Error("java should be absent (no JAVA_PATH key)")
 	}
 }
 

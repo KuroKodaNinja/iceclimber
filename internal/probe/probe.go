@@ -26,14 +26,36 @@ type Options struct {
 
 // Fingerprint is the result of probing a sandbox host.
 type Fingerprint struct {
-	OS              string     `json:"os"`     // normalized: "linux", "darwin", ...
-	OSRaw           string     `json:"os_raw"` // uname -s verbatim
-	Arch            string     `json:"arch"`   // uname -m verbatim, e.g. "x86_64", "aarch64"
-	Home            string     `json:"home"`
-	Libc            Libc       `json:"libc"` // meaningful on Linux only
-	Roots           []RootInfo `json:"roots"`
-	HasExistingTree bool       `json:"has_existing_tree"`
-	Warnings        []string   `json:"warnings,omitempty"`
+	OS              string        `json:"os"`     // normalized: "linux", "darwin", ...
+	OSRaw           string        `json:"os_raw"` // uname -s verbatim
+	Arch            string        `json:"arch"`   // uname -m verbatim, e.g. "x86_64", "aarch64"
+	Home            string        `json:"home"`
+	Libc            Libc          `json:"libc"` // meaningful on Linux only
+	Roots           []RootInfo    `json:"roots"`
+	Runtimes        []RuntimeInfo `json:"runtimes,omitempty"` // language runtimes found on PATH (brownfield)
+	HasExistingTree bool          `json:"has_existing_tree"`
+	Warnings        []string      `json:"warnings,omitempty"`
+}
+
+// RuntimeInfo describes a language runtime discovered on the sandbox's PATH — the
+// raw material for "use a pre-existing runtime" (brownfield) mode. It is reported by
+// probe but never acted on here; the operator chooses a source at bootstrap.
+type RuntimeInfo struct {
+	Lang        string   `json:"lang"`                   // "python" | "node" | "java"
+	Path        string   `json:"path"`                   // resolved binary (command -v)
+	Version     string   `json:"version,omitempty"`      // parsed, e.g. "3.11.2"
+	VersionRaw  string   `json:"version_raw,omitempty"`  // the unparsed --version line
+	EnvManagers []string `json:"env_managers,omitempty"` // python only: "venv","conda"
+}
+
+// Runtime returns the discovered runtime for lang ("python"/"node"/"java"), if present.
+func (f *Fingerprint) Runtime(lang string) (RuntimeInfo, bool) {
+	for _, rt := range f.Runtimes {
+		if rt.Lang == lang && rt.Path != "" {
+			return rt, true
+		}
+	}
+	return RuntimeInfo{}, false
 }
 
 // Libc describes the C library family detected on a Linux host.
@@ -67,7 +89,22 @@ echo "ARCH=$(uname -m 2>/dev/null)"
 echo "HOME=$HOME"
 echo "LDD=$(ldd --version 2>&1 | head -n1)"
 echo "MUSL=$(ls -d /lib/ld-musl-* 2>/dev/null | head -n1)"
-echo "GLIBC=$(getconf GNU_LIBC_VERSION 2>/dev/null)"`
+echo "GLIBC=$(getconf GNU_LIBC_VERSION 2>/dev/null)"
+if command -v python3 >/dev/null 2>&1; then
+  echo "PY_PATH=$(command -v python3)"
+  echo "PY_VER=$(python3 --version 2>&1 | head -n1)"
+  python3 -c 'import venv' 2>/dev/null && echo "PY_VENV=yes"
+  python3 -c 'import ensurepip' 2>/dev/null && echo "PY_ENSUREPIP=yes"
+fi
+command -v conda >/dev/null 2>&1 && echo "CONDA_PATH=$(command -v conda)"
+if command -v node >/dev/null 2>&1; then
+  echo "NODE_PATH=$(command -v node)"
+  echo "NODE_VER=$(node --version 2>&1 | head -n1)"
+fi
+if command -v java >/dev/null 2>&1; then
+  echo "JAVA_PATH=$(command -v java)"
+  echo "JAVA_VER=$(java -version 2>&1 | head -n1)"
+fi`
 
 // Run fingerprints the host.
 func Run(ctx context.Context, r remote.Runner, opts Options) (*Fingerprint, error) {
@@ -82,6 +119,7 @@ func Run(ctx context.Context, r remote.Runner, opts Options) (*Fingerprint, erro
 	fp.Arch = kv["ARCH"]
 	fp.Home = kv["HOME"]
 	fp.Libc = detectLibc(fp.OS, kv)
+	fp.Runtimes = detectRuntimes(kv)
 
 	for _, root := range candidateRoots(opts.ExplicitRoots, fp.Home) {
 		info, err := probeRoot(ctx, r, root)
@@ -164,6 +202,56 @@ func parseGlibcVersion(glibc, ldd string) string {
 		last := f[len(f)-1] // "ldd (GNU libc) 2.31" -> "2.31"
 		if strings.ContainsAny(last, "0123456789") {
 			return last
+		}
+	}
+	return ""
+}
+
+// detectRuntimes turns the probe script's runtime keys into RuntimeInfo entries —
+// only for runtimes actually found on PATH (a missing runtime emits no keys). Python
+// also reports its usable env managers: "venv" (only when both the venv module AND
+// ensurepip import — Debian ships python3 without a working venv otherwise) and
+// "conda" when a conda binary is on PATH.
+func detectRuntimes(kv map[string]string) []RuntimeInfo {
+	var out []RuntimeInfo
+	if p := kv["PY_PATH"]; p != "" {
+		rt := RuntimeInfo{Lang: "python", Path: p, VersionRaw: kv["PY_VER"], Version: parsePythonVersion(kv["PY_VER"])}
+		if kv["PY_VENV"] == "yes" && kv["PY_ENSUREPIP"] == "yes" {
+			rt.EnvManagers = append(rt.EnvManagers, "venv")
+		}
+		if kv["CONDA_PATH"] != "" {
+			rt.EnvManagers = append(rt.EnvManagers, "conda")
+		}
+		out = append(out, rt)
+	}
+	if p := kv["NODE_PATH"]; p != "" {
+		out = append(out, RuntimeInfo{Lang: "node", Path: p, VersionRaw: kv["NODE_VER"], Version: parseNodeVersion(kv["NODE_VER"])})
+	}
+	if p := kv["JAVA_PATH"]; p != "" {
+		out = append(out, RuntimeInfo{Lang: "java", Path: p, VersionRaw: kv["JAVA_VER"], Version: parseJavaVersion(kv["JAVA_VER"])})
+	}
+	return out
+}
+
+// parsePythonVersion: "Python 3.11.2" -> "3.11.2".
+func parsePythonVersion(s string) string {
+	if f := strings.Fields(s); len(f) >= 2 {
+		return f[1]
+	}
+	return ""
+}
+
+// parseNodeVersion: "v20.1.0" -> "20.1.0".
+func parseNodeVersion(s string) string {
+	return strings.TrimPrefix(strings.TrimSpace(s), "v")
+}
+
+// parseJavaVersion: `openjdk version "17.0.1" 2021-…` or `java version "1.8.0_292"`
+// -> the first quoted token.
+func parseJavaVersion(s string) string {
+	if i := strings.IndexByte(s, '"'); i >= 0 {
+		if j := strings.IndexByte(s[i+1:], '"'); j >= 0 {
+			return s[i+1 : i+1+j]
 		}
 	}
 	return ""
