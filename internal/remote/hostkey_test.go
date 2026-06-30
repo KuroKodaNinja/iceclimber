@@ -109,6 +109,28 @@ func TestRecordHostKey_PreservesOtherHosts(t *testing.T) {
 	}
 }
 
+// TestRecordHostKey_PreservesHashedEntries: --replace drops only the matching
+// PLAINTEXT entry; hashed (|1|…) lines can't be matched by host and must survive
+// untouched — else replacing one host could silently delete unrelated hashed
+// entries from the operator's real known_hosts.
+func TestRecordHostKey_PreservesHashedEntries(t *testing.T) {
+	kh := filepath.Join(t.TempDir(), "known_hosts")
+	hashed := "|1|abc123saltvalue=|def456hashvalue= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYKEYDATA\n"
+	if err := os.WriteFile(kh, []byte(hashed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target, newKey := testKey(t), testKey(t)
+	if err := RecordHostKey(kh, "target.example", 22, target, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordHostKey(kh, "target.example", 22, newKey, true); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(kh); !strings.Contains(string(b), "|1|abc123saltvalue=") {
+		t.Errorf("hashed entry was dropped on --replace:\n%s", b)
+	}
+}
+
 func TestHostKeyError_Message(t *testing.T) {
 	unknown := &HostKeyError{Host: "h", Port: 2222}
 	if got := unknown.Error(); !strings.Contains(got, "iceclimber trust") || !strings.Contains(got, "unknown host") {

@@ -75,16 +75,22 @@ func fileSigners(files []string) []ssh.Signer {
 // no-echo read per question — covers password and 2FA/OTP prompts).
 func keyboardInteractiveAuth(pr PasswordPrompter) ssh.AuthMethod {
 	return ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
-		answers := make([]string, len(questions))
-		for i, q := range questions {
-			ans, err := pr.Prompt(strings.TrimSpace(q) + " ")
-			if err != nil {
-				return nil, err
-			}
-			answers[i] = ans
-		}
-		return answers, nil
+		return kbdAnswers(pr, questions)
 	})
+}
+
+// kbdAnswers maps N challenge questions to N prompter answers (extracted so the
+// challenge logic is unit-testable without a live SSH server).
+func kbdAnswers(pr PasswordPrompter, questions []string) ([]string, error) {
+	answers := make([]string, len(questions))
+	for i, q := range questions {
+		ans, err := pr.Prompt(strings.TrimSpace(q) + " ")
+		if err != nil {
+			return nil, err
+		}
+		answers[i] = ans
+	}
+	return answers, nil
 }
 
 // passwordAuth prompts (no-echo) for the target password on demand.

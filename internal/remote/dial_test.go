@@ -2,9 +2,13 @@ package remote
 
 import (
 	"context"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 // fakeResolve swaps runSSHG to return fixed `ssh -G` output (and records args),
@@ -42,9 +46,9 @@ func TestBuildDialPlan_ResolvesAndProxies(t *testing.T) {
 	}
 }
 
-func TestBuildDialPlan_ExplicitWins(t *testing.T) {
-	// Explicit cfg user/port/known_hosts override what ssh -G would resolve.
-	fakeResolve(t, "hostname h\nport 22\nuser resolveduser\nuserknownhostsfile /resolved\n")
+func TestBuildDialPlan_ResolutionDisabled(t *testing.T) {
+	// UseSSHConfig=false → literal dial, no `ssh -G`, no proxy. (This used to be
+	// misnamed "ExplicitWins" — it tests the disabled path, not precedence.)
 	pw := false
 	p, err := buildDialPlan(context.Background(), DialConfig{
 		Host: "sandbox", User: "explicit", Port: 2200, KnownHosts: "/explicit", UseSSHConfig: &pw,
@@ -52,12 +56,77 @@ func TestBuildDialPlan_ExplicitWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// UseSSHConfig=false → literal dial, no resolution, no proxy.
 	if p.host != "sandbox" || p.user != "explicit" || p.port != 2200 || p.knownHosts != "/explicit" {
 		t.Errorf("literal plan = %+v", p)
 	}
 	if p.proxyArgv != nil {
 		t.Errorf("UseSSHConfig=false must not proxy: %q", p.proxyArgv)
+	}
+}
+
+// TestBuildDialPlan_ExplicitWinsOverResolved is the real precedence test: with
+// resolution ON, explicit cfg user/port/known_hosts must override what `ssh -G`
+// returns — while the resolved ProxyJump still applies (it has no explicit field).
+func TestBuildDialPlan_ExplicitWinsOverResolved(t *testing.T) {
+	fakeResolve(t, "hostname 10.0.0.9\nport 22\nuser resolveduser\nuserknownhostsfile /resolved_kh\nproxyjump bastion\n")
+	p, err := buildDialPlan(context.Background(), DialConfig{
+		Host: "sandbox", User: "explicit", Port: 2200, KnownHosts: "/explicit_kh",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.user != "explicit" || p.port != 2200 || p.knownHosts != "/explicit_kh" {
+		t.Errorf("explicit user/port/known_hosts must win; got user=%q port=%d kh=%q", p.user, p.port, p.knownHosts)
+	}
+	if p.host != "10.0.0.9" { // host always becomes the resolved HostName
+		t.Errorf("host = %q, want resolved 10.0.0.9", p.host)
+	}
+	if len(p.proxyArgv) == 0 || p.proxyArgv[len(p.proxyArgv)-1] != "bastion" {
+		t.Errorf("resolved ProxyJump should still apply: %q", p.proxyArgv)
+	}
+}
+
+// TestBuildDialPlan_IdentityOrder: the explicit identity file is tried first, then
+// ssh -G's IdentityFiles, deduped — so the operator's key wins.
+func TestBuildDialPlan_IdentityOrder(t *testing.T) {
+	fakeResolve(t, "hostname h\nport 22\nidentityfile /resolved/a\nidentityfile /resolved/b\n")
+	p, err := buildDialPlan(context.Background(), DialConfig{Host: "sandbox", IdentityFile: "/explicit/key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/explicit/key", "/resolved/a", "/resolved/b"}
+	if len(p.identityFiles) != 3 || p.identityFiles[0] != want[0] || p.identityFiles[1] != want[1] || p.identityFiles[2] != want[2] {
+		t.Errorf("identityFiles = %q, want explicit-then-resolved %q", p.identityFiles, want)
+	}
+}
+
+func TestResolveTarget(t *testing.T) {
+	// ResolveTarget reports the RESOLVED host (not the alias) so host-key trust is
+	// keyed on the real host — the property that lets trust work behind a bastion.
+	fakeResolve(t, "hostname 192.168.1.50\nport 2222\nuserknownhostsfile /kh\n")
+	host, port, kh, err := ResolveTarget(context.Background(), DialConfig{Host: "alias"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host != "192.168.1.50" || port != 2222 || kh != "/kh" {
+		t.Errorf("ResolveTarget = %q/%d/%q, want the resolved values", host, port, kh)
+	}
+}
+
+func TestProxyDetail(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	pc, err := newProxyConn(context.Background(), helperArgv("fail"), "10.0.0.1:22")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.ReadAll(pc)
+	_ = pc.Close()
+	if got := proxyDetail(pc); !strings.Contains(got, "permission denied") {
+		t.Errorf("proxyDetail(proxyConn) = %q, want the bastion stderr tail", got)
+	}
+	// A plain (non-proxy) conn enriches nothing.
+	if got := proxyDetail(plainConn{}); got != "" {
+		t.Errorf("proxyDetail(plain) = %q, want empty", got)
 	}
 }
 
@@ -104,3 +173,15 @@ func TestBuildDialPlan_PortDefault(t *testing.T) {
 		t.Errorf("default plan = %+v, want port 22, no proxy", p)
 	}
 }
+
+// plainConn is a no-op net.Conn for proxyDetail's non-proxy branch.
+type plainConn struct{}
+
+func (plainConn) Read([]byte) (int, error)         { return 0, io.EOF }
+func (plainConn) Write(b []byte) (int, error)      { return len(b), nil }
+func (plainConn) Close() error                     { return nil }
+func (plainConn) LocalAddr() net.Addr              { return nil }
+func (plainConn) RemoteAddr() net.Addr             { return nil }
+func (plainConn) SetDeadline(t time.Time) error    { return nil }
+func (plainConn) SetReadDeadline(time.Time) error  { return nil }
+func (plainConn) SetWriteDeadline(time.Time) error { return nil }

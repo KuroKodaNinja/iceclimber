@@ -77,6 +77,45 @@ func TestLoad_UserOptional(t *testing.T) {
 	}
 }
 
+// TestLoad_CorporateSSHFields pins the yaml tags of the corporate-SSH keys (the
+// #59 rule: a doc/scaffold-named field must be checked by a test), including the
+// use_ssh_config *bool tri-state (a typo'd tag would silently ignore the opt-out).
+func TestLoad_CorporateSSHFields(t *testing.T) {
+	path := writeTemp(t, `sandbox_id: box-1
+ssh:
+  host: prod
+  use_ssh_config: false
+  ssh_config_file: ~/.ssh/work_config
+  password_auth: true
+  keyboard_interactive: true
+`)
+	cfg, err := Load(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SSH.UseSSHConfig == nil || *cfg.SSH.UseSSHConfig != false {
+		t.Errorf("use_ssh_config = %v, want explicit false", cfg.SSH.UseSSHConfig)
+	}
+	if !cfg.SSH.PasswordAuth || !cfg.SSH.KeyboardInteractive {
+		t.Errorf("password_auth/keyboard_interactive not parsed: %+v", cfg.SSH)
+	}
+	home, _ := os.UserHomeDir()
+	if want := filepath.Join(home, ".ssh", "work_config"); cfg.SSH.SSHConfigFile != want {
+		t.Errorf("ssh_config_file = %q, want expanded %q", cfg.SSH.SSHConfigFile, want)
+	}
+
+	// Tri-state: omitting use_ssh_config leaves the pointer nil (= default true),
+	// distinct from an explicit false.
+	p2 := writeTemp(t, "sandbox_id: box-1\nssh:\n  host: prod\n")
+	cfg2, err := Load(p2, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg2.SSH.UseSSHConfig != nil {
+		t.Errorf("omitted use_ssh_config should be nil (default), got %v", *cfg2.SSH.UseSSHConfig)
+	}
+}
+
 func TestLoad_SandboxMismatch(t *testing.T) {
 	path := writeTemp(t, "sandbox_id: box-1\nssh:\n  host: h\n  user: u\n")
 	if _, err := Load(path, "box-2"); err == nil {

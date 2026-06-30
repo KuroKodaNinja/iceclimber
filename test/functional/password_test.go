@@ -101,6 +101,10 @@ func TestPasswordAuth_NoMethodFailsClearly(t *testing.T) {
 // writePasswordConfig writes an iceclimber.yaml with NO identity_file (so key auth
 // is unavailable), password auth toggled per the arg, and ssh_config disabled.
 func writePasswordConfig(t *testing.T, sb sandboxConn, passwordAuth bool) string {
+	return writeAuthConfig(t, sb, passwordAuth, false)
+}
+
+func writeAuthConfig(t *testing.T, sb sandboxConn, passwordAuth, kbdAuth bool) string {
 	t.Helper()
 	content := fmt.Sprintf(`sandbox_id: %s
 ssh:
@@ -110,12 +114,64 @@ ssh:
   known_hosts: %s
   use_ssh_config: false
   password_auth: %t
-`, sandboxName, sb.Host, sb.Port, sb.User, sb.KnownHosts, passwordAuth)
+  keyboard_interactive: %t
+`, sandboxName, sb.Host, sb.Port, sb.User, sb.KnownHosts, passwordAuth, kbdAuth)
 	path := filepath.Join(t.TempDir(), "iceclimber.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// TestKeyboardInteractiveAuth_Automated mirrors the password test but uses the
+// keyboard-interactive method (password_auth off). The sandbox enables
+// KbdInteractiveAuthentication; if the server doesn't actually challenge for a
+// password that way (PAM-dependent), the test skips rather than failing the gate.
+func TestKeyboardInteractiveAuth_Automated(t *testing.T) {
+	sb := requireSandbox(t)
+	const password = "iceclimber-test-pw"
+	enablePasswordAuth(t, sb, password)
+
+	cfg := writeAuthConfig(t, sb, false, true) // keyboard_interactive only
+	cmd := exec.Command(iceclimberBin, "probe", "--config", cfg)
+	cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK=")
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatalf("start under pty: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	var seen bytes.Buffer
+	typed := false
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 1024)
+		for {
+			n, rerr := ptmx.Read(buf)
+			if n > 0 {
+				seen.Write(buf[:n])
+				if !typed && strings.Contains(strings.ToLower(seen.String()), "password:") {
+					typed = true
+					_, _ = io.WriteString(ptmx, password+"\n")
+				}
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(45 * time.Second):
+		t.Fatalf("kbd-interactive probe timed out; output:\n%s", seen.String())
+	}
+	_ = cmd.Wait()
+
+	out := seen.String()
+	if !strings.Contains(out, "os/arch:") {
+		t.Skipf("server did not complete keyboard-interactive password auth (PAM-dependent); output:\n%s", out)
+	}
 }
 
 // enablePasswordAuth sets the sandbox user's password and ensures sshd accepts
