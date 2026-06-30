@@ -142,12 +142,12 @@ func provision(ctx context.Context, sess *session) error {
 	}
 	// Record the host facts in the capabilities self-report so `status` shows the real
 	// platform instead of "(not reported)" even before an agent is installed. Preserves
-	// any existing agent block (read-modify-write).
-	if err := protocol.WriteCapabilities(ctx, sess.fs, sess.tree, func(c *protocol.Capabilities) {
+	// any existing agent block (read-modify-write). Best-effort: capabilities.json is
+	// informational (Popo never depends on it), so a hiccup here must not fail the whole
+	// bootstrap — matches recordAgentCaps.
+	_ = protocol.WriteCapabilities(ctx, sess.fs, sess.tree, func(c *protocol.Capabilities) {
 		c.Host = protocol.CapHost{OS: sess.fp.OS, Arch: sess.fp.Arch, Libc: sess.fp.Libc.Family}
-	}); err != nil {
-		return fmt.Errorf("write capabilities: %w", err)
-	}
+	})
 	if err := dropPopo(ctx, sess); err != nil {
 		return err
 	}

@@ -97,3 +97,21 @@ func TestCollectStatus_CapsReported(t *testing.T) {
 		}
 	}
 }
+
+// TestCollectStatus_CapsCorrupt: a corrupt capabilities.json degrades gracefully to ""
+// ("not reported") rather than surfacing an error or garbage in the status panel.
+func TestCollectStatus_CapsCorrupt(t *testing.T) {
+	ctx := context.Background()
+	runner := remotefstest.LocalRunner{}
+	fs := remotefs.NewExecFS(runner)
+	tree := protocol.Tree{Root: t.TempDir()}
+	if err := protocol.EnsureTree(ctx, fs, tree); err != nil {
+		t.Fatalf("EnsureTree: %v", err)
+	}
+	if err := fs.WriteFile(ctx, tree.Capabilities(), []byte("{not json")); err != nil {
+		t.Fatal(err)
+	}
+	if s := collectStatus(ctx, fs, runner, tree); s.Caps != "" {
+		t.Errorf("corrupt capabilities.json should degrade to empty Caps; got %q", s.Caps)
+	}
+}

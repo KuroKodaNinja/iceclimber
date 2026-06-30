@@ -69,3 +69,32 @@ func TestCapabilities_ReadWriteNoClobber(t *testing.T) {
 		t.Errorf("host not updated on re-bootstrap: %+v", c2.Host)
 	}
 }
+
+// TestCapabilities_Corrupt: a corrupt file surfaces a read error (so the status reader
+// degrades to "not reported"), and WriteCapabilities over a corrupt file starts clean
+// (replacing the unrecoverable bytes) rather than aborting.
+func TestCapabilities_Corrupt(t *testing.T) {
+	ctx := context.Background()
+	fs := remotefs.NewExecFS(remotefstest.LocalRunner{})
+	tree := Tree{Root: t.TempDir()}
+	if err := EnsureTree(ctx, fs, tree); err != nil {
+		t.Fatalf("EnsureTree: %v", err)
+	}
+	if err := fs.WriteFile(ctx, tree.Capabilities(), []byte("{not json")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ReadCapabilities(ctx, fs, tree); err == nil {
+		t.Error("ReadCapabilities on a corrupt file should return an error")
+	}
+
+	if err := WriteCapabilities(ctx, fs, tree, func(c *Capabilities) {
+		c.Host = CapHost{OS: "linux", Arch: "arm64"}
+	}); err != nil {
+		t.Fatalf("write over a corrupt file should start clean, not abort: %v", err)
+	}
+	c, err := ReadCapabilities(ctx, fs, tree)
+	if err != nil || c == nil || c.Host.Arch != "arm64" || c.Agent != nil {
+		t.Errorf("write-over-corrupt should yield a clean host-only report; got %+v (err %v)", c, err)
+	}
+}
