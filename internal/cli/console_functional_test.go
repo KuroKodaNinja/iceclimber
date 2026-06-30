@@ -52,7 +52,9 @@ func newTestOps(t *testing.T, sess *session) (*consoleOps, chan tea.Msg) {
 	t.Helper()
 	events := make(chan tea.Msg, 128)
 	act := activity.New(filepath.Join(t.TempDir(), "activity.jsonl"))
-	return &consoleOps{ctx: context.Background(), sess: sess, act: act, events: events}, events
+	holder := &sessionHolder{}
+	holder.Set(sess)
+	return &consoleOps{ctx: context.Background(), holder: holder, act: act, events: events}, events
 }
 
 // runOp runs an operator command synchronously and drains the activity events it
@@ -252,7 +254,9 @@ func TestConsoleTUI_FullInstall(t *testing.T) {
 
 	events := make(chan tea.Msg, 128)
 	act := activity.New(filepath.Join(t.TempDir(), "activity.jsonl"))
-	ops := &consoleOps{ctx: context.Background(), sess: sess, act: act, events: events}
+	holder := &sessionHolder{}
+	holder.Set(sess)
+	ops := &consoleOps{ctx: context.Background(), holder: holder, act: act, events: events}
 	model := tui.NewConsole(sess.sandboxID, events, "", ops)
 	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(120, 40))
 
