@@ -14,6 +14,7 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -130,25 +131,18 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 	}
 
 	disp.Observe(func(ev protocol.ServiceEvent) {
-		if isOperatorDenied(ev.Resp) {
+		e, ok := servicedEvent(ev)
+		if !ok {
 			return // denied by the gate — a denial, not a serviced request
 		}
-		detail := serviceDetail(ev.Req.Type, ev.Resp)
-		_ = act.Append(activity.Event{
-			Kind:   activity.KindServiced,
-			ID:     ev.Resp.ID,
-			Type:   ev.Req.Type,
-			Status: ev.Resp.Status,
-			DurMS:  ev.Dur.Milliseconds(),
-			Detail: detail,
-		})
-		typ := ev.Req.Type
+		_ = act.Append(e)
+		typ := e.Type
 		if typ == "" {
 			typ = "?"
 		}
-		line := fmt.Sprintf("  %s  %-15s %-19s %s", time.Now().Format("15:04:05"), typ, ev.Resp.Status, detail)
-		if ev.Dur > 0 {
-			line += " · " + ev.Dur.Round(100*time.Millisecond).String()
+		line := fmt.Sprintf("  %s  %-15s %-19s %s", time.Now().Format("15:04:05"), typ, e.Status, e.Detail)
+		if e.DurMS > 0 {
+			line += " · " + progress.HumanDur(time.Duration(e.DurMS)*time.Millisecond)
 		}
 		fmt.Fprintln(out, strings.TrimRight(line, " "))
 	})

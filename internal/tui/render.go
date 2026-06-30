@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 )
 
 var (
@@ -47,7 +48,7 @@ func eventToLine(e activity.Event) popoLine {
 		}
 		base := fmt.Sprintf("%s  %-15s %-19s %s", ts, typ, e.Status, e.Detail)
 		if e.DurMS > 0 {
-			base += " · " + humanDurMS(e.DurMS) // total time taken (not just an ETA)
+			base += " · " + progress.HumanDur(time.Duration(e.DurMS)*time.Millisecond) // total time taken (not just an ETA)
 		}
 		plain := strings.TrimRight(base, " ")
 		st := plainStyle
@@ -75,15 +76,6 @@ func nanaEcho(e activity.Event) string {
 
 // dashboard renders the header + two panes + footer. showNana renders the [NANA]
 // pane (the sandbox's voice); hasAgentLog only tweaks the empty-pane hint.
-// humanDurMS formats an elapsed duration for the activity feed: sub-second in ms,
-// else rounded to a tenth of a second (e.g. "450ms", "3.2s", "1m2s").
-func humanDurMS(ms int64) string {
-	d := time.Duration(ms) * time.Millisecond
-	if d < time.Second {
-		return d.Round(time.Millisecond).String()
-	}
-	return d.Round(100 * time.Millisecond).String()
-}
 
 // hbStatus is the heartbeat freshness shown in the header next to the link state.
 type hbStatus struct {

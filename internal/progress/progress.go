@@ -116,3 +116,14 @@ func shortDur(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
+
+// HumanDur formats an elapsed duration: sub-second in ms, else rounded to a tenth
+// of a second (e.g. "450ms", "3.2s", "1m2.5s"). Shared by the activity feed
+// (render.go), the logs view (logs.go), and the headless serve line (serve.go) so a
+// serviced request's total time renders identically everywhere.
+func HumanDur(d time.Duration) string {
+	if d < time.Second {
+		return d.Round(time.Millisecond).String()
+	}
+	return d.Round(100 * time.Millisecond).String()
+}

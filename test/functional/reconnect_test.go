@@ -121,9 +121,15 @@ func TestServeReconnectsAfterSSHDrop(t *testing.T) {
 	}
 
 	// 4. Servicing resumed: a ping over a freshly-dialed connection is serviced.
+	//    Generous deadline (60s): the one-shot pkill can land on the *first* reconnected
+	//    session (if the reconnect beat the 1s kill delay), forcing serve to detect and
+	//    reconnect a second time — keepalive misses + backoff + redial — while step 3
+	//    has already observed the first "reconnected" line. Under the full functional
+	//    suite's contended VM that second cycle can outlast a 30s window even though the
+	//    product reconnects fine (this passes in seconds run in isolation).
 	fs2, cleanup2 := dialFS(t, sb, "sftp")
 	defer cleanup2()
-	if r := waitPong(fs2, deliverPing(fs2), 30*time.Second); r.Status != protocol.StatusOK {
+	if r := waitPong(fs2, deliverPing(fs2), 60*time.Second); r.Status != protocol.StatusOK {
 		t.Fatalf("post-reconnect pong = %+v, want ok (serve should have auto-reconnected)", r)
 	}
 }

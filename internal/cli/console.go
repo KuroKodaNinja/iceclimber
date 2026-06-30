@@ -785,13 +785,9 @@ func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Conf
 		}
 	})
 	disp.Observe(func(ev protocol.ServiceEvent) {
-		if isOperatorDenied(ev.Resp) {
+		e, ok := servicedEvent(ev)
+		if !ok {
 			return // denied by the gate — counted as a denial, not a serviced request
-		}
-		e := activity.Event{
-			TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindServiced,
-			ID: ev.Resp.ID, Type: ev.Req.Type, Status: ev.Resp.Status,
-			DurMS: ev.Dur.Milliseconds(), Detail: serviceDetail(ev.Req.Type, ev.Resp),
 		}
 		_ = act.Append(e)
 		select {
@@ -800,6 +796,25 @@ func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Conf
 		}
 	})
 	return disp
+}
+
+// servicedEvent builds the activity event for a completed request, returning ok=false
+// when the request was rejected by the operator gate before its handler ran — that is
+// a denial, not a serviced request, so it must not inflate the serviced tally. Shared
+// by the console and headless serve observers so both apply the skip identically.
+func servicedEvent(ev protocol.ServiceEvent) (activity.Event, bool) {
+	if isOperatorDenied(ev.Resp) {
+		return activity.Event{}, false
+	}
+	return activity.Event{
+		TS:     time.Now().UTC().Format(time.RFC3339),
+		Kind:   activity.KindServiced,
+		ID:     ev.Resp.ID,
+		Type:   ev.Req.Type,
+		Status: ev.Resp.Status,
+		DurMS:  ev.Dur.Milliseconds(),
+		Detail: serviceDetail(ev.Req.Type, ev.Resp),
+	}, true
 }
 
 // isOperatorDenied reports whether a response was rejected by the gate before its

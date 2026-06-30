@@ -11,6 +11,7 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/tail"
 	"github.com/spf13/cobra"
 )
@@ -114,7 +115,7 @@ func eventBody(e activity.Event) string {
 		}
 		base := fmt.Sprintf("%-15s %-19s %s", typ, e.Status, e.Detail)
 		if e.DurMS > 0 {
-			base += " · " + (time.Duration(e.DurMS) * time.Millisecond).Round(100*time.Millisecond).String()
+			base += " · " + progress.HumanDur(time.Duration(e.DurMS)*time.Millisecond)
 		}
 		return strings.TrimRight(base, " ")
 	case activity.KindApproved:
