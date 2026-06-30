@@ -78,32 +78,31 @@ func Fingerprint(key ssh.PublicKey) string { return ssh.FingerprintSHA256(key) }
 // (authenticated) connection, so it never has to present credentials.
 var errHostKeyCaptured = errors.New("host key captured")
 
-// FetchHostKey dials host:port far enough to learn the key the server offers,
+// FetchHostKey dials the target far enough to learn the key the server offers,
 // then aborts the handshake (no authentication is attempted). It is the in-process
 // equivalent of `ssh-keyscan`, used by `iceclimber trust` and the console's
-// first-connect prompt.
+// first-connect prompt. It routes through the same dialPlan as Dial, so a target
+// behind a jumpbox is reached through the bastion and the captured key is the
+// *target's* (keyed by the resolved HostName).
 func FetchHostKey(ctx context.Context, cfg DialConfig) (ssh.PublicKey, error) {
-	port := cfg.Port
-	if port == 0 {
-		port = 22
+	plan, err := buildDialPlan(ctx, cfg)
+	if err != nil {
+		return nil, err
 	}
-	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(port))
+	conn, addr, err := plan.dialTarget(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("dial %s: %w", addr, err)
+	}
+	defer conn.Close()
 
 	var captured ssh.PublicKey
 	clientCfg := &ssh.ClientConfig{
-		User: cfg.User,
+		User: plan.user,
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			captured = key
 			return errHostKeyCaptured
 		},
 	}
-
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", addr, err)
-	}
-	defer conn.Close()
 
 	// The handshake invokes the callback before authentication; the sentinel
 	// aborts right after we capture the key, so a successful capture is success

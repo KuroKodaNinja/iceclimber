@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"strconv"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -21,54 +20,26 @@ type SSHRunner struct {
 	client *ssh.Client
 }
 
-// DialConfig is the minimal connection input for Dial.
+// DialConfig is the connection input for Dial. Zero values preserve the original
+// direct-dial behavior; the SSHConfig/UseSSHConfig fields opt into honoring the
+// operator's ~/.ssh/config (and any ProxyJump) via the system ssh client.
 type DialConfig struct {
 	Host         string
 	Port         int
 	User         string
 	IdentityFile string // optional; falls back to ssh-agent when empty
 	KnownHosts   string // optional; defaults to ~/.ssh/known_hosts
+
+	// SSHConfigFile, when set, is passed as `ssh -F <file>` during resolution
+	// (power users / hermetic tests); empty uses the default ~/.ssh/config.
+	SSHConfigFile string
+	// UseSSHConfig gates consulting `ssh -G`. nil/true = consult (honor
+	// ~/.ssh/config + ProxyJump); false = force a literal direct dial.
+	UseSSHConfig *bool
 }
 
-// Dial opens an SSH connection to the sandbox host. Host keys are verified
-// against the user's known_hosts file: an unknown host is a hard error rather
-// than silently trusted (no InsecureIgnoreHostKey).
-func Dial(ctx context.Context, cfg DialConfig) (*SSHRunner, error) {
-	auth, err := authMethods(cfg.IdentityFile)
-	if err != nil {
-		return nil, err
-	}
-	hostKeyCallback, err := knownHostsCallback(cfg.KnownHosts)
-	if err != nil {
-		return nil, err
-	}
-	port := cfg.Port
-	if port == 0 {
-		port = 22
-	}
-	clientCfg := &ssh.ClientConfig{
-		User:            cfg.User,
-		Auth:            auth,
-		HostKeyCallback: hostKeyCallback,
-	}
-	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(port))
-
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", addr, err)
-	}
-	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, clientCfg)
-	if err != nil {
-		conn.Close()
-		var ke *knownhosts.KeyError
-		if errors.As(err, &ke) {
-			return nil, &HostKeyError{Host: cfg.Host, Port: port, Mismatch: len(ke.Want) > 0, err: err}
-		}
-		return nil, fmt.Errorf("ssh handshake %s: %w", addr, err)
-	}
-	return &SSHRunner{client: ssh.NewClient(sshConn, chans, reqs)}, nil
-}
+// Dial is defined in dial.go (it resolves a dialPlan, then connects directly or
+// through a ProxyCommand subprocess before the x/crypto handshake).
 
 // Run executes cmd in a fresh non-interactive session. No pty is requested — a
 // clean byte stream is required for the raw transfers ExecFS relies on (§6).
