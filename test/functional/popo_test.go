@@ -92,7 +92,9 @@ func TestRawFileProtocol(t *testing.T) {
 	var body string
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
-		body = limaSh(t, "cat "+resp+" 2>/dev/null")
+		// `|| true` so a not-yet-present response (cat exits 1) doesn't fatal the
+		// limaSh helper mid-poll; we just retry until the deadline.
+		body = limaSh(t, "cat "+resp+" 2>/dev/null || true")
 		if strings.Contains(body, `"status"`) {
 			break
 		}
