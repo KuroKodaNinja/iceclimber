@@ -648,13 +648,13 @@ func TestFlow_QuitCtrlC(t *testing.T) {
 func TestFlow_StatusPanel(t *testing.T) {
 	ops := newRecordOps()
 	ops.status = StatusSnapshot{
-		Sandbox: "sbx", Heartbeat: "seq 42 · ~3s ago", Queue: "1 awaiting · 0 unread",
-		Runtimes: []string{"python 3.12.13-aarch64-musl"}, Caps: "has_exec=true, has_file_write=true",
+		Sandbox: "sbx", Heartbeat: "seq 42 · ~3s ago", Queue: "1 awaiting · 0 delivered",
+		Runtimes: []string{"python 3.12.13-aarch64-musl"}, Caps: "Claude Code 1.2.3 · auth ✓ · linux/arm64 (musl)",
 	}
 	tm := startConsole(t, ops)
 	waitText(t, tm, "i install")
 	press(tm, "s")
-	waitAll(t, tm, "Status", "seq 42", "python 3.12.13", "has_exec=true")
+	waitAll(t, tm, "Status", "seq 42", "python 3.12.13", "Claude Code 1.2.3")
 	send(tm, tea.KeyEsc) // close
 	c := finalConsole(t, tm)
 	if c.panel != "" {

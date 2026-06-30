@@ -54,6 +54,16 @@ func TestAgentInstallClaude(t *testing.T) {
 		t.Errorf("agent install output unexpected:\n%s", out)
 	}
 
+	// The CLI install recorded the agent identity in capabilities.json (#8): name, a
+	// real (non-empty) version, and auth_configured (a token was provided). Guards the
+	// recordAgentCaps call in the install command — independent of the console path.
+	caps := limaSh(t, "cat "+root+"/protocol/capabilities.json")
+	for _, want := range []string{`"name":"claude"`, `"display_name":"Claude Code"`, `"auth_configured":true`, `"version":"`} {
+		if !strings.Contains(caps, want) {
+			t.Errorf("capabilities.json missing %q:\n%s", want, caps)
+		}
+	}
+
 	// The relayed native binary must be on the VM and run on musl (it is dynamically
 	// linked against musl libs, which the Alpine sandbox has).
 	bin := root + "/agent/claude/claude"
@@ -200,6 +210,14 @@ func TestAgentWrapPreexisting(t *testing.T) {
 	// nana launches the wrapped binary and exits cleanly.
 	if s := limaSh(t, root+"/nana --version >/dev/null 2>&1; echo EXIT=$?"); !strings.Contains(s, "EXIT=0") {
 		t.Errorf("nana over the wrapped binary did not run cleanly: %s", s)
+	}
+
+	// The CLI wrap recorded the agent in capabilities.json (#8): name + auth not
+	// configured (--skip-auth), no version (wrap resolves none). Guards the
+	// recordAgentCaps call in the wrap command.
+	caps := limaSh(t, "cat "+root+"/protocol/capabilities.json")
+	if !strings.Contains(caps, `"name":"claude"`) || !strings.Contains(caps, `"auth_configured":false`) {
+		t.Errorf("capabilities.json should record the wrapped agent (claude, auth not configured):\n%s", caps)
 	}
 }
 
