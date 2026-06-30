@@ -114,13 +114,23 @@ default iceclimber resolves it with `ssh -G` (honoring `Match`/`Include`, `User`
   password is needed you're prompted **no-echo on the terminal**. This works in
   headless mode too (the prompt uses the controlling terminal), so an unattended
   `serve` still authenticates as long as a terminal exists — otherwise use
-  ssh-agent or a key. Passwords are never logged or written to disk.
+  ssh-agent or a key. Passwords are never logged or written to disk; one you type
+  is held in memory only and **reused for auto-reconnect** (below).
+- **Keepalive & auto-reconnect** — `serve` sends an SSH keepalive every
+  `keepalive_interval` seconds (default 20) so a corporate firewall/NAT/bastion
+  doesn't silently drop an idle connection, and if the link drops anyway, **`serve`
+  reconnects on its own** (capped backoff, retrying indefinitely) instead of exiting
+  — in both headless mode and the TUI console (whose header shows `◌ reconnecting…`
+  while down). A request the agent delivered during the outage is serviced once the
+  link returns. With password auth, the password you typed at startup is reused for
+  the reconnect (re-prompted only if it stops working).
 
 ```yaml
 ssh:
   host: prod-sandbox        # a Host alias from ~/.ssh/config (ProxyJump lives there)
   password_auth: true       # prompt for a password if key/agent don't authenticate
   known_hosts: ~/.ssh/known_hosts
+  keepalive_interval: 20    # SSH keepalive seconds (0 = default 20; negative disables)
 ```
 
 (Honoring `~/.ssh/config` requires the OpenSSH client on the controller; without
