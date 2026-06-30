@@ -33,12 +33,16 @@ type Event struct {
 // the CLI/agent paths that don't render progress).
 type Func func(Event)
 
-// emit is a nil-safe call.
-func (f Func) emit(e Event) {
+// Emit is a nil-safe send of a single event — for discrete phase markers
+// ("resolving", "verifying") where there's no stream to count.
+func (f Func) Emit(e Event) {
 	if f != nil {
 		f(e)
 	}
 }
+
+// Phase is a convenience for an indeterminate phase marker (Total 0 → spinner).
+func (f Func) Phase(name string) { f.Emit(Event{Phase: name}) }
 
 // Reader wraps r and reports byte progress for phase via f, throttled to at most
 // one event per ~100ms, plus a guaranteed final event at EOF. Total 0 =

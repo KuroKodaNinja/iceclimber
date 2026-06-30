@@ -16,5 +16,12 @@ func (i *Installer) extractAndPush(ctx context.Context, tarball, target string) 
 		return err
 	}
 	defer f.Close()
-	return remotefs.PushTarGz(ctx, i.cfg.FS, f, target)
+	// Report transfer progress against the compressed tarball size — the same gz
+	// reader is consumed by both the bulk-tar (exec) and per-file (SFTP) paths.
+	var total int64
+	if st, err := f.Stat(); err == nil {
+		total = st.Size()
+	}
+	src := i.cfg.Progress.Reader(f, "transferring", total)
+	return remotefs.PushTarGz(ctx, i.cfg.FS, src, target)
 }

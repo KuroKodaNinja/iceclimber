@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 )
@@ -34,6 +35,7 @@ type Config struct {
 	Libc       string // "musl" | "glibc"
 	CacheDir   string
 	HTTPClient *http.Client
+	Progress   progress.Func
 }
 
 // Installer installs Node runtimes into one sandbox.
@@ -59,6 +61,7 @@ type Result struct {
 // Install ensures the requested version line (e.g. "20" or "20.11") is present and
 // runnable in the sandbox, returning the absolute path to its bin/node.
 func (i *Installer) Install(ctx context.Context, version string) (Result, error) {
+	i.cfg.Progress.Phase("resolving")
 	r, err := i.resolve(ctx, version)
 	if err != nil {
 		return Result{}, err
@@ -81,6 +84,7 @@ func (i *Installer) Install(ctx context.Context, version string) (Result, error)
 	if err := i.extractAndPush(ctx, tarball, target); err != nil {
 		return Result{}, fmt.Errorf("push node tree: %w", err)
 	}
+	i.cfg.Progress.Phase("verifying")
 	if err := i.verify(ctx, bin); err != nil {
 		return Result{}, fmt.Errorf("installed node failed to run: %w", err)
 	}
@@ -137,7 +141,7 @@ func (i *Installer) download(ctx context.Context, r resolved) (string, error) {
 		return dst, nil
 	}
 
-	body, err := i.httpGet(ctx, r.URL)
+	body, length, err := i.httpGet(ctx, r.URL)
 	if err != nil {
 		return "", fmt.Errorf("download %s: %w", r.AssetName, err)
 	}
@@ -149,7 +153,8 @@ func (i *Installer) download(ctx context.Context, r resolved) (string, error) {
 		return "", err
 	}
 	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(out, h), body); err != nil {
+	src := i.cfg.Progress.Reader(body, "downloading", length)
+	if _, err := io.Copy(io.MultiWriter(out, h), src); err != nil {
 		out.Close()
 		os.Remove(tmp)
 		return "", err
@@ -165,20 +170,20 @@ func (i *Installer) download(ctx context.Context, r resolved) (string, error) {
 	return dst, nil
 }
 
-func (i *Installer) httpGet(ctx context.Context, url string) (io.ReadCloser, error) {
+func (i *Installer) httpGet(ctx context.Context, url string) (io.ReadCloser, int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	resp, err := i.cfg.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
+		return nil, 0, fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
-	return resp.Body, nil
+	return resp.Body, resp.ContentLength, nil
 }
 
 func fileSHA256(p string) (string, error) {

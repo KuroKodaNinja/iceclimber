@@ -16,5 +16,10 @@ func (i *Installer) extractAndPush(ctx context.Context, tarball, target string) 
 		return err
 	}
 	defer f.Close()
-	return remotefs.PushTarGz(ctx, i.cfg.FS, f, target)
+	var total int64
+	if st, err := f.Stat(); err == nil {
+		total = st.Size()
+	}
+	src := i.cfg.Progress.Reader(f, "transferring", total)
+	return remotefs.PushTarGz(ctx, i.cfg.FS, src, target)
 }

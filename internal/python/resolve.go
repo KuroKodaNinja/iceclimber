@@ -37,7 +37,7 @@ func (i *Installer) resolve(ctx context.Context, minor string) (resolved, error)
 	if err != nil {
 		return resolved{}, err
 	}
-	body, err := i.httpGet(ctx, m.AssetURLPrefix+"/SHA256SUMS")
+	body, _, err := i.httpGet(ctx, m.AssetURLPrefix+"/SHA256SUMS")
 	if err != nil {
 		return resolved{}, fmt.Errorf("fetch SHA256SUMS: %w", err)
 	}
@@ -54,7 +54,7 @@ func (i *Installer) resolve(ctx context.Context, minor string) (resolved, error)
 }
 
 func (i *Installer) fetchManifest(ctx context.Context) (manifest, error) {
-	body, err := i.httpGet(ctx, pbsManifestURL)
+	body, _, err := i.httpGet(ctx, pbsManifestURL)
 	if err != nil {
 		return manifest{}, fmt.Errorf("fetch PBS manifest: %w", err)
 	}

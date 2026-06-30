@@ -81,7 +81,7 @@ func nodePlatform(goos, arch, libc string) (base, fileTag string, err error) {
 }
 
 func (i *Installer) fetchIndex(ctx context.Context, url string) ([]indexEntry, error) {
-	body, err := i.httpGet(ctx, url)
+	body, _, err := i.httpGet(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("fetch node index: %w", err)
 	}
@@ -96,7 +96,7 @@ func (i *Installer) fetchIndex(ctx context.Context, url string) ([]indexEntry, e
 // fetchSHA reads a SHASUMS256.txt body and returns the hash for asset. Lines are
 // "<64-hex-hash>  <filename>".
 func (i *Installer) fetchSHA(ctx context.Context, url, asset string) (string, error) {
-	body, err := i.httpGet(ctx, url)
+	body, _, err := i.httpGet(ctx, url)
 	if err != nil {
 		return "", fmt.Errorf("fetch SHASUMS256: %w", err)
 	}

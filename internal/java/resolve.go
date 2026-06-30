@@ -47,7 +47,7 @@ func (i *Installer) resolve(ctx context.Context, feature string) (resolved, erro
 	feature = strings.TrimSpace(feature)
 	url := fmt.Sprintf("%s/assets/latest/%s/hotspot?architecture=%s&image_type=jdk&os=%s",
 		adoptiumAPI, feature, arch, apiOS)
-	body, err := i.httpGet(ctx, url)
+	body, _, err := i.httpGet(ctx, url)
 	if err != nil {
 		return resolved{}, fmt.Errorf("query Adoptium API: %w", err)
 	}
