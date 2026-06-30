@@ -80,6 +80,10 @@ type AgentInstallRequest struct {
 // AgentChoice is one installable agent offered in the console's agent form.
 type AgentChoice struct{ Name, DisplayName string }
 
+// RuntimeChoice is a system runtime the console offers as a bootstrap source option
+// (the operator can use it instead of an iceclimber-managed runtime).
+type RuntimeChoice struct{ Lang, Version, Path string }
+
 // OpResultMsg signals an operator-initiated action finished; it clears the running
 // indicator. The pane line is driven separately by the activity event the runner
 // emits, so the result reads identically whether it was operator- or agent-driven.
@@ -96,6 +100,11 @@ type OpRunner interface {
 	RunAgentInstall(AgentInstallRequest) tea.Cmd
 	// Agents lists the installable agents (for the agent form's picker). Local.
 	Agents() []AgentChoice
+	// DetectedRuntimes lists system runtimes the operator may opt into at bootstrap. Local.
+	DetectedRuntimes() []RuntimeChoice
+	// SetRuntimeSources persists the operator's per-language system(true)/managed(false)
+	// choice from the bootstrap form. Local.
+	SetRuntimeSources(useSystem map[string]bool) error
 	// PollStatus returns a cmd that reads sandbox status (SSH) and emits a StatusMsg.
 	PollStatus() tea.Cmd
 	// Egress reads the operator's persisted rules + pending held requests (local).
@@ -195,6 +204,8 @@ type formState struct {
 	agentMode string // "install" | "wrap"
 	agentBin  string
 	agentAuth string // "env" | "skip"
+	// bootstrap form: runtime source choice ("" = not offered, else "managed"|"system")
+	pyRuntime string
 }
 
 // NewConsole builds a console reading events (and, optionally, the agent stream).
@@ -490,6 +501,10 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 		if !c.st.confirm {
 			return c, nil // operator declined at the confirm
 		}
+		// Persist the runtime-source choice (if the form offered one) before provisioning.
+		if c.st.pyRuntime != "" {
+			_ = c.ops.SetRuntimeSources(map[string]bool{"python": c.st.pyRuntime == "system"})
+		}
 		c.running = "bootstrap"
 		c.progStart = time.Now()
 		return c, tea.Batch(c.ops.RunBootstrap(), c.spin.Tick)
@@ -598,11 +613,25 @@ func (c *Console) agentForm() *huh.Form {
 
 func (c *Console) bootstrapForm() *huh.Form {
 	c.st = &formState{}
-	return huh.NewForm(huh.NewGroup(
-		huh.NewConfirm().Title("Re-provision this sandbox?").
-			Description("Ensure the protocol tree, pip.conf, and NANA.md, then run the ping/pong smoke test. Idempotent — existing runtimes and approvals are kept.").
-			Value(&c.st.confirm),
-	))
+	var fields []huh.Field
+	// When a system runtime is detected, let the operator pick it as the source
+	// (persisted on confirm; takes effect for subsequent installs + the serve loop).
+	for _, rt := range c.ops.DetectedRuntimes() {
+		if rt.Lang == "python" {
+			c.st.pyRuntime = "managed"
+			fields = append(fields, huh.NewSelect[string]().
+				Title("Python runtime").
+				Description(fmt.Sprintf("A system Python %s is on the sandbox (%s).", rt.Version, rt.Path)).
+				Value(&c.st.pyRuntime).Options(
+				huh.NewOption("managed — install an iceclimber-pinned Python", "managed"),
+				huh.NewOption("system — use the box's Python (venv under $ICECLIMBER_HOME)", "system"),
+			))
+		}
+	}
+	fields = append(fields, huh.NewConfirm().Title("Re-provision this sandbox?").
+		Description("Ensure the protocol tree, pip.conf, and NANA.md, then run the ping/pong smoke test. Idempotent — existing runtimes and approvals are kept.").
+		Value(&c.st.confirm))
+	return huh.NewForm(huh.NewGroup(fields...))
 }
 
 func (c Console) formTitle() string {

@@ -39,7 +39,23 @@ type session struct {
 	policy           *egress.Policy
 	sandboxID        string
 	approver         webfetch.Approver // non-nil only in interactive serve
-	runtimeSources   runtimes.Sources  // resolved per-language runtime source (config > persisted > managed)
+	// Runtime source is resolved LAZILY (runtimeSourcesNow) from these, not cached, so
+	// a choice persisted mid-session (e.g. via the console bootstrap modal) takes
+	// effect immediately for installs and the serve loop, without a reconnect.
+	runtimeStore  *runtimes.Store
+	runtimeConfig runtimes.Sources // operator-config overlay (immutable for the session)
+}
+
+// runtimeSourcesNow resolves the per-language runtime source at the moment of use:
+// config overlay > persisted choice > managed default. The persisted store is read
+// fresh each call (cheap) so a mid-session change is honored; a missing/corrupt store
+// degrades to the config/managed defaults rather than failing.
+func (s *session) runtimeSourcesNow() runtimes.Sources {
+	var persisted runtimes.Sources
+	if s.runtimeStore != nil {
+		persisted, _ = s.runtimeStore.Load()
+	}
+	return runtimes.Resolve(nil, s.runtimeConfig, persisted, nil, nil)
 }
 
 // sessionHolder guards the current session pointer so the reconnect supervisor can
@@ -142,16 +158,7 @@ func openSessionWith(ctx context.Context, cfg *config.Config, transport string, 
 		}
 	}
 
-	// Resolve the runtime source for installs (config overrides the bootstrap-persisted
-	// choice; both fall back to managed). No prompt here — serve/install are unattended.
-	persistedSrc, err := runtimesStore(cfg).Load()
-	if err != nil {
-		_ = r.Close()
-		return nil, fmt.Errorf("load runtime sources: %w", err)
-	}
-	resolvedSrc := runtimes.Resolve(nil, configRuntimeSources(cfg.Runtimes), persistedSrc, nil, nil)
-
-	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, auditPath: auditPath(cfg), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID, runtimeSources: resolvedSrc}
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, auditPath: auditPath(cfg), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID, runtimeStore: runtimesStore(cfg), runtimeConfig: configRuntimeSources(cfg.Runtimes)}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"

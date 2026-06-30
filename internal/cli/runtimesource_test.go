@@ -1,0 +1,47 @@
+package cli
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+
+	"github.com/KuroKodaNinja/iceclimber/internal/probe"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
+)
+
+// TestRuntimeSourceLazyResolveRoundTrip proves the console's runtime-source modal
+// path end to end without a VM: the session resolves the source LAZILY, so a choice
+// persisted via SetRuntimeSources is picked up by the next resolve — no reconnect or
+// cached-staleness. Also covers DetectedRuntimes filtering to supported langs.
+func TestRuntimeSourceLazyResolveRoundTrip(t *testing.T) {
+	store := runtimes.NewStore(filepath.Join(t.TempDir(), "runtimes.json"))
+	sess := &session{
+		fp: &probe.Fingerprint{Runtimes: []probe.RuntimeInfo{
+			{Lang: "python", Version: "3.12.1", Path: "/usr/bin/python3"},
+			{Lang: "node", Version: "20.1.0", Path: "/usr/bin/node"}, // not system-supported yet
+		}},
+		runtimeStore:  store,
+		runtimeConfig: runtimes.Sources{},
+	}
+	if sess.runtimeSourcesNow().Of("python").Mode != runtimes.ModeManaged {
+		t.Fatal("default source should be managed")
+	}
+
+	holder := &sessionHolder{}
+	holder.Set(sess)
+	ops := &consoleOps{ctx: context.Background(), holder: holder}
+
+	// Only python is offered (system mode is python-only).
+	dr := ops.DetectedRuntimes()
+	if len(dr) != 1 || dr[0].Lang != "python" || dr[0].Version != "3.12.1" {
+		t.Fatalf("DetectedRuntimes = %+v, want only python", dr)
+	}
+
+	if err := ops.SetRuntimeSources(map[string]bool{"python": true}); err != nil {
+		t.Fatalf("SetRuntimeSources: %v", err)
+	}
+	// The lazy resolve re-reads the store, so the new choice is live immediately.
+	if got := sess.runtimeSourcesNow().Of("python").Mode; got != runtimes.ModeSystem {
+		t.Errorf("after SetRuntimeSources(system), source = %q, want system", got)
+	}
+}

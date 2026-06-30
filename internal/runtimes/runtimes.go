@@ -179,7 +179,9 @@ func (s *Store) Load() (Sources, error) {
 	return out, nil
 }
 
-// Save writes the sources (pretty JSON, 0600), creating the parent dir.
+// Save writes the sources (pretty JSON, 0600), creating the parent dir. The write
+// is atomic (temp + rename) so a concurrent Load — e.g. an install resolving the
+// source while the console persists a new choice — never sees a partial file.
 func (s *Store) Save(src Sources) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return err
@@ -188,5 +190,9 @@ func (s *Store) Save(src Sources) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, data, 0o600)
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.path)
 }

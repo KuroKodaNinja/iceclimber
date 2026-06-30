@@ -121,6 +121,40 @@ func (o *consoleOps) Agents() []tui.AgentChoice {
 	return out
 }
 
+// DetectedRuntimes lists the system runtimes the operator may opt into at bootstrap
+// (those whose system mode is implemented), drawn from the probe fingerprint.
+func (o *consoleOps) DetectedRuntimes() []tui.RuntimeChoice {
+	var out []tui.RuntimeChoice
+	for _, rt := range o.sess().fp.Runtimes {
+		if runtimes.SystemSupported(rt.Lang) {
+			out = append(out, tui.RuntimeChoice{Lang: rt.Lang, Version: rt.Version, Path: rt.Path})
+		}
+	}
+	return out
+}
+
+// SetRuntimeSources persists the operator's per-language system/managed choice. The
+// install path + serve loop resolve the source fresh (runtimeSourcesNow), so the
+// choice takes effect without a reconnect.
+func (o *consoleOps) SetRuntimeSources(useSystem map[string]bool) error {
+	store := o.sess().runtimeStore
+	if store == nil {
+		return nil
+	}
+	cur, _ := store.Load()
+	if cur == nil {
+		cur = runtimes.Sources{}
+	}
+	for lang, sys := range useSystem {
+		mode := runtimes.ModeManaged
+		if sys {
+			mode = runtimes.ModeSystem
+		}
+		cur[lang] = runtimes.Source{Mode: mode}
+	}
+	return store.Save(cur)
+}
+
 // RunAgentInstall installs or wraps a coding agent (the nana wrapper) from the
 // console — the TUI equivalent of `iceclimber agent install/wrap`.
 func (o *consoleOps) RunAgentInstall(r tui.AgentInstallRequest) tea.Cmd {
@@ -362,7 +396,7 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 // returns a sandbox echo of the interpreter that will host the packages.
 func (o *consoleOps) ensurePython(ver string, pr progress.Func) ([]echo, error) {
 	sess := o.sess()
-	src := sess.runtimeSources.Of("python")
+	src := sess.runtimeSourcesNow().Of("python")
 	if src.Mode == runtimes.ModeSystem {
 		// System mode: create/reuse an iceclimber-owned venv from the system python.
 		bin, err := python.EnsureEnv(o.ctx, sess.fs, sess.runner, sess.tree.Root, ver, sess.fp.Arch, sess.fp.Libc.Family,

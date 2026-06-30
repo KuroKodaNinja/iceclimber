@@ -32,11 +32,13 @@ func (f *fakeOps) RunAgentInstall(r AgentInstallRequest) tea.Cmd {
 func (f *fakeOps) Agents() []AgentChoice {
 	return []AgentChoice{{Name: "claude", DisplayName: "Claude Code"}}
 }
-func (f *fakeOps) PollStatus() tea.Cmd          { return func() tea.Msg { return StatusMsg{} } }
-func (f *fakeOps) Egress() EgressSnapshot       { return EgressSnapshot{} }
-func (f *fakeOps) ApprovePending(string) error  { return nil }
-func (f *fakeOps) DenyPending(string) error     { return nil }
-func (f *fakeOps) ForgetRule(_, _ string) error { return nil }
+func (f *fakeOps) DetectedRuntimes() []RuntimeChoice       { return nil }
+func (f *fakeOps) SetRuntimeSources(map[string]bool) error { return nil }
+func (f *fakeOps) PollStatus() tea.Cmd                     { return func() tea.Msg { return StatusMsg{} } }
+func (f *fakeOps) Egress() EgressSnapshot                  { return EgressSnapshot{} }
+func (f *fakeOps) ApprovePending(string) error             { return nil }
+func (f *fakeOps) DenyPending(string) error                { return nil }
+func (f *fakeOps) ForgetRule(_, _ string) error            { return nil }
 
 // errOps fails egress actions and serves a fixed snapshot, for error-surfacing.
 type errOps struct {

@@ -91,7 +91,7 @@ func mavenDeps(sess *session, pr progress.Func) maven.Deps {
 
 // pipDeps builds the pip.install dependency bundle from an open session.
 func pipDeps(sess *session, pr progress.Func) pip.Deps {
-	src := sess.runtimeSources.Of("python")
+	src := sess.runtimeSourcesNow().Of("python")
 	return pip.Deps{
 		FS:                 sess.fs,
 		Runner:             sess.runner,
