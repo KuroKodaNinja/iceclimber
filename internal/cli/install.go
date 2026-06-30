@@ -48,11 +48,13 @@ func newInstallMavenCmd() *cobra.Command {
 			}
 			defer sess.Close()
 
-			deps := mavenDeps(sess)
+			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
+			deps := mavenDeps(sess, pr)
 			if mirror != "" {
 				deps.MirrorURL = mirror
 			}
 			res, err := maven.Run(ctx, deps, javaVersion, specs, tier)
+			finish()
 			if err != nil {
 				return err
 			}
@@ -110,7 +112,9 @@ func newInstallJavaCmd() *cobra.Command {
 			}
 			defer sess.Close()
 
-			res, err := newJavaInstaller(sess).Install(ctx, args[0])
+			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
+			res, err := newJavaInstaller(sess, pr).Install(ctx, args[0])
+			finish()
 			if err != nil {
 				return err
 			}
@@ -147,7 +151,9 @@ func newInstallNpmCmd() *cobra.Command {
 			}
 			defer sess.Close()
 
-			out, err := npm.Run(ctx, npmDeps(sess), nodeVersion, parseNpmSpecs(args), tier)
+			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
+			out, err := npm.Run(ctx, npmDeps(sess, pr), nodeVersion, parseNpmSpecs(args), tier)
+			finish()
 			if err != nil {
 				return err
 			}
@@ -204,7 +210,9 @@ func newInstallNodeCmd() *cobra.Command {
 			}
 			defer sess.Close()
 
-			res, err := newNodeInstaller(sess).Install(ctx, args[0])
+			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
+			res, err := newNodeInstaller(sess, pr).Install(ctx, args[0])
+			finish()
 			if err != nil {
 				return err
 			}
@@ -241,7 +249,9 @@ func newInstallPythonCmd() *cobra.Command {
 			}
 			defer sess.Close()
 
-			res, err := newInstaller(sess).Install(ctx, args[0])
+			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
+			res, err := newInstaller(sess, pr).Install(ctx, args[0])
+			finish()
 			if err != nil {
 				return err
 			}
@@ -278,7 +288,9 @@ func newInstallPipCmd() *cobra.Command {
 			}
 			defer sess.Close()
 
-			out, err := pip.Run(ctx, pipDeps(sess), pyVersion, parseSpecs(args), tier)
+			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
+			out, err := pip.Run(ctx, pipDeps(sess, pr), pyVersion, parseSpecs(args), tier)
+			finish()
 			if err != nil {
 				return err
 			}

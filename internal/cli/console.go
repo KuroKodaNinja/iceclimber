@@ -223,7 +223,7 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 			return opResult{typ: "python.install", detail: "python " + ver, echoes: echoes}
 		}
 		pkgs := parseSpecs(specs)
-		out, err := pip.Run(o.ctx, pipDeps(o.sess), ver, pkgs, "auto")
+		out, err := pip.Run(o.ctx, pipDeps(o.sess, nil), ver, pkgs, "auto")
 		if err != nil {
 			return opResult{typ: "pip.install", err: err, echoes: echoes}
 		}
@@ -240,7 +240,7 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 			return opResult{typ: "node.install", detail: "node " + ver, echoes: echoes}
 		}
 		pkgs := parseNpmSpecs(specs)
-		out, err := npm.Run(o.ctx, npmDeps(o.sess), ver, pkgs, "auto")
+		out, err := npm.Run(o.ctx, npmDeps(o.sess, nil), ver, pkgs, "auto")
 		if err != nil {
 			return opResult{typ: "npm.install", err: err, echoes: echoes}
 		}
@@ -258,7 +258,7 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		if err != nil {
 			return opResult{typ: "maven.install", err: err, echoes: echoes}
 		}
-		out, err := maven.Run(o.ctx, mavenDeps(o.sess), ver, coords, "auto")
+		out, err := maven.Run(o.ctx, mavenDeps(o.sess, nil), ver, coords, "auto")
 		if err != nil {
 			return opResult{typ: "maven.install", err: err, echoes: echoes}
 		}
@@ -273,7 +273,7 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 func (o *consoleOps) ensurePython(ver string) ([]echo, error) {
 	bin, err := python.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
 	if err != nil {
-		res, ierr := newInstaller(o.sess).Install(o.ctx, ver)
+		res, ierr := newInstaller(o.sess, nil).Install(o.ctx, ver)
 		if ierr != nil {
 			return nil, ierr
 		}
@@ -287,7 +287,7 @@ func (o *consoleOps) ensurePython(ver string) ([]echo, error) {
 func (o *consoleOps) ensureNode(ver string) ([]echo, error) {
 	bin, err := node.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
 	if err != nil {
-		res, ierr := newNodeInstaller(o.sess).Install(o.ctx, ver)
+		res, ierr := newNodeInstaller(o.sess, nil).Install(o.ctx, ver)
 		if ierr != nil {
 			return nil, ierr
 		}
@@ -301,7 +301,7 @@ func (o *consoleOps) ensureNode(ver string) ([]echo, error) {
 func (o *consoleOps) ensureJava(ver string) ([]echo, error) {
 	bin, err := java.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
 	if err != nil {
-		res, ierr := newJavaInstaller(o.sess).Install(o.ctx, ver)
+		res, ierr := newJavaInstaller(o.sess, nil).Install(o.ctx, ver)
 		if ierr != nil {
 			return nil, ierr
 		}

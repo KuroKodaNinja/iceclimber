@@ -8,13 +8,15 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/node"
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/webfetch"
 )
 
-// newInstaller builds the Python installer from an open session.
-func newInstaller(sess *session) *python.Installer {
+// newInstaller builds the Python installer from an open session. pr (may be nil)
+// receives operator-facing progress events.
+func newInstaller(sess *session, pr progress.Func) *python.Installer {
 	return python.NewInstaller(python.Config{
 		FS:       sess.fs,
 		Runner:   sess.runner,
@@ -23,11 +25,12 @@ func newInstaller(sess *session) *python.Installer {
 		Arch:     sess.fp.Arch,
 		Libc:     sess.fp.Libc.Family,
 		CacheDir: sess.cacheDir,
+		Progress: pr,
 	})
 }
 
 // newNodeInstaller builds the Node installer from an open session.
-func newNodeInstaller(sess *session) *node.Installer {
+func newNodeInstaller(sess *session, pr progress.Func) *node.Installer {
 	return node.NewInstaller(node.Config{
 		FS:       sess.fs,
 		Runner:   sess.runner,
@@ -36,6 +39,7 @@ func newNodeInstaller(sess *session) *node.Installer {
 		Arch:     sess.fp.Arch,
 		Libc:     sess.fp.Libc.Family,
 		CacheDir: sess.cacheDir,
+		Progress: pr,
 	})
 }
 
@@ -56,7 +60,7 @@ func newAgentInstaller(sess *session) *agent.Installer {
 }
 
 // newJavaInstaller builds the JDK installer from an open session.
-func newJavaInstaller(sess *session) *java.Installer {
+func newJavaInstaller(sess *session, pr progress.Func) *java.Installer {
 	return java.NewInstaller(java.Config{
 		FS:       sess.fs,
 		Runner:   sess.runner,
@@ -65,11 +69,12 @@ func newJavaInstaller(sess *session) *java.Installer {
 		Arch:     sess.fp.Arch,
 		Libc:     sess.fp.Libc.Family,
 		CacheDir: sess.cacheDir,
+		Progress: pr,
 	})
 }
 
 // mavenDeps builds the maven.install dependency bundle from an open session.
-func mavenDeps(sess *session) maven.Deps {
+func mavenDeps(sess *session, pr progress.Func) maven.Deps {
 	return maven.Deps{
 		FS:                   sess.fs,
 		Runner:               sess.runner,
@@ -80,11 +85,12 @@ func mavenDeps(sess *session) maven.Deps {
 		ControllerJava:       sess.controllerJava,
 		ControllerRepository: sess.maven.ControllerRepository,
 		CacheDir:             sess.cacheDir,
+		Progress:             pr,
 	}
 }
 
 // pipDeps builds the pip.install dependency bundle from an open session.
-func pipDeps(sess *session) pip.Deps {
+func pipDeps(sess *session, pr progress.Func) pip.Deps {
 	return pip.Deps{
 		FS:                 sess.fs,
 		Runner:             sess.runner,
@@ -96,11 +102,12 @@ func pipDeps(sess *session) pip.Deps {
 		TrustedHost:        sess.pip.TrustedHost,
 		ControllerPython:   sess.controllerPython,
 		ControllerIndexURL: sess.pip.ControllerIndexURL,
+		Progress:           pr,
 	}
 }
 
 // npmDeps builds the npm.install dependency bundle from an open session.
-func npmDeps(sess *session) npm.Deps {
+func npmDeps(sess *session, pr progress.Func) npm.Deps {
 	return npm.Deps{
 		FS:                 sess.fs,
 		Runner:             sess.runner,
@@ -110,6 +117,7 @@ func npmDeps(sess *session) npm.Deps {
 		RegistryURL:        sess.npm.RegistryURL,
 		ControllerNpm:      sess.controllerNpm,
 		ControllerRegistry: sess.npm.ControllerRegistry,
+		Progress:           pr,
 	}
 }
 
@@ -131,13 +139,15 @@ func webfetchDeps(sess *session) webfetch.Deps {
 // this is where heavier handlers get their dependencies, §9).
 func buildRegistry(sess *session) protocol.Registry {
 	return protocol.Registry{
+		// Agent-triggered installs go to a file response — no operator render
+		// surface — so progress is nil here (it's a console/CLI concern only).
 		"ping":           protocol.PingHandler(version),
-		"python.install": python.Handler(newInstaller(sess)),
-		"pip.install":    pip.Handler(pipDeps(sess)),
-		"node.install":   node.Handler(newNodeInstaller(sess)),
-		"npm.install":    npm.Handler(npmDeps(sess)),
-		"java.install":   java.Handler(newJavaInstaller(sess)),
-		"maven.install":  maven.Handler(mavenDeps(sess)),
+		"python.install": python.Handler(newInstaller(sess, nil)),
+		"pip.install":    pip.Handler(pipDeps(sess, nil)),
+		"node.install":   node.Handler(newNodeInstaller(sess, nil)),
+		"npm.install":    npm.Handler(npmDeps(sess, nil)),
+		"java.install":   java.Handler(newJavaInstaller(sess, nil)),
+		"maven.install":  maven.Handler(mavenDeps(sess, nil)),
 		"web.fetch":      webfetch.Handler(webfetchDeps(sess)),
 	}
 }
