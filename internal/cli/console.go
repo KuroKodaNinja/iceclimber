@@ -21,6 +21,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
@@ -210,12 +211,25 @@ func (o *consoleOps) ForgetRule(kind, pattern string) error {
 // version, or the recommended default when blank), installs the requested packages
 // via the derived manager (pip / npm, tier auto), and verifies the result in the
 // sandbox so Nana echoes back confirmation.
+// progress builds the progress.Func that pushes live install progress to the
+// console as a ProgressMsg, tagged with the active transport, non-blocking (a full
+// channel just drops a sample — the next one supersedes it).
+func (o *consoleOps) progress() progress.Func {
+	return func(e progress.Event) {
+		select {
+		case o.events <- tui.ProgressMsg{Event: e, Transport: o.sess.transport}:
+		default:
+		}
+	}
+}
+
 func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 	ver := defaultVersion(r.Lang, r.Version)
 	specs := splitSpecs(r.Pkgs)
+	pr := o.progress()
 	switch r.Lang {
 	case "python":
-		echoes, err := o.ensurePython(ver)
+		echoes, err := o.ensurePython(ver, pr)
 		if err != nil {
 			return opResult{typ: "python.install", err: err, echoes: echoes}
 		}
@@ -223,7 +237,7 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 			return opResult{typ: "python.install", detail: "python " + ver, echoes: echoes}
 		}
 		pkgs := parseSpecs(specs)
-		out, err := pip.Run(o.ctx, pipDeps(o.sess, nil), ver, pkgs, "auto")
+		out, err := pip.Run(o.ctx, pipDeps(o.sess, pr), ver, pkgs, "auto")
 		if err != nil {
 			return opResult{typ: "pip.install", err: err, echoes: echoes}
 		}
@@ -232,7 +246,7 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		echoes = append(echoes, o.verifyPyPkgs(ver, specNames(pkgs))...)
 		return opResult{typ: "pip.install", detail: pkgSummary(out.Installed, out.Failed), echoes: echoes}
 	case "javascript":
-		echoes, err := o.ensureNode(ver)
+		echoes, err := o.ensureNode(ver, pr)
 		if err != nil {
 			return opResult{typ: "node.install", err: err, echoes: echoes}
 		}
@@ -240,14 +254,14 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 			return opResult{typ: "node.install", detail: "node " + ver, echoes: echoes}
 		}
 		pkgs := parseNpmSpecs(specs)
-		out, err := npm.Run(o.ctx, npmDeps(o.sess, nil), ver, pkgs, "auto")
+		out, err := npm.Run(o.ctx, npmDeps(o.sess, pr), ver, pkgs, "auto")
 		if err != nil {
 			return opResult{typ: "npm.install", err: err, echoes: echoes}
 		}
 		echoes = append(echoes, o.verifyNodePkgs(ver, specNames(pkgs))...)
 		return opResult{typ: "npm.install", detail: pkgSummary(out.Installed, out.Failed), echoes: echoes}
 	case "java":
-		echoes, err := o.ensureJava(ver)
+		echoes, err := o.ensureJava(ver, pr)
 		if err != nil {
 			return opResult{typ: "java.install", err: err, echoes: echoes}
 		}
@@ -258,7 +272,7 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		if err != nil {
 			return opResult{typ: "maven.install", err: err, echoes: echoes}
 		}
-		out, err := maven.Run(o.ctx, mavenDeps(o.sess, nil), ver, coords, "auto")
+		out, err := maven.Run(o.ctx, mavenDeps(o.sess, pr), ver, coords, "auto")
 		if err != nil {
 			return opResult{typ: "maven.install", err: err, echoes: echoes}
 		}
@@ -270,10 +284,10 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 
 // ensurePython locates the Python runtime at ver, installing it if absent, and
 // returns a sandbox echo of the interpreter that will host the packages.
-func (o *consoleOps) ensurePython(ver string) ([]echo, error) {
+func (o *consoleOps) ensurePython(ver string, pr progress.Func) ([]echo, error) {
 	bin, err := python.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
 	if err != nil {
-		res, ierr := newInstaller(o.sess, nil).Install(o.ctx, ver)
+		res, ierr := newInstaller(o.sess, pr).Install(o.ctx, ver)
 		if ierr != nil {
 			return nil, ierr
 		}
@@ -284,10 +298,10 @@ func (o *consoleOps) ensurePython(ver string) ([]echo, error) {
 
 // ensureNode locates the Node runtime at ver, installing it if absent, and returns
 // a sandbox echo of the runtime that will host the packages.
-func (o *consoleOps) ensureNode(ver string) ([]echo, error) {
+func (o *consoleOps) ensureNode(ver string, pr progress.Func) ([]echo, error) {
 	bin, err := node.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
 	if err != nil {
-		res, ierr := newNodeInstaller(o.sess, nil).Install(o.ctx, ver)
+		res, ierr := newNodeInstaller(o.sess, pr).Install(o.ctx, ver)
 		if ierr != nil {
 			return nil, ierr
 		}
@@ -298,10 +312,10 @@ func (o *consoleOps) ensureNode(ver string) ([]echo, error) {
 
 // ensureJava locates the JDK at ver, installing it if absent, and returns a sandbox
 // echo of the runtime that will host the resolved dependencies.
-func (o *consoleOps) ensureJava(ver string) ([]echo, error) {
+func (o *consoleOps) ensureJava(ver string, pr progress.Func) ([]echo, error) {
 	bin, err := java.Locate(o.ctx, o.sess.fs, o.sess.tree.Root, ver, o.sess.fp.Arch, o.sess.fp.Libc.Family)
 	if err != nil {
-		res, ierr := newJavaInstaller(o.sess, nil).Install(o.ctx, ver)
+		res, ierr := newJavaInstaller(o.sess, pr).Install(o.ctx, ver)
 		if ierr != nil {
 			return nil, ierr
 		}

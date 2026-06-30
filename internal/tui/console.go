@@ -2,15 +2,26 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/tail"
 )
+
+// ProgressMsg is one live install-progress sample pushed onto the console's event
+// channel by the executor (with the active transport label). It drives the footer
+// meter.
+type ProgressMsg struct {
+	progress.Event
+	Transport string // "sftp" | "exec" — how the transfer is happening
+}
 
 // required is a huh validator that rejects blank/whitespace input.
 func required(what string) func(string) error {
@@ -123,7 +134,10 @@ type Console struct {
 	form      *huh.Form
 	formKind  string // "install" | "bootstrap" while a form is open
 	running   string // label of an in-flight operator action ("" = idle)
-	panel     string // "" | "status" | "egress" — an open read/manage panel
+	spin      spinner.Model
+	prog      *ProgressMsg // latest progress sample for the in-flight action ("" running = ignored)
+	progStart time.Time    // when the current phase began (for ETA)
+	panel     string       // "" | "status" | "egress" — an open read/manage panel
 	status    *StatusSnapshot
 	egress    EgressSnapshot
 	cursor    int    // selected row in the egress panel
@@ -149,6 +163,7 @@ type formState struct {
 // ops may be nil to disable the operator management menu (e.g. in tests).
 func NewConsole(sandboxID string, events <-chan tea.Msg, agentLog string, ops OpRunner) Console {
 	c := Console{sandboxID: sandboxID, events: events, ops: ops, width: 100, height: 30}
+	c.spin = spinner.New(spinner.WithSpinner(spinner.Dot))
 	if agentLog != "" {
 		c.nana = tail.NewReader(agentLog)
 	}
@@ -220,8 +235,23 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case *ApprovalRequest:
 		c.modal = msg
 		return c, c.waitEvent()
+	case ProgressMsg:
+		if msg.Phase != c.progPhase() {
+			c.progStart = time.Now() // new phase → reset the ETA clock
+		}
+		m := msg
+		c.prog = &m
+		return c, c.waitEvent()
+	case spinner.TickMsg:
+		if c.running == "" {
+			return c, nil // stop animating when idle (restarted when an action begins)
+		}
+		var cmd tea.Cmd
+		c.spin, cmd = c.spin.Update(msg)
+		return c, cmd
 	case OpResultMsg:
 		c.running = ""
+		c.prog = nil
 		return c, nil
 	case tickMsg:
 		if c.nana != nil {
@@ -341,8 +371,12 @@ func (c Console) View() string {
 	if c.form != nil {
 		return formView(c.width, c.height, c.formTitle(), c.form.View())
 	}
+	meter := ""
+	if c.running != "" {
+		meter = c.renderMeter()
+	}
 	return dashboard(c.width, c.height, c.sandboxID, c.served, c.approved, c.denied,
-		c.lastTS, true, c.popoLines, c.nanaLines, true, c.nana != nil, c.ops != nil, c.running)
+		c.lastTS, true, c.popoLines, c.nanaLines, true, c.nana != nil, c.ops != nil, c.running, meter)
 }
 
 // openForm builds and focuses the named operator form.
@@ -384,17 +418,57 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 	switch kind {
 	case "install":
 		c.running = installLabel(c.st.lang)
-		return c, c.ops.RunInstall(InstallRequest{
+		c.progStart = time.Now()
+		// Batch the spinner tick so the in-flight footer animates while the op runs.
+		return c, tea.Batch(c.ops.RunInstall(InstallRequest{
 			Lang: c.st.lang, Version: c.st.version, Pkgs: c.st.pkgs,
-		})
+		}), c.spin.Tick)
 	case "bootstrap":
 		if !c.st.confirm {
 			return c, nil // operator declined at the confirm
 		}
 		c.running = "bootstrap"
-		return c, c.ops.RunBootstrap()
+		c.progStart = time.Now()
+		return c, tea.Batch(c.ops.RunBootstrap(), c.spin.Tick)
 	}
 	return c, nil
+}
+
+// progPhase is the current progress phase, or "" when none.
+func (c Console) progPhase() string {
+	if c.prog == nil {
+		return ""
+	}
+	return c.prog.Phase
+}
+
+// renderMeter builds the in-flight footer line: spinner + action label + current
+// phase, with a byte bar/%/ETA (transfers) or an (i/n) count (packages), and the
+// transfer mode. Falls back to spinner + label when no sample has arrived yet.
+func (c Console) renderMeter() string {
+	b := &strings.Builder{}
+	b.WriteString(c.spin.View() + " " + c.running)
+	if c.prog == nil {
+		b.WriteString(" …")
+		return b.String()
+	}
+	p := c.prog
+	b.WriteString(" · " + p.Phase)
+	switch {
+	case p.Unit == progress.Bytes && p.Total > 0:
+		ratio := float64(p.Cur) / float64(p.Total)
+		fmt.Fprintf(b, "  %s %d%%  %s/%s", meterBar(ratio, 18), int(ratio*100),
+			progress.HumanBytes(p.Cur), progress.HumanBytes(p.Total))
+		if eta := progress.ETA(p.Cur, p.Total, time.Since(c.progStart)); eta != "" {
+			b.WriteString("  " + eta)
+		}
+	case p.Unit == progress.Items && p.Total > 0:
+		fmt.Fprintf(b, "  (%d/%d)", p.Cur, p.Total)
+	}
+	if p.Transport != "" {
+		b.WriteString(" · via " + p.Transport)
+	}
+	return b.String()
 }
 
 func (c *Console) installForm() *huh.Form {

@@ -12,6 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
+
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 )
 
@@ -408,6 +410,35 @@ func (o *gateOps) ApprovePending(string) error  { return nil }
 func (o *gateOps) DenyPending(string) error     { return nil }
 func (o *gateOps) ForgetRule(_, _ string) error { return nil }
 
+// TestFlow_InstallProgressMeter: while an install is in flight, ProgressMsg samples
+// render in the footer — a byte transfer shows %/transport, a package step shows
+// (i/n) — and the meter clears when the op finishes.
+func TestFlow_InstallProgressMeter(t *testing.T) {
+	ops := &gateOps{release: make(chan struct{})}
+	tm := startConsole(t, ops)
+	press(tm, "i")
+	waitText(t, tm, "language")
+	send(tm, tea.KeyEnter)
+	waitText(t, tm, "requests / figlet")
+	send(tm, tea.KeyEnter) // packages blank → version
+	waitText(t, tm, "3.12 / 24")
+	send(tm, tea.KeyEnter) // submit ⇒ RunInstall blocks (running stays visible)
+	waitText(t, tm, "Python install")
+
+	// A byte-transfer sample → bar/%/transport in the footer.
+	tm.Send(ProgressMsg{Event: progress.Event{Phase: "transferring", Cur: 62, Total: 100, Unit: progress.Bytes}, Transport: "exec"})
+	waitText(t, tm, "62%")
+	waitText(t, tm, "via exec")
+
+	// A package step sample → (i/n).
+	tm.Send(ProgressMsg{Event: progress.Event{Phase: "installing six", Cur: 1, Total: 3, Unit: progress.Items}})
+	waitText(t, tm, "(1/3)")
+
+	close(ops.release)
+	tm.Quit()
+	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+}
+
 func TestFlow_RunningIndicator(t *testing.T) {
 	ops := &gateOps{release: make(chan struct{})}
 	tm := startConsole(t, ops)
@@ -419,9 +450,9 @@ func TestFlow_RunningIndicator(t *testing.T) {
 	waitText(t, tm, "six")
 	send(tm, tea.KeyEnter) // advance to version
 	waitText(t, tm, "3.12 / 24")
-	send(tm, tea.KeyEnter) // submit ⇒ RunInstall blocks
-	waitText(t, tm, "running Python install")
-	press(tm, "i") // input is ignored while running (no second form)
+	send(tm, tea.KeyEnter)            // submit ⇒ RunInstall blocks
+	waitText(t, tm, "Python install") // the in-flight meter (spinner + label)
+	press(tm, "i")                    // input is ignored while running (no second form)
 	close(ops.release)
 	tm.Quit() // after release the op resolves; Quit forces a clean finish
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))

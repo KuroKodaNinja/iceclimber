@@ -71,7 +71,7 @@ func nanaEcho(e activity.Event) string {
 
 // dashboard renders the header + two panes + footer. showNana renders the [NANA]
 // pane (the sandbox's voice); hasAgentLog only tweaks the empty-pane hint.
-func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, serving bool, popoLines []popoLine, nanaLines []string, showNana, hasAgentLog, hasOps bool, running string) string {
+func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, serving bool, popoLines []popoLine, nanaLines []string, showNana, hasAgentLog, hasOps bool, running, meter string) string {
 	if w < 40 {
 		w = 40
 	}
@@ -79,7 +79,7 @@ func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS 
 		h = 10
 	}
 	hdr := header(w, sandboxID, served, approved, denied, lastTS, serving)
-	ftr := footer(w, hasOps, running)
+	ftr := footer(w, hasOps, running, meter)
 	bodyH := h - lipgloss.Height(hdr) - lipgloss.Height(ftr)
 	if bodyH < 4 {
 		bodyH = 4
@@ -108,8 +108,12 @@ func header(w int, sandboxID string, served, approved, denied int, lastTS time.T
 	return lipgloss.NewStyle().Width(w).Render(left + strings.Repeat(" ", gap) + right)
 }
 
-func footer(w int, hasOps bool, running string) string {
+func footer(w int, hasOps bool, running, meter string) string {
 	if running != "" {
+		// The meter carries its own spinner/bar styling; wrap to width only.
+		if meter != "" {
+			return lipgloss.NewStyle().Width(w).Render(" " + meter)
+		}
 		return warnStyle.Width(w).Render(" ⏳ running " + running + " …")
 	}
 	keys := "q quit"
@@ -117,6 +121,18 @@ func footer(w int, hasOps bool, running string) string {
 		keys = "i install   b bootstrap   s status   e egress   ·   q quit"
 	}
 	return dimStyle.Width(w).Render(" [POPO] Popo's activity   [NANA] the sandbox's voice   ·   " + keys)
+}
+
+// meterBar renders a fixed-width Unicode progress bar for ratio in [0,1].
+func meterBar(ratio float64, w int) string {
+	if ratio < 0 {
+		ratio = 0
+	}
+	if ratio > 1 {
+		ratio = 1
+	}
+	n := int(ratio * float64(w))
+	return "▕" + strings.Repeat("█", n) + strings.Repeat("░", w-n) + "▏"
 }
 
 func popoPane(w, h int, lines []popoLine) string {

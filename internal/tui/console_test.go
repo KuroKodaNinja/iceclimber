@@ -17,7 +17,8 @@ type fakeOps struct {
 }
 
 func (f *fakeOps) RunInstall(r InstallRequest) tea.Cmd {
-	return func() tea.Msg { f.install = &r; return OpResultMsg{} }
+	f.install = &r // recorded at call time (submitForm now batches the op with a spinner tick)
+	return func() tea.Msg { return OpResultMsg{} }
 }
 
 func (f *fakeOps) RunBootstrap() tea.Cmd {
@@ -214,10 +215,7 @@ func TestConsole_SubmitInstallRunsOp(t *testing.T) {
 		t.Fatalf("running = %q, want JavaScript install", c2.running)
 	}
 	if cmd == nil {
-		t.Fatal("submit should return the op command")
-	}
-	if _, ok := cmd().(OpResultMsg); !ok {
-		t.Error("op command should resolve to OpResultMsg")
+		t.Fatal("submit should return the op command (batched with the spinner tick)")
 	}
 	if ops.install == nil || ops.install.Lang != "javascript" ||
 		ops.install.Version != "24" || ops.install.Pkgs != "figlet" {
