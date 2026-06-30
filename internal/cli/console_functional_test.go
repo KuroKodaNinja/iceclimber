@@ -14,6 +14,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/tui"
@@ -139,6 +141,71 @@ func TestConsoleOps_InstallEmitsProgress(t *testing.T) {
 		default:
 			if !sawTransfer {
 				t.Error("no 'transferring' ProgressMsg emitted during a fresh runtime install")
+			}
+			return
+		}
+	}
+}
+
+// TestConsoleDispatcher_AgentInstallEmitsProgress proves the #3 wiring on the AGENT
+// path (the operator path is TestConsoleOps_InstallEmitsProgress): a python.install
+// request delivered to the outbox — as Nana would — is serviced by the console
+// dispatcher, and the registry's progress sink pushes an Agent-tagged "transferring"
+// ProgressMsg onto the events channel. If buildRegistry were wired with a nil progress
+// Func (the pre-#3 state), zero ProgressMsgs would appear — this test fails closed.
+func TestConsoleDispatcher_AgentInstallEmitsProgress(t *testing.T) {
+	path := os.Getenv("ICECLIMBER_CONFIG")
+	if path == "" {
+		path = filepath.Join("..", "..", "iceclimber.yaml")
+	}
+	cfg, err := config.Load(path, "")
+	if err != nil {
+		t.Skipf("no usable config at %s (%v); run `make sandbox-up && make sandbox-config`", path, err)
+	}
+	cfg.RemoteRoot = fmt.Sprintf("/tmp/iceclimber-agentprog-%d", time.Now().UnixNano()) // fresh → forces a transfer
+	cfg.ActivityLog = filepath.Join(t.TempDir(), "activity.jsonl")
+	ctx := context.Background()
+	sess, err := openSession(ctx, cfg, "auto")
+	if err != nil {
+		t.Skipf("cannot reach sandbox (%v); run `make sandbox-up`", err)
+	}
+	defer sess.Close()
+	t.Cleanup(func() { _ = sess.fs.RemoveAll(ctx, cfg.RemoteRoot) })
+	if err := provision(ctx, sess); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+
+	events := make(chan tea.Msg, 256)
+	disp := buildConsoleDispatcher(ctx, sess, cfg, activity.New(cfg.ActivityLog), events)
+	disp.SetGate(nil) // auto-approve: this exercises the progress wiring, not the gate
+
+	// Deliver a python.install request exactly as the in-sandbox agent would.
+	id := protocol.NewID()
+	name := protocol.RequestName(id)
+	data, _ := json.Marshal(protocol.Request{
+		SchemaVersion: protocol.SchemaVersion, ID: id, Type: "python.install",
+		CreatedAt: time.Now().UTC(), Params: json.RawMessage(`{"version":"3.12"}`),
+	})
+	if err := protocol.Deliver(ctx, sess.fs, sess.tree.Outbox(), name, data); err != nil {
+		t.Fatal(err)
+	}
+	if err := disp.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	var sawAgentTransfer bool
+	for {
+		select {
+		case m := <-events:
+			if pm, ok := m.(tui.ProgressMsg); ok && pm.Agent && strings.HasPrefix(pm.Phase, "transferring") {
+				sawAgentTransfer = true
+				if pm.Transport != sess.transport {
+					t.Errorf("ProgressMsg.Transport = %q, want the active transport %q", pm.Transport, sess.transport)
+				}
+			}
+		default:
+			if !sawAgentTransfer {
+				t.Error("an agent-dispatched runtime install emitted no Agent 'transferring' ProgressMsg — buildRegistry progress wiring is broken")
 			}
 			return
 		}

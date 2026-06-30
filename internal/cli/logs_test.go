@@ -38,3 +38,14 @@ func TestEventBody_ShowsDuration(t *testing.T) {
 		t.Errorf("serviced body should show elapsed; got %q", got)
 	}
 }
+
+func TestEventBody_StartedFallback(t *testing.T) {
+	// KindStarted is live-only; eventBody renders a stray on-disk line defensively,
+	// with a "?" type fallback.
+	if got := eventBody(activity.Event{Kind: activity.KindStarted, Type: "pip.install"}); !strings.Contains(got, "▸ pip.install …") {
+		t.Errorf("started body should show the type; got %q", got)
+	}
+	if got := eventBody(activity.Event{Kind: activity.KindStarted}); !strings.Contains(got, "▸ ? …") {
+		t.Errorf("started body with empty type should render the ? fallback; got %q", got)
+	}
+}
