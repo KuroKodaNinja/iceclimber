@@ -7,6 +7,7 @@ import (
 	"path"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
@@ -26,6 +27,7 @@ type Deps struct {
 	TrustedHost        string
 	ControllerPython   string
 	ControllerIndexURL string
+	Progress           progress.Func // optional operator-facing progress (nil = silent)
 }
 
 // Run locates the target runtime and installs the specs via the selected tier
@@ -33,6 +35,7 @@ type Deps struct {
 // failed — the whole request fails. A nil error with per-package failures in the
 // Outcome is the partial-success case (plan §4.3). Shared by CLI and handler.
 func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, tier string) (pkg.Outcome, error) {
+	d.Progress.Phase("resolving")
 	bin, err := python.Locate(ctx, d.FS, d.Root, pythonVersion, d.Arch, d.Libc)
 	if err != nil {
 		return pkg.Outcome{}, err
@@ -50,6 +53,7 @@ func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, ti
 		Libc:               d.Libc,
 		ControllerPython:   d.ControllerPython,
 		ControllerIndexURL: d.ControllerIndexURL,
+		Progress:           d.Progress,
 	})
 	if resolveTier(tier, d.IndexURL) == pkg.TierRelay {
 		return m.RelayInstall(ctx, specs, pythonVersion)

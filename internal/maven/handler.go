@@ -8,6 +8,7 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
@@ -25,6 +26,7 @@ type Deps struct {
 	ControllerRepository string // Tier-1: Popo-reachable Maven repository; empty = Central
 	CacheDir             string
 	HTTPClient           *http.Client
+	Progress             progress.Func
 }
 
 // Result is the maven.install response body: the resolved coordinates plus the
@@ -37,6 +39,7 @@ type Result struct {
 
 // Run locates the JDK and resolves the coordinates via the selected tier.
 func Run(ctx context.Context, d Deps, javaVersion string, specs []pkg.Spec, tier string) (Result, error) {
+	d.Progress.Phase("resolving")
 	javaBin, err := java.Locate(ctx, d.FS, d.Root, javaVersion, d.Arch, d.Libc)
 	if err != nil {
 		return Result{}, err

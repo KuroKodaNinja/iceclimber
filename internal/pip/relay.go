@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 )
@@ -58,7 +59,8 @@ func (m *Manager) RelayInstall(ctx context.Context, specs []pkg.Spec, minor stri
 	}
 	defer func() { _ = m.cfg.FS.RemoveAll(ctx, sandboxDir) }() // relayed wheels are transient
 	hashes := map[string]string{}
-	for _, w := range wheels {
+	for i, w := range wheels {
+		m.cfg.Progress.Emit(progress.Event{Phase: "transferring " + filepath.Base(w), Cur: int64(i + 1), Total: int64(len(wheels)), Unit: progress.Items})
 		data, err := os.ReadFile(w)
 		if err != nil {
 			return pkg.Outcome{}, err

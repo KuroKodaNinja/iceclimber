@@ -7,6 +7,7 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/node"
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
@@ -22,6 +23,7 @@ type Deps struct {
 	RegistryURL        string
 	ControllerNpm      string
 	ControllerRegistry string
+	Progress           progress.Func
 }
 
 // Result is the npm.install response body: the neutral install outcome plus the
@@ -34,6 +36,7 @@ type Result struct {
 
 // Run locates the Node runtime and installs the specs via the selected tier.
 func Run(ctx context.Context, d Deps, nodeVersion string, specs []pkg.Spec, tier string) (Result, error) {
+	d.Progress.Phase("resolving")
 	nodeBin, err := node.Locate(ctx, d.FS, d.Root, nodeVersion, d.Arch, d.Libc)
 	if err != nil {
 		return Result{}, err
@@ -56,6 +59,7 @@ func Run(ctx context.Context, d Deps, nodeVersion string, specs []pkg.Spec, tier
 	result := func(o pkg.Outcome) Result {
 		return Result{Installed: o.Installed, Failed: o.Failed, NodePath: m.cfg.NodePath}
 	}
+	d.Progress.Phase("installing")
 	if resolveTier(tier, d.RegistryURL) == pkg.TierRelay {
 		out, err := m.RelayInstall(ctx, specs)
 		if err != nil {

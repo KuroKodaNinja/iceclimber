@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 )
 
@@ -66,6 +67,29 @@ func (s scriptRunner) Run(_ context.Context, cmd string, _ io.Reader) (remote.Re
 	return s.fn(cmd)
 }
 func (s scriptRunner) Close() error { return nil }
+
+func TestInstall_ReportsPerPackageProgress(t *testing.T) {
+	var events []progress.Event
+	m := New(Config{
+		PythonBin: "/py",
+		IndexURL:  "https://idx/simple",
+		Runner:    scriptRunner{fn: func(string) (remote.Result, error) { return remote.Result{}, nil }},
+		Progress:  func(e progress.Event) { events = append(events, e) },
+	})
+	plan := pkg.Plan{Packages: []pkg.Resolved{{Name: "requests", Version: "2.0"}, {Name: "urllib3", Version: "2.2"}}}
+	if _, err := m.Install(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("got %d progress events, want one per package", len(events))
+	}
+	if events[0].Phase != "installing requests" || events[0].Cur != 1 || events[0].Total != 2 || events[0].Unit != progress.Items {
+		t.Errorf("first event = %+v, want installing requests (1/2) Items", events[0])
+	}
+	if events[1].Cur != 2 || events[1].Phase != "installing urllib3" {
+		t.Errorf("second event = %+v, want installing urllib3 (2/2)", events[1])
+	}
+}
 
 func TestInstall_PerPackageOutcome(t *testing.T) {
 	m := New(Config{

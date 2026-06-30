@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 )
@@ -32,6 +33,7 @@ type Config struct {
 	Libc               string
 	ControllerPython   string // operator's python on the controller (default python3)
 	ControllerIndexURL string // Popo-reachable index to download from (default PyPI)
+	Progress           progress.Func
 }
 
 // Manager installs pip packages into one runtime.
@@ -75,7 +77,8 @@ func (m *Manager) Resolve(ctx context.Context, specs []pkg.Spec) (pkg.Plan, erro
 // pull failure is attributable. --no-deps because resolution already happened.
 func (m *Manager) Install(ctx context.Context, plan pkg.Plan) (pkg.Outcome, error) {
 	var out pkg.Outcome
-	for _, p := range plan.Packages {
+	for i, p := range plan.Packages {
+		m.cfg.Progress.Emit(progress.Event{Phase: "installing " + p.Name, Cur: int64(i + 1), Total: int64(len(plan.Packages)), Unit: progress.Items})
 		res, err := m.cfg.Runner.Run(ctx, m.installCmd(p), nil)
 		switch {
 		case err != nil:
