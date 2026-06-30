@@ -252,6 +252,12 @@ a per-agent `run` script that sources the env and launches the harness with `NAN
 as persistent system context (`--append-system-prompt`) plus passthrough args. The
 agent-specific launch recipe is baked from the `Descriptor` at install time, so the
 sandbox scripts stay generic. The demo dogfoods it (`demo-agent.sh` → `$ICECLIMBER_HOME/nana`).
+`iceclimber agent wrap [name] [--bin <path>]` drops the **same** wrapper around a
+binary **already on the sandbox** with **no relay** (decision #67): `Install` and
+`Wrap` share `Installer.wire` (env + run + nana + verify); `Wrap` resolves the binary
+to an absolute path (`--bin`, else `command -v` over the sandbox) and skips the
+relay. `popo shellenv` prints a `brew shellenv`-style block (`ICECLIMBER_HOME` + PATH,
+no secrets) so an interactive sandbox shell runs `popo`/`nana` by name.
 Run headless (a print flag like `-p`, or non-tty), `nana` mirrors the agent's stream to
 `$ICECLIMBER_HOME/agent/<name>/session.log` (interactive runs keep their tty, not mirrored). The
 **serving process bridges** those logs to a controller-side `agent.log`

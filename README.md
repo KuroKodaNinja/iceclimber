@@ -209,6 +209,7 @@ operation the agent requests, with context, and you approve inline:
 | `install java <version>` | Provision a Temurin JDK (javac bundled) directly |
 | `install maven <group:artifact:version> --java <version>` | Resolve JVM deps into a classpath (Coursier) |
 | `agent install [claude]` · `agent list` | Relay a coding agent (Claude Code) into the sandbox + configure its subscription token; drops a `$ICECLIMBER_HOME/nana` launcher to start it (auth + NANA.md wired in) |
+| `agent wrap [claude] [--bin <path>]` | Wrap an agent binary **already on the sandbox** (pre-baked image / out-of-band install) with the same `nana`/auth/NANA.md launcher — **no relay**. Binary found on PATH by default, or pass `--bin` |
 | `web fetch <url>` | Run a fetch yourself (same gating) |
 | `skill print` / `skill path` | The `NANA.md` contract (`--protocol` for the raw `PROTOCOL.md`) |
 
@@ -227,6 +228,8 @@ Popo with the **`popo` client**, which `bootstrap` also relays into `<root>/popo
   "print(1)"`), never by bare name.
 - **Approvals:** if `popo` exits 2, Popo needs the operator to approve something —
   the agent relays the message and retries.
+- **Interactive shells:** `eval "$(<root>/popo shellenv)"` sets `ICECLIMBER_HOME` and
+  puts `<root>` on `PATH`, so `popo`/`nana` then run by name (à la `brew shellenv`).
 
 **File-I/O-only fallback.** A harness that *can't execute* `popo` can still drive the
 bridge with nothing but file read/write — the raw maildir protocol (envelope →
