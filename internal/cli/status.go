@@ -72,7 +72,7 @@ type statusSnapshot struct {
 	QueueOut     int    // requests awaiting service
 	QueueIn      int    // responses unread
 	Runtimes     []string
-	Caps         string // "has_exec=true, has_file_write=true" or "" if not reported
+	Caps         string // e.g. "Claude Code 1.2.3 · auth ✓ · linux/arm64 (glibc)", or "" if not reported
 }
 
 // collectStatus reads liveness, queue depth, installed runtimes (health-probed, all

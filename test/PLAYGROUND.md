@@ -44,11 +44,12 @@ req()  { printf '%s' "{\"schema_version\":1,\"id\":\"$1\",\"type\":\"$2\",\"crea
 resp() { for i in 1 2 3 4 5 6 7 8; do [ -f "inbox/new/$1.json" ] && { cat "inbox/new/$1.json"; echo; return; }; sleep 1; done; echo "(no response yet)"; }
 ```
 
-### 1. First action: report capabilities, then ping
+### 1. First action: ping
+
+(capabilities.json is written by the controller — host facts at bootstrap, the agent's
+identity on `agent install`/`wrap` — not by Nana; see PROTOCOL.md.)
 
 ```sh
-printf '%s' '{"has_exec":true,"has_file_write":true}' > capabilities.json
-
 req ping1 ping '{}'
 resp ping1            # {"status":"ok","result":{"pong_at":...,"popo_version":...}}
 

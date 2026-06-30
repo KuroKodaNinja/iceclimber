@@ -104,7 +104,7 @@ func (t Tree) BlobRef(name string) string {
 }
 
 // Skill holds the dropped skill docs (NANA.md + the PROTOCOL.md fallback);
-// Capabilities is Nana's optional self-report.
+// Capabilities is the sandbox self-report (written by the controller — see Capabilities).
 func (t Tree) Skill() string        { return path.Join(t.Root, "skill") }
 func (t Tree) SkillFile() string    { return path.Join(t.Skill(), "NANA.md") }
 func (t Tree) ProtocolFile() string { return path.Join(t.Skill(), "PROTOCOL.md") }
@@ -113,11 +113,11 @@ func (t Tree) Capabilities() string { return path.Join(t.protocolDir(), "capabil
 // CapabilitiesSchema is the version of the capabilities.json self-report.
 const CapabilitiesSchema = 1
 
-// Capabilities is Nana's self-report, written to Tree.Capabilities(): the sandbox
-// host facts (written by bootstrap) and the installed coding agent's identity
-// (written by agent install/wrap). The two blocks are updated independently via a
-// read-modify-write, so neither writer clobbers the other. The status panel renders
-// Summary().
+// Capabilities is the sandbox self-report, written to Tree.Capabilities() by the
+// CONTROLLER: the host facts (written by bootstrap) and the installed coding agent's
+// identity (written by agent install/wrap) — Nana itself writes nothing. The two
+// blocks are updated independently via a read-modify-write, so neither writer clobbers
+// the other. The status panel renders Summary().
 type Capabilities struct {
 	SchemaVersion int       `json:"schema_version"`
 	WrittenAt     string    `json:"written_at"`

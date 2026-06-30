@@ -68,11 +68,12 @@ advancing** across polls (not the timestamp — clocks differ). Back off ~2s, 5s
 30s; if `<seq>` hasn't advanced for ~2 minutes, tell the operator to run
 `iceclimber serve`.
 
-## Capabilities (optional, informational)
+## Capabilities (informational)
 
-You may write `$ICECLIMBER_HOME/protocol/capabilities.json` as your first action:
-`{ "has_exec": true, "has_file_write": true }`. Popo never depends on it; it only
-informs the operator's status view.
+`$ICECLIMBER_HOME/protocol/capabilities.json` is a self-report the **controller**
+writes — host facts at bootstrap, the installed agent's identity on `agent
+install`/`wrap` — to inform the operator's `status` view. **You don't write it**
+(doing so would overwrite the controller's blocks). Popo never depends on it.
 
 ## The verbs
 
