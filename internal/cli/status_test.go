@@ -72,3 +72,28 @@ func TestCollectStatus(t *testing.T) {
 		t.Errorf("Caps = %q, want empty (no capabilities.json written)", s.Caps)
 	}
 }
+
+// TestCollectStatus_CapsReported: once capabilities.json exists (bootstrap host block +
+// an installed agent), status reports the real self-report instead of "(not reported)".
+func TestCollectStatus_CapsReported(t *testing.T) {
+	ctx := context.Background()
+	runner := remotefstest.LocalRunner{}
+	fs := remotefs.NewExecFS(runner)
+	tree := protocol.Tree{Root: t.TempDir()}
+	if err := protocol.EnsureTree(ctx, fs, tree); err != nil {
+		t.Fatalf("EnsureTree: %v", err)
+	}
+	if err := protocol.WriteCapabilities(ctx, fs, tree, func(c *protocol.Capabilities) {
+		c.Host = protocol.CapHost{OS: "linux", Arch: "arm64", Libc: "musl"}
+		c.Agent = &protocol.CapAgent{Name: "claude", DisplayName: "Claude Code", Version: "1.2.3", AuthConfigured: true}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := collectStatus(ctx, fs, runner, tree)
+	for _, want := range []string{"Claude Code 1.2.3", "auth ✓", "linux/arm64 (musl)"} {
+		if !strings.Contains(s.Caps, want) {
+			t.Errorf("Caps = %q, want substring %q", s.Caps, want)
+		}
+	}
+}

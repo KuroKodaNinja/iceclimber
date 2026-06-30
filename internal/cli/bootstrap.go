@@ -140,6 +140,14 @@ func provision(ctx context.Context, sess *session) error {
 	if err := sess.fs.WriteFile(ctx, sess.tree.ProtocolFile(), []byte(skill.ProtocolMD)); err != nil {
 		return fmt.Errorf("write PROTOCOL.md: %w", err)
 	}
+	// Record the host facts in the capabilities self-report so `status` shows the real
+	// platform instead of "(not reported)" even before an agent is installed. Preserves
+	// any existing agent block (read-modify-write).
+	if err := protocol.WriteCapabilities(ctx, sess.fs, sess.tree, func(c *protocol.Capabilities) {
+		c.Host = protocol.CapHost{OS: sess.fp.OS, Arch: sess.fp.Arch, Libc: sess.fp.Libc.Family}
+	}); err != nil {
+		return fmt.Errorf("write capabilities: %w", err)
+	}
 	if err := dropPopo(ctx, sess); err != nil {
 		return err
 	}

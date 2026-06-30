@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path"
 	"strings"
@@ -110,14 +109,10 @@ func collectStatus(ctx context.Context, fs remotefs.FS, runner remote.Runner, tr
 			s.Runtimes = append(s.Runtimes, lang+" "+n+" "+mark)
 		}
 	}
-	if data, err := fs.ReadFile(ctx, tree.Capabilities()); err == nil {
-		var c struct {
-			HasExec      bool `json:"has_exec"`
-			HasFileWrite bool `json:"has_file_write"`
-		}
-		if json.Unmarshal(data, &c) == nil {
-			s.Caps = fmt.Sprintf("has_exec=%v, has_file_write=%v", c.HasExec, c.HasFileWrite)
-		}
+	// The agent's self-report (host facts from bootstrap + the installed agent's
+	// identity); absent/corrupt → "" → the panel shows "(not reported)".
+	if c, err := protocol.ReadCapabilities(ctx, fs, tree); err == nil && c != nil {
+		s.Caps = c.Summary()
 	}
 	return s
 }

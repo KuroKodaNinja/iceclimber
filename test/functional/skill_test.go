@@ -30,14 +30,16 @@ func TestSkillAndStatus(t *testing.T) {
 		t.Errorf("dropped NANA.md differs from skill print (%d vs %d bytes)", len(inSandbox), len(printed))
 	}
 
-	// Install a runtime, write capabilities by hand, stamp the heartbeat.
+	// Install a runtime and stamp the heartbeat. Bootstrap already wrote the host
+	// capabilities block (no hand-written file needed), so status reports the real
+	// self-report — "no agent yet" + the host facts — instead of "(not reported)".
 	runIceclimber(t, "install", "python", "3.12", "--config", cfg, "--transport", "sftp")
-	limaSh(t, fmt.Sprintf(`printf '%%s' '{"has_exec":true,"has_file_write":true}' > %s/protocol/capabilities.json`, root))
 	runIceclimber(t, "serve", "--once", "--config", cfg, "--transport", "sftp")
 
 	out := string(runIceclimber(t, "status", "--config", cfg, "--transport", "sftp"))
-	// status lists installed runtimes for all languages under one "runtimes:" line.
-	for _, want := range []string{"heartbeat: seq", "runtimes:  python 3.12", "has_exec=true"} {
+	// status lists installed runtimes for all languages under one "runtimes:" line; the
+	// agent line shows the bootstrap-written host facts (this is the musl sandbox).
+	for _, want := range []string{"heartbeat: seq", "runtimes:  python 3.12", "no agent yet", "musl"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status missing %q:\n%s", want, out)
 		}
