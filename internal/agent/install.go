@@ -94,32 +94,72 @@ func (i *Installer) Install(ctx context.Context, d Descriptor, token string) (Re
 		return Result{}, fmt.Errorf("chmod agent binary: %w", err)
 	}
 
-	res := Result{Agent: d.Name, Version: version, Bin: binPath, Dir: dir}
+	res, err := i.wire(ctx, d, token, dir, binPath)
+	res.Version = version // the relayed package's version (wire doesn't know it)
+	return res, err
+}
+
+// Wrap drops the iceclimber wrapper (auth env + run launcher + nana dispatcher)
+// around an agent binary that is ALREADY on the sandbox — no relay. binPath, when
+// empty, is resolved from the descriptor's Bin via `command -v` over the sandbox
+// (so an absolute path is baked into the launcher, not a name resolved against
+// whatever PATH the run shell happens to have); pass an explicit path otherwise.
+func (i *Installer) Wrap(ctx context.Context, d Descriptor, token, binPath string) (Result, error) {
+	if binPath == "" {
+		p, err := i.locateBin(ctx, d.Bin)
+		if err != nil {
+			return Result{}, err
+		}
+		binPath = p
+	}
+	dir := path.Join(i.cfg.Root, "agent", d.Name)
+	if err := i.cfg.FS.Mkdir(ctx, dir); err != nil {
+		return Result{}, fmt.Errorf("create agent dir: %w", err)
+	}
+	return i.wire(ctx, d, token, dir, binPath)
+}
+
+// locateBin resolves bin to an absolute path on the sandbox via `command -v`.
+func (i *Installer) locateBin(ctx context.Context, bin string) (string, error) {
+	res, err := i.cfg.Runner.Run(ctx, "command -v "+remote.ShellQuote(bin), nil)
+	if err != nil {
+		return "", err
+	}
+	p := strings.TrimSpace(string(res.Stdout))
+	if res.ExitCode != 0 || p == "" {
+		return "", fmt.Errorf("no %q found on the sandbox PATH; pass --bin <path>", bin)
+	}
+	return p, nil
+}
+
+// wire writes the per-agent auth env (when a token is given), the `run` launcher
+// (NANA.md wired in as system context), and the generic `nana` dispatcher, then
+// verifies binPath runs. Shared by Install (after the relay) and Wrap (no relay).
+// NANA.md is dropped by bootstrap; the launcher warns if it's absent (install/wrap
+// may precede bootstrap).
+func (i *Installer) wire(ctx context.Context, d Descriptor, token, dir, binPath string) (Result, error) {
+	res := Result{Agent: d.Name, Bin: binPath, Dir: dir}
 
 	if token != "" {
 		envFile := path.Join(dir, "env.sh")
 		if err := i.writeSecret(ctx, envFile, renderEnv(d, token, dir, i.cfg.Root)); err != nil {
-			return Result{}, fmt.Errorf("write agent env: %w", err)
+			return res, fmt.Errorf("write agent env: %w", err)
 		}
 		res.EnvFile = envFile
 		res.AuthConfigured = true
 	}
 
-	// The per-agent launcher + the generic `nana` dispatcher. NANA.md is dropped by
-	// bootstrap at <root>/skill/NANA.md; the launcher injects it as system context
-	// when present (and warns otherwise — install may precede bootstrap).
-	nanaPath := path.Join(i.cfg.Root, "skill", "NANA.md")
-	if err := i.writeExec(ctx, path.Join(dir, "run"), renderRun(d, dir, binPath, nanaPath)); err != nil {
-		return Result{}, fmt.Errorf("write agent launcher: %w", err)
+	if err := i.writeExec(ctx, path.Join(dir, "run"), renderRun(d, dir, binPath, path.Join(i.cfg.Root, "skill", "NANA.md"))); err != nil {
+		return res, fmt.Errorf("write agent launcher: %w", err)
 	}
 	launcher := path.Join(i.cfg.Root, "nana")
 	if err := i.writeExec(ctx, launcher, renderDispatcher(i.cfg.Root)); err != nil {
-		return Result{}, fmt.Errorf("write nana launcher: %w", err)
+		return res, fmt.Errorf("write nana launcher: %w", err)
 	}
 	res.Launcher = launcher
 
 	if err := i.verify(ctx, binPath, d); err != nil {
-		return res, fmt.Errorf("installed %s failed to run: %w", d.Bin, err)
+		return res, fmt.Errorf("%s failed to run: %w", d.Bin, err)
 	}
 	return res, nil
 }

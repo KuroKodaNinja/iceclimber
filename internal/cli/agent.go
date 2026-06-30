@@ -17,7 +17,7 @@ func newAgentCmd() *cobra.Command {
 		Use:   "agent",
 		Short: "Install and manage coding agents in the sandbox (Claude Code today)",
 	}
-	cmd.AddCommand(newAgentInstallCmd(), newAgentListCmd())
+	cmd.AddCommand(newAgentInstallCmd(), newAgentWrapCmd(), newAgentListCmd())
 	return cmd
 }
 
@@ -102,6 +102,75 @@ func newAgentInstallCmd() *cobra.Command {
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "read the auth token from this file (a shell 'export VAR=...' line or a bare token)")
 	cmd.Flags().BoolVar(&skipAuth, "skip-auth", false, "install the agent CLI without configuring an auth token")
+	return cmd
+}
+
+func newAgentWrapCmd() *cobra.Command {
+	var transport, tokenFile, bin string
+	var skipAuth bool
+	cmd := &cobra.Command{
+		Use:   "wrap [name]",
+		Short: "Wrap an agent binary already on the sandbox with the iceclimber launcher (no relay)",
+		Long: "Drops just the iceclimber wrapper — the auth env, the `run` launcher (NANA.md\n" +
+			"wired in), and the `nana` dispatcher — around an agent binary that is ALREADY\n" +
+			"present on the sandbox (a pre-baked image, or one installed out of band). Unlike\n" +
+			"`install`, it relays nothing. The binary is found on the sandbox PATH by default\n" +
+			"(resolved to an absolute path); pass --bin for an explicit path. Auth + token\n" +
+			"handling are identical to `install`.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := agent.Claude.Name
+			if len(args) == 1 {
+				name = args[0]
+			}
+			d, ok := agent.Lookup(name)
+			if !ok {
+				return fmt.Errorf("unknown agent %q (known: %s)", name, strings.Join(agent.Names(), ", "))
+			}
+
+			token := ""
+			if !skipAuth {
+				t, err := resolveAgentToken(d, tokenFile)
+				if err != nil {
+					return err
+				}
+				token = t
+			}
+
+			cfg, err := config.Load(cfgFile, sandboxID)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
+			defer cancel()
+
+			sess, err := openSession(ctx, cfg, transport)
+			if err != nil {
+				return err
+			}
+			defer sess.Close()
+
+			res, err := newAgentInstaller(sess).Wrap(ctx, d, token, bin)
+			if err != nil {
+				return err
+			}
+
+			w := cmd.OutOrStdout()
+			fmt.Fprintf(w, "wrapped %s (%s)\n", d.DisplayName, d.Name)
+			fmt.Fprintf(w, "  agent:  %s   (already on the sandbox — not relayed)\n", res.Bin)
+			if res.AuthConfigured {
+				fmt.Fprintf(w, "  auth:   configured (%s) → %s\n", d.TokenEnv, res.EnvFile)
+			} else {
+				fmt.Fprintf(w, "  auth:   skipped — set %s before running the agent\n", d.TokenEnv)
+			}
+			fmt.Fprintf(w, "  launch: %s   (run in the sandbox — starts the agent, wired to NANA.md)\n", res.Launcher)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
+	cmd.Flags().StringVar(&bin, "bin", "", "absolute path to the agent binary on the sandbox (default: found on PATH)")
+	cmd.Flags().StringVar(&tokenFile, "token-file", "", "read the auth token from this file (a shell 'export VAR=...' line or a bare token)")
+	cmd.Flags().BoolVar(&skipAuth, "skip-auth", false, "wrap the agent without configuring an auth token")
 	return cmd
 }
 
