@@ -1,11 +1,11 @@
 package main
 
 import (
-	"strings"
 	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,7 +90,7 @@ func TestPrintResult(t *testing.T) {
 func TestRequestRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	tree := wire.Tree{Root: root}
-	for _, d := range []string{tree.Outbox().Tmp(), tree.Outbox().New(), tree.Inbox().New()} {
+	for _, d := range []string{tree.Outbox().Tmp(), tree.Outbox().New(), tree.Inbox().New(), tree.Inbox().Cur()} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -120,6 +120,76 @@ func TestRequestRoundTrip(t *testing.T) {
 	}
 	if resp.Status != wire.StatusOK || resp.ID == "" {
 		t.Fatalf("response = %+v, want ok with an id", resp)
+	}
+	// await auto-collects: the response is moved out of inbox/new into inbox/cur so Popo
+	// can prune the pair and inbox/new reflects only uncollected mail.
+	name := wire.RequestName(resp.ID)
+	if _, err := os.Stat(filepath.Join(tree.Inbox().New(), name)); !os.IsNotExist(err) {
+		t.Error("await should have collected the response out of inbox/new")
+	}
+	if _, err := os.Stat(filepath.Join(tree.Inbox().Cur(), name)); err != nil {
+		t.Errorf("collected response should be in inbox/cur: %v", err)
+	}
+}
+
+func TestCollect_MovesResponse(t *testing.T) {
+	root := t.TempDir()
+	tree := wire.Tree{Root: root}
+	for _, d := range []string{tree.Inbox().New(), tree.Inbox().Cur()} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	name := wire.RequestName("01TESTID")
+	if err := os.WriteFile(filepath.Join(tree.Inbox().New(), name), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := collect(tree, name); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tree.Inbox().New(), name)); !os.IsNotExist(err) {
+		t.Error("collect should remove the response from inbox/new")
+	}
+	if _, err := os.Stat(filepath.Join(tree.Inbox().Cur(), name)); err != nil {
+		t.Errorf("collect should place the response in inbox/cur: %v", err)
+	}
+}
+
+func TestAwait_CollectFailureNonFatal(t *testing.T) {
+	// inbox/cur intentionally absent → the auto-collect rename fails, but await must still
+	// return the response (collection is best-effort; a failed collect just leaves it
+	// counted as uncollected).
+	root := t.TempDir()
+	tree := wire.Tree{Root: root}
+	for _, d := range []string{tree.Outbox().Tmp(), tree.Outbox().New(), tree.Inbox().New()} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = os.WriteFile(tree.Heartbeat(), []byte("1 t"), 0o644)
+	go func() {
+		for {
+			entries, _ := os.ReadDir(tree.Outbox().New())
+			for _, e := range entries {
+				data, _ := os.ReadFile(filepath.Join(tree.Outbox().New(), e.Name()))
+				var req wire.Request
+				if json.Unmarshal(data, &req) != nil {
+					continue
+				}
+				resp, _ := json.Marshal(wire.OK(req.ID, map[string]any{"popo_version": "test"}))
+				_ = os.WriteFile(filepath.Join(tree.Inbox().New(), e.Name()), resp, 0o644)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	resp, err := request(root, "ping", nil)
+	if err != nil {
+		t.Fatalf("await must return the response even when collect fails: %v", err)
+	}
+	if resp.Status != wire.StatusOK {
+		t.Errorf("response = %+v, want ok", resp)
 	}
 }
 

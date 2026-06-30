@@ -43,6 +43,26 @@ func main() {
 		return
 	}
 
+	// collect is local-only: mark a response collected (inbox/new -> inbox/cur) so Popo's
+	// GC can prune the pair. The normal request/await flow does this automatically; this
+	// verb is for collecting a response read out-of-band.
+	if verb == "collect" {
+		if len(rest) != 1 {
+			fmt.Fprintf(os.Stderr, "popo collect <id>\n")
+			os.Exit(1)
+		}
+		root, err := resolveRoot()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "popo: %v\n", err)
+			os.Exit(1)
+		}
+		if err := collect(wire.Tree{Root: root}, wire.RequestName(rest[0])); err != nil {
+			fmt.Fprintf(os.Stderr, "popo collect: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if _, ok := verbs[verb]; !ok {
 		fmt.Fprintf(os.Stderr, "popo: unknown verb %q (run `popo help`)\n", verb)
 		os.Exit(1)
@@ -77,6 +97,7 @@ var verbs = map[string]string{
 	"java.install":   "popo java.install <feature>             e.g. 21",
 	"maven.install":  "popo maven.install --java <feature> <group:artifact:version>...",
 	"web.fetch":      "popo web.fetch <url> [--method M] [--header K:V]... [--body STR]",
+	"collect":        "popo collect <id>                       mark a response collected (usually automatic)",
 	"shellenv":       "popo shellenv                           eval \"$(./popo shellenv)\" — popo/nana on PATH",
 }
 
@@ -151,6 +172,7 @@ func await(tree wire.Tree, name string) (wire.Response, error) {
 			if err := json.Unmarshal(data, &r); err != nil {
 				return wire.Response{}, fmt.Errorf("parse response: %w", err)
 			}
+			_ = collect(tree, name) // best-effort: collected so Popo can prune; response still returned
 			return r, nil
 		}
 		if seq := heartbeatSeq(tree); seq != "" && seq != lastSeq {
@@ -168,6 +190,16 @@ func await(tree wire.Tree, name string) (wire.Response, error) {
 		}
 		time.Sleep(d)
 	}
+}
+
+// collect marks a response collected by moving it inbox/new -> inbox/cur, so Popo's GC
+// can prune the request/response pair and inbox/new reflects only uncollected mail. Done
+// automatically by await; exposed explicitly via `popo collect <id>`.
+func collect(tree wire.Tree, name string) error {
+	return os.Rename(
+		filepath.Join(tree.Inbox().New(), name),
+		filepath.Join(tree.Inbox().Cur(), name),
+	)
 }
 
 func heartbeatSeq(tree wire.Tree) string {
