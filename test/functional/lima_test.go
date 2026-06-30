@@ -187,10 +187,10 @@ func keyscanToFile(host string, port int) (string, error) {
 	return "", lastErr
 }
 
-// writeConfig writes a real iceclimber.yaml pointing at the sandbox.
-func writeConfig(t *testing.T, sb sandboxConn) string {
-	t.Helper()
-	content := fmt.Sprintf(`sandbox_id: %s
+// sshConfigYAML renders the sandbox_id + ssh block, keyed to sb.Name — the one place
+// the ssh fields live, so the various config writers can't drift.
+func sshConfigYAML(sb sandboxConn) string {
+	return fmt.Sprintf(`sandbox_id: %s
 ssh:
   host: %s
   port: %d
@@ -198,13 +198,21 @@ ssh:
   identity_file: %s
   known_hosts: %s
   use_ssh_config: false
-`, sandboxName, sb.Host, sb.Port, sb.User, sb.IdentityFile, sb.KnownHosts)
+`, sb.Name, sb.Host, sb.Port, sb.User, sb.IdentityFile, sb.KnownHosts)
+}
+
+// writeYAML writes content to a fresh temp iceclimber.yaml and returns its path.
+func writeYAML(t *testing.T, content string) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "iceclimber.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
 }
+
+// writeConfig writes a real iceclimber.yaml pointing at the sandbox (no remote_root).
+func writeConfig(t *testing.T, sb sandboxConn) string { return writeConfigFor(t, sb, "") }
 
 // runIceclimber runs the built binary and fails the test on a non-zero exit.
 func runIceclimber(t *testing.T, args ...string) []byte {
@@ -243,23 +251,10 @@ func scheduleRootCleanupOn(t *testing.T, name, root string) {
 // schedules its cleanup; an empty root omits it (e.g. for a probe-only test).
 func writeConfigFor(t *testing.T, sb sandboxConn, root string) string {
 	t.Helper()
-	var b strings.Builder
-	fmt.Fprintf(&b, `sandbox_id: %s
-ssh:
-  host: %s
-  port: %d
-  user: %s
-  identity_file: %s
-  known_hosts: %s
-  use_ssh_config: false
-`, sb.Name, sb.Host, sb.Port, sb.User, sb.IdentityFile, sb.KnownHosts)
+	c := sshConfigYAML(sb)
 	if root != "" {
-		fmt.Fprintf(&b, "remote_root: %s\n", root)
+		c += fmt.Sprintf("remote_root: %s\n", root)
 		scheduleRootCleanupOn(t, sb.Name, root)
 	}
-	path := filepath.Join(t.TempDir(), "iceclimber.yaml")
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return path
+	return writeYAML(t, c)
 }

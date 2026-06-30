@@ -5,9 +5,6 @@ package functional
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -79,21 +76,5 @@ func TestPingPong(t *testing.T) {
 // writeConfigRoot writes a config pinned to a specific remote_root, so each E2E
 // run gets an isolated tree and bootstrap/serve skip root probing.
 func writeConfigRoot(t *testing.T, sb sandboxConn, root string) string {
-	t.Helper()
-	content := fmt.Sprintf(`sandbox_id: %s
-ssh:
-  host: %s
-  port: %d
-  user: %s
-  identity_file: %s
-  known_hosts: %s
-  use_ssh_config: false
-remote_root: %s
-`, sandboxName, sb.Host, sb.Port, sb.User, sb.IdentityFile, sb.KnownHosts, root)
-	path := filepath.Join(t.TempDir(), "iceclimber.yaml")
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	scheduleRootCleanup(t, root)
-	return path
+	return writeConfigFor(t, sb, root)
 }

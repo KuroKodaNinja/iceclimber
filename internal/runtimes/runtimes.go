@@ -25,6 +25,12 @@ const (
 // Langs are the languages a source can be chosen for, in display order.
 var Langs = []string{"python", "node", "java"}
 
+// SystemSupported reports whether ModeSystem (use a pre-existing runtime) is
+// implemented for lang. Only python (venv) is wired today; node/java system mode is
+// future work, so we reject it at choose-time rather than persist a no-op that fails
+// confusingly at install.
+func SystemSupported(lang string) bool { return lang == "python" }
+
 // Source is the chosen origin for one language's runtime.
 type Source struct {
 	Mode Mode `json:"mode"`
@@ -49,9 +55,10 @@ func (s Sources) Of(lang string) Source {
 // validMode reports whether m is a recognized mode (empty is treated as unset).
 func validMode(m Mode) bool { return m == ModeManaged || m == ModeSystem }
 
-// ParseFlag parses a `--runtime-source` value: a comma-separated list of
-// lang=mode[:path] pairs, e.g. "python=system,node=managed". An empty string yields
-// an empty Sources. Unknown langs or modes are an error.
+// ParseFlag parses a `--runtime-source` value: a comma-separated list of lang=mode
+// pairs, e.g. "python=system,node=managed". An empty string yields an empty Sources.
+// Unknown langs/modes (or system mode for an unsupported lang) are an error. A
+// system interpreter path is set in config, not on the flag.
 func ParseFlag(s string) (Sources, error) {
 	out := Sources{}
 	s = strings.TrimSpace(s)
@@ -74,6 +81,9 @@ func ParseFlag(s string) (Sources, error) {
 		mode := Mode(strings.TrimSpace(v))
 		if !validMode(mode) {
 			return nil, fmt.Errorf("runtime-source %s: unknown mode %q (want managed or system)", lang, v)
+		}
+		if mode == ModeSystem && !SystemSupported(lang) {
+			return nil, fmt.Errorf("runtime-source %s=system is not supported yet (only python); use managed", lang)
 		}
 		out[lang] = Source{Mode: mode}
 	}

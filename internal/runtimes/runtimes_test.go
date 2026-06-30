@@ -29,6 +29,21 @@ func TestParseFlag(t *testing.T) {
 	if _, err := ParseFlag("python"); err == nil {
 		t.Error("missing = should error")
 	}
+	if _, err := ParseFlag("node=system"); err == nil {
+		t.Error("system mode for an unsupported lang (node) should error")
+	}
+	if _, err := ParseFlag("node=managed"); err != nil {
+		t.Errorf("node=managed should be accepted: %v", err)
+	}
+}
+
+func TestSystemSupported(t *testing.T) {
+	if !SystemSupported("python") {
+		t.Error("python should support system mode")
+	}
+	if SystemSupported("node") || SystemSupported("java") {
+		t.Error("node/java system mode is not implemented yet")
+	}
 }
 
 func TestResolvePrecedence(t *testing.T) {
@@ -71,6 +86,13 @@ func TestResolveDefaultsAndPrompt(t *testing.T) {
 	}
 	if got["node"].Mode != ModeManaged {
 		t.Errorf("node = %v, want managed (not detected, not prompted)", got["node"].Mode)
+	}
+
+	// Operator declines at the prompt (returns an empty Source) → managed default.
+	declined := Resolve(nil, nil, nil, map[string]bool{"python": true},
+		func(string) Source { return Source{} })
+	if declined["python"].Mode != ModeManaged {
+		t.Errorf("declined prompt → %v, want managed", declined["python"].Mode)
 	}
 }
 

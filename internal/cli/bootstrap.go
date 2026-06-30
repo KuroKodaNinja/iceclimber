@@ -87,7 +87,11 @@ func resolveAndPersistRuntimes(cmd *cobra.Command, cfg *config.Config, fp *probe
 	}
 	detected := map[string]bool{}
 	for _, rt := range fp.Runtimes {
-		detected[rt.Lang] = true
+		// Only offer a choice for languages whose system mode is implemented — else
+		// we'd prompt for / persist a node/java=system that install can't honor.
+		if runtimes.SystemSupported(rt.Lang) {
+			detected[rt.Lang] = true
+		}
 	}
 
 	var prompt func(string) runtimes.Source

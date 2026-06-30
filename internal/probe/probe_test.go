@@ -112,6 +112,16 @@ func TestDetectRuntimes(t *testing.T) {
 			t.Errorf("want no runtimes, got %+v", rts)
 		}
 	})
+
+	t.Run("present but unparseable version", func(t *testing.T) {
+		rts := detectRuntimes(map[string]string{"PY_PATH": "/usr/bin/python3", "PY_VER": "garbage"})
+		if len(rts) != 1 || rts[0].Path != "/usr/bin/python3" || rts[0].Version != "" {
+			t.Errorf("want python with empty Version (raw kept), got %+v", rts)
+		}
+		if rts[0].VersionRaw != "garbage" {
+			t.Errorf("VersionRaw should keep the raw line, got %q", rts[0].VersionRaw)
+		}
+	})
 }
 
 func TestParseRuntimeVersions(t *testing.T) {

@@ -40,18 +40,20 @@ type Deps struct {
 // passthrough, not arbitrary). Value-taking flags consume their following token; the
 // agent cannot pass bare positionals or unlisted flags. This is what makes complex
 // installs like PyTorch (--index-url) possible without handing the agent a shell.
+// The allowlist is deliberately narrow: index/version-selection flags (what PyTorch
+// and friends need), not build-behavior flags. --no-binary / --no-build-isolation are
+// excluded — they force sdist builds (setup.py code-exec) and --no-binary conflicts
+// with the relay download's --only-binary; add them only if a real need appears.
 var extraArgAllow = map[string]pkg.FlagSpec{
-	"--index-url":          {TakesValue: true},
-	"-i":                   {TakesValue: true},
-	"--extra-index-url":    {TakesValue: true},
-	"--find-links":         {TakesValue: true},
-	"-f":                   {TakesValue: true},
-	"--trusted-host":       {TakesValue: true},
-	"--pre":                {},
-	"--no-binary":          {TakesValue: true},
-	"--only-binary":        {TakesValue: true},
-	"--prefer-binary":      {},
-	"--no-build-isolation": {},
+	"--index-url":       {TakesValue: true},
+	"-i":                {TakesValue: true},
+	"--extra-index-url": {TakesValue: true},
+	"--find-links":      {TakesValue: true},
+	"-f":                {TakesValue: true},
+	"--trusted-host":    {TakesValue: true},
+	"--pre":             {},
+	"--only-binary":     {TakesValue: true},
+	"--prefer-binary":   {},
 }
 
 // Run locates the target runtime and installs the specs via the selected tier

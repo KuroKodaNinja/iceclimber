@@ -274,7 +274,7 @@ context. To learn the protocol by hand, see [`test/PLAYGROUND.md`](test/PLAYGROU
 |---|---|
 | `ping` | Liveness check (`pong`) |
 | `python.install` | A portable Python (python-build-standalone), run by absolute path |
-| `pip.install` | Python packages — from a sandbox-reachable mirror (Tier 0) or relayed in by Popo for air-gapped boxes (Tier 1). Accepts allowlisted `extra_args` (e.g. `--index-url`, `--pre`) so complex installs like PyTorch work |
+| `pip.install` | Python packages — from a sandbox-reachable mirror (Tier 0) or relayed in by Popo for air-gapped boxes (Tier 1). Accepts allowlisted `extra_args` (index/version-selection flags only — `--index-url`, `--extra-index-url`, `--pre`, `-f`, …; no build-behavior flags, no shell). In **relay** mode an agent `--index-url` directs the **controller's** download to that index — a deliberate capability (PyTorch's wheel index) but not covered by the web.fetch egress gate, so it's an allowlist, not arbitrary passthrough |
 | `node.install` | A portable Node.js runtime (npm bundled), run by absolute path |
 | `npm.install` | npm packages (Tier 0 mirror / Tier 1 relay); returns a `NODE_PATH` to `require()` them |
 | `java.install` | A portable Temurin JDK (javac bundled), run by absolute path |

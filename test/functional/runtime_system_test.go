@@ -3,10 +3,10 @@
 package functional
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -51,6 +51,36 @@ func TestSystemPythonVenvInstall(t *testing.T) {
 	}
 }
 
+// TestSystemPythonVersionMismatchFails proves the headline safety guarantee end to
+// end: in system mode, requesting a python the box doesn't have fails clearly and
+// never mutates the system toolchain — iceclimber uses what's there or refuses.
+func TestSystemPythonVersionMismatchFails(t *testing.T) {
+	sb := requireGlibcSandbox(t)
+	minor := systemPythonMinor(t, sb) // e.g. "3.12"
+	if minor == "3.11" {
+		t.Skip("box already has 3.11; need a version it lacks for the mismatch")
+	}
+	root := "/tmp/iceclimber-mismatch-" + protocol.NewID()
+	cfg := writeSystemPythonConfig(t, sb, root)
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
+
+	var stderr bytes.Buffer
+	cmd := exec.Command(iceclimberBin, "install", "pip", "six",
+		"--config", cfg, "--transport", "sftp", "--python", "3.11") // box has 3.12, not 3.11
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		t.Fatal("requesting a python version the box lacks should fail in system mode")
+	}
+	if !strings.Contains(stderr.String(), minor) {
+		t.Errorf("error should name the system version %s; got: %s", minor, stderr.String())
+	}
+	// The venv for the wrong version must NOT have been created.
+	chk := limaShOn(t, sb.Name, "[ -d "+root+"/envs/python-3.11 ] && echo exists || echo absent")
+	if !strings.Contains(chk, "absent") {
+		t.Errorf("a venv for the unavailable version should not exist: %q", chk)
+	}
+}
+
 // systemPythonMinor probes the glibc box for its system python's "<maj>.<min>".
 func systemPythonMinor(t *testing.T, sb sandboxConn) string {
 	t.Helper()
@@ -70,26 +100,10 @@ func systemPythonMinor(t *testing.T, sb sandboxConn) string {
 	return parts[0] + "." + parts[1]
 }
 
-// writeSystemPythonConfig writes a config pinning python to the system source.
+// writeSystemPythonConfig writes a config pinning python to the system source
+// (shared ssh block + remote_root, plus the runtimes override).
 func writeSystemPythonConfig(t *testing.T, sb sandboxConn, root string) string {
 	t.Helper()
-	content := fmt.Sprintf(`sandbox_id: %s
-ssh:
-  host: %s
-  port: %d
-  user: %s
-  identity_file: %s
-  known_hosts: %s
-  use_ssh_config: false
-remote_root: %s
-runtimes:
-  python:
-    source: system
-`, sb.Name, sb.Host, sb.Port, sb.User, sb.IdentityFile, sb.KnownHosts, root)
-	path := filepath.Join(t.TempDir(), "iceclimber.yaml")
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	scheduleRootCleanupOn(t, sb.Name, root)
-	return path
+	return writeYAML(t, sshConfigYAML(sb)+fmt.Sprintf("remote_root: %s\nruntimes:\n  python:\n    source: system\n", root))
 }

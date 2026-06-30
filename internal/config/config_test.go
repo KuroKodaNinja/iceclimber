@@ -145,6 +145,12 @@ runtimes:
 	if _, err := Load(bad, ""); err == nil {
 		t.Error("an invalid runtimes source should be rejected")
 	}
+
+	// system mode is python-only for now; node/java=system must be rejected, not a no-op.
+	nodeSys := writeTemp(t, "sandbox_id: box-1\nssh:\n  host: prod\nruntimes:\n  node:\n    source: system\n")
+	if _, err := Load(nodeSys, ""); err == nil {
+		t.Error("node source=system should be rejected (only python supports system mode)")
+	}
 }
 
 func TestLoad_SandboxMismatch(t *testing.T) {
