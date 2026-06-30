@@ -3,9 +3,45 @@ package cli
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
+
+// TestSessionHolder_ConcurrentGetSet locks in the documented race-safety: the
+// supervisor Sets a fresh session on reconnect while consoleOps + the bridge Get the
+// current one. Run under -race; the assertion is "no data race / no panic".
+func TestSessionHolder_ConcurrentGetSet(t *testing.T) {
+	h := &sessionHolder{}
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+				h.Set(&session{sandboxID: "s"})
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = h.Get()
+			}
+		}
+	}()
+	time.Sleep(50 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+}
 
 // fakeCache records the supervisor's Commit/Forget decisions.
 type fakeCache struct{ commits, forgets int }
@@ -53,6 +89,39 @@ func TestSupervisor_TransientThenReconnect(t *testing.T) {
 	want := []time.Duration{reconnectBackoffInitial, 2 * reconnectBackoffInitial}
 	if len(sleeps) != len(want) || sleeps[0] != want[0] || sleeps[1] != want[1] {
 		t.Errorf("backoff schedule = %v, want %v", sleeps, want)
+	}
+}
+
+// TestSupervisor_BackoffResetsAfterHealthyCycle: a successful connect (Commit) resets
+// the backoff, so a drop after a healthy cycle starts over at 1s rather than continuing
+// to grow. Guards the `backoff, attempt = initial, 0` reset against silent regression.
+func TestSupervisor_BackoffResetsAfterHealthyCycle(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cache := &fakeCache{}
+	var sleeps []time.Duration
+	calls := 0
+	cycle := func(_ context.Context, _ int) (bool, error) {
+		calls++
+		switch calls {
+		case 1, 2:
+			return false, errors.New("connection reset by peer") // grows backoff: 1s, 2s
+		case 3:
+			return true, nil // connected + served a full cycle, then ended cleanly → reset
+		default:
+			cancel()
+			return false, context.Canceled
+		}
+	}
+	if err := runSupervisor(ctx, cache, cycle, nil, instantSleep(&sleeps)); err != nil {
+		t.Fatal(err)
+	}
+	want := []time.Duration{reconnectBackoffInitial, 2 * reconnectBackoffInitial, reconnectBackoffInitial}
+	if len(sleeps) < 3 || sleeps[0] != want[0] || sleeps[1] != want[1] || sleeps[2] != want[2] {
+		t.Errorf("backoff did not reset after a healthy cycle: got %v, want prefix %v", sleeps, want)
+	}
+	if cache.commits != 1 {
+		t.Errorf("commits=%d, want 1 (the healthy cycle commits the password)", cache.commits)
 	}
 }
 

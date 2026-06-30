@@ -528,14 +528,18 @@ func splitSpecs(s string) []string {
 // the interactive console — serving the sandbox and handling approvals inline.
 // Returns when the operator quits.
 //
-// Lifecycle: one session is shared by the background Serve loop and the operator
-// actions (consoleOps). The dispatcher serves one request at a time and operator
-// actions run as Bubble Tea cmds; both only ever read/write the sandbox over the
-// SSH/SFTP transport, which is safe for concurrent use, and a single human drives
-// the operator side — so they don't race in practice. On quit, the tea program
-// returns, `cancel()` stops the Serve loop, and a pending approval blocked in the
-// asker fails safe to deny via the done channel (ctx.Done); `sess.Close()` (deferred)
-// tears down the connection.
+// Lifecycle: a background supervisor owns the session, swapping it via a
+// sessionHolder on each (re)connect (it closes each session when that serve cycle
+// ends). The operator actions (consoleOps) and the agent.log bridge read the current
+// session through the holder's mutex-guarded Get, so they follow reconnects; an
+// action attempted mid-drop just errors against the old session and the operator
+// retries. The dispatcher serves one request at a time and operator actions run as
+// Bubble Tea cmds — both only read/write the sandbox over the SSH/SFTP transport
+// (safe for concurrent use) and a single human drives the operator side, so they
+// don't race in practice. On quit, the tea program returns, `cancel()` stops the
+// supervisor (a pending approval blocked in the asker fails safe to deny via
+// ctx.Done), and the deferred `holder.Get().Close()` backstops teardown (idempotent
+// if the supervisor already closed it).
 func runConsole(parent context.Context, cfg *config.Config, transport, agentLog string) error {
 	// The initial connect (and host-key trust prompt) runs before the alt-screen TUI
 	// so a /dev/tty password/trust prompt isn't fighting the rendered UI. A single

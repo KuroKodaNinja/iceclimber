@@ -95,6 +95,56 @@ func TestCachingPrompter_NilDefaultsToTTY(t *testing.T) {
 	}
 }
 
+// TestPromptersFor_KbdBypassesCache pins the auth routing the OTP-safety property
+// depends on: behind a CachingPrompter, the password method gets the cache while the
+// keyboard-interactive method gets the raw (uncached) inner — so a committed password
+// is reused for reconnect but a kbd challenge (possible one-time code) re-reads every
+// time and is never replayed.
+func TestPromptersFor_KbdBypassesCache(t *testing.T) {
+	inner := &queuePrompter{answers: []string{"pw", "otp1", "otp2"}}
+	cp := NewCachingPrompter(inner)
+
+	passwordPr, kbdPr := promptersFor(cp)
+	if passwordPr != PasswordPrompter(cp) {
+		t.Errorf("password prompter = %T, want the CachingPrompter (cached)", passwordPr)
+	}
+	if kbdPr != inner {
+		t.Errorf("kbd prompter = %T, want the raw inner (uncached)", kbdPr)
+	}
+
+	// Password rides the cache: prompt once, commit, then reuse silently.
+	if v, _ := passwordPr.Prompt("pw: "); v != "pw" {
+		t.Fatalf("password prompt = %q, want pw", v)
+	}
+	cp.Commit()
+	if v, _ := passwordPr.Prompt("pw: "); v != "pw" {
+		t.Errorf("committed password not reused: %q", v)
+	}
+	// Kbd re-reads each time (never the cached "pw") — a fresh OTP every challenge.
+	if v, _ := kbdPr.Prompt("code: "); v != "otp1" {
+		t.Errorf("kbd answer 1 = %q, want a fresh read (otp1)", v)
+	}
+	if v, _ := kbdPr.Prompt("code: "); v != "otp2" {
+		t.Errorf("kbd answer 2 = %q, want a fresh read (otp2) — never cached", v)
+	}
+}
+
+// TestPromptersFor_PlainPrompter: a non-caching prompter is used for both paths.
+func TestPromptersFor_PlainPrompter(t *testing.T) {
+	pr := fakePrompter{secret: "x"}
+	pw, kbd := promptersFor(pr)
+	if pw != PasswordPrompter(pr) || kbd != PasswordPrompter(pr) {
+		t.Errorf("plain prompter should be used for both paths, got pw=%T kbd=%T", pw, kbd)
+	}
+	pwNil, kbdNil := promptersFor(nil)
+	if _, ok := pwNil.(ttyPrompter); !ok {
+		t.Errorf("nil → ttyPrompter for password, got %T", pwNil)
+	}
+	if _, ok := kbdNil.(ttyPrompter); !ok {
+		t.Errorf("nil → ttyPrompter for kbd, got %T", kbdNil)
+	}
+}
+
 // TestIsAuthFailure distinguishes credential rejection from transport errors.
 func TestIsAuthFailure(t *testing.T) {
 	auth := errors.New("ssh handshake h:22: ssh: handshake failed: ssh: unable to authenticate, attempted methods [none publickey]")

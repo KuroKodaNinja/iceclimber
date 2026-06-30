@@ -28,28 +28,32 @@ func authMethods(p *dialPlan) ([]ssh.AuthMethod, error) {
 		}
 	}
 
-	pr := p.prompter
-	if pr == nil {
-		pr = ttyPrompter{}
-	}
-	// Keyboard-interactive uses the raw prompter even behind a CachingPrompter: its
-	// challenges may be one-time OTP/2FA codes that must not be replayed on reconnect.
-	// Password (PAM/local) may ride the cache.
-	kbdPr := pr
-	if cp, ok := pr.(*CachingPrompter); ok {
-		kbdPr = cp.Raw()
-	}
+	passwordPr, kbdPr := promptersFor(p.prompter)
 	if p.allowKbd {
 		methods = append(methods, keyboardInteractiveAuth(kbdPr))
 	}
 	if p.allowPassword {
-		methods = append(methods, passwordAuth(pr, p.user+"@"+p.host))
+		methods = append(methods, passwordAuth(passwordPr, p.user+"@"+p.host))
 	}
 
 	if len(methods) == 0 {
 		return nil, errors.New("no SSH auth method available: set ssh.identity_file, start ssh-agent (SSH_AUTH_SOCK), or enable ssh.password_auth")
 	}
 	return methods, nil
+}
+
+// promptersFor splits the dial prompter into the password and keyboard-interactive
+// prompters (nil → the /dev/tty prompter). Behind a CachingPrompter, keyboard-
+// interactive uses the raw (uncached) inner so a one-time OTP/2FA code is never
+// replayed on reconnect, while password rides the cache.
+func promptersFor(pr PasswordPrompter) (passwordPr, kbdPr PasswordPrompter) {
+	if pr == nil {
+		pr = ttyPrompter{}
+	}
+	if cp, ok := pr.(*CachingPrompter); ok {
+		return cp, cp.Raw()
+	}
+	return pr, pr
 }
 
 // IsAuthFailure reports whether err is an SSH authentication failure (the server

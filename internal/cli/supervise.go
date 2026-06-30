@@ -67,8 +67,8 @@ func superviseServe(ctx context.Context, cfg *config.Config, transport string, d
 	return runSupervisor(ctx, prompter, cycle, hooks.onDown, sleepCtx)
 }
 
-// passwordCache is the slice of CachingPrompter the supervisor drives: Commit a
-// password after a successful dial, Forget it after an auth failure.
+// passwordCache is the Commit/Forget face of CachingPrompter the supervisor drives:
+// Commit a password after a successful dial, Forget it after an auth failure.
 type passwordCache interface {
 	Commit()
 	Forget()
