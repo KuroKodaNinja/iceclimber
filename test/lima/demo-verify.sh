@@ -14,8 +14,8 @@
 set -euo pipefail
 
 DEMO="${1:-iceclimber-demo}"
-ROOT="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"
-WORK="$ROOT/work"
+ICECLIMBER_HOME="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"
+WORK="$ICECLIMBER_HOME/work"
 
 fail() { echo "DEMO VERIFY: FAIL — $1" >&2; exit 1; }
 
@@ -56,18 +56,18 @@ $out" ;;
 }
 
 # 2a. Python (rich) under the installed interpreter.
-PY="$(vm_glob "$ROOT/runtimes/python/*/bin/python3")"
+PY="$(vm_glob "$ICECLIMBER_HOME/runtimes/python/*/bin/python3")"
 [ -n "$PY" ] || fail "no installed Python (did python.install run?)"
 check python "$WORK/py/report.py" "$PY $WORK/py/report.py"
 
 # 2b. JavaScript (left-pad) under the installed Node, with NODE_PATH set.
-NODE="$(vm_glob "$ROOT/runtimes/node/*/bin/node")"
+NODE="$(vm_glob "$ICECLIMBER_HOME/runtimes/node/*/bin/node")"
 [ -n "$NODE" ] || fail "no installed Node (did node.install run?)"
-NMOD="$(vm_glob "$ROOT/runtimes/node/*/lib/node_modules")"
+NMOD="$(vm_glob "$ICECLIMBER_HOME/runtimes/node/*/lib/node_modules")"
 check javascript "$WORK/js/report.js" "NODE_PATH=$NMOD $NODE $WORK/js/report.js"
 
 # 2c. Java under the installed JDK (single-file source launch).
-JAVA="$(vm_glob "$ROOT/runtimes/java/*/bin/java")"
+JAVA="$(vm_glob "$ICECLIMBER_HOME/runtimes/java/*/bin/java")"
 [ -n "$JAVA" ] || fail "no installed Java (did java.install run?)"
 check java "$WORK/java/Report.java" "$JAVA $WORK/java/Report.java"
 

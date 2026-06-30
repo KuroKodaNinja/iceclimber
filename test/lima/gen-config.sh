@@ -6,7 +6,7 @@ set -euo pipefail
 
 SBX="${1:-iceclimber-sandbox}"
 OUT="${2:-iceclimber.yaml}"
-ROOT="${3:-}"   # optional: pin remote_root so the tree path is predictable
+ICECLIMBER_HOME="${3:-}"   # optional: pin remote_root so the tree path is predictable
 CFG="$HOME/.lima/$SBX/ssh.config"
 
 if [ ! -f "$CFG" ]; then
@@ -35,9 +35,9 @@ ssh:
   # Hermetic: don't read the dev/CI machine's real ~/.ssh/config during tests.
   use_ssh_config: false
 EOF
-if [ -n "$ROOT" ]; then
-	echo "remote_root: $ROOT" >> "$OUT"
+if [ -n "$ICECLIMBER_HOME" ]; then
+	echo "remote_root: $ICECLIMBER_HOME" >> "$OUT"
 fi
 
-echo "wrote $OUT  (sandbox $SBX, $USER_@127.0.0.1:$PORT${ROOT:+, root $ROOT})"
+echo "wrote $OUT  (sandbox $SBX, $USER_@127.0.0.1:$PORT${ICECLIMBER_HOME:+, root $ICECLIMBER_HOME})"
 echo "next:  ./iceclimber bootstrap   then   ./iceclimber serve"

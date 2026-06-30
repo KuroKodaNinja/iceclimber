@@ -88,7 +88,7 @@ writes its **subscription** token to a 0600 env file (API key refused — never
 metered billing) and drops a **`nana` launcher** at the tree root.
 `./iceclimber agent list` shows the available agents.
 
-**Starting the agent — `$ROOT/nana`.** Run it *inside the sandbox* from any
+**Starting the agent — `$ICECLIMBER_HOME/nana`.** Run it *inside the sandbox* from any
 directory; it sets up the environment (auth token, `ANTHROPIC_API_KEY` blanked) and
 launches the agent with `NANA.md` already loaded as its system context, so it knows
 how to reach Popo from turn one. Extra flags pass straight through to the agent:

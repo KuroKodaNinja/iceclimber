@@ -72,12 +72,12 @@ func TestRenderEnv(t *testing.T) {
 	if !strings.Contains(got, "export USE_BUILTIN_RIPGREP='0'") {
 		t.Errorf("ripgrep workaround missing:\n%s", got)
 	}
-	if !strings.Contains(got, "export ICECLIMBER_ROOT='/opt/iceclimber'") {
-		t.Errorf("ICECLIMBER_ROOT not exported:\n%s", got)
+	if !strings.Contains(got, "export ICECLIMBER_HOME='/opt/iceclimber'") {
+		t.Errorf("ICECLIMBER_HOME not exported:\n%s", got)
 	}
-	// Both the agent dir and $ROOT (where popo lives) on PATH.
+	// Both the agent dir and $ICECLIMBER_HOME (where popo lives) on PATH.
 	if !strings.Contains(got, "export PATH='/opt/iceclimber/agent/claude':'/opt/iceclimber':\"$PATH\"") {
-		t.Errorf("agent dir + $ROOT not on PATH:\n%s", got)
+		t.Errorf("agent dir + $ICECLIMBER_HOME not on PATH:\n%s", got)
 	}
 }
 

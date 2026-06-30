@@ -67,15 +67,15 @@ var verbs = map[string]string{
 	"web.fetch":      "popo web.fetch <url> [--method M] [--header K:V]... [--body STR]",
 }
 
-// resolveRoot finds $ROOT: ICECLIMBER_ROOT if set, else the directory popo lives in
-// ($ROOT/popo), so the agent never has to supply a path.
+// resolveRoot finds $ICECLIMBER_HOME: ICECLIMBER_HOME if set, else the directory popo lives in
+// ($ICECLIMBER_HOME/popo), so the agent never has to supply a path.
 func resolveRoot() (string, error) {
-	if r := os.Getenv("ICECLIMBER_ROOT"); r != "" {
+	if r := os.Getenv("ICECLIMBER_HOME"); r != "" {
 		return r, nil
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return "", fmt.Errorf("cannot locate $ROOT (set ICECLIMBER_ROOT): %w", err)
+		return "", fmt.Errorf("cannot locate $ICECLIMBER_HOME (set ICECLIMBER_HOME): %w", err)
 	}
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved

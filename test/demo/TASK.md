@@ -19,21 +19,21 @@ build a tiny program in **each** of Python, JavaScript, and Java that reads it a
 prints a **computed** line (not just an echo of the data).
 
 1. Through Popo, **`web.fetch`** `https://xkcd.com/info.0.json` and save the body to
-   `{{ROOT}}/work/comic.json`. (You can't reach the internet; Popo will, on its own
+   `{{ICECLIMBER_HOME}}/work/comic.json`. (You can't reach the internet; Popo will, on its own
    network.) It contains at least `num` (an integer) and `title` (a string).
 
 2. **Python.** Install **Python 3.12** and the **`rich`** package through Popo.
-   Write `{{ROOT}}/work/py/report.py` that reads `comic.json` and prints, using
+   Write `{{ICECLIMBER_HOME}}/work/py/report.py` that reads `comic.json` and prints, using
    `rich`:  `[python] xkcd #<num> title-length=<len(title)>`. Run it with the
    absolute python path `python.install` returned.
 
 3. **JavaScript.** Install **Node 24** and the **`left-pad`** package through Popo.
-   Write `{{ROOT}}/work/js/report.js` that reads `comic.json` and prints, using
+   Write `{{ICECLIMBER_HOME}}/work/js/report.js` that reads `comic.json` and prints, using
    `left-pad` to zero-pad the number to 5 digits:
    `[javascript] xkcd #<padded-num> title-length=<title.length>`. Run it with the
    absolute node path, with `NODE_PATH` set to what `npm.install` returned.
 
-4. **Java.** Install **Java 21** through Popo. Write `{{ROOT}}/work/java/Report.java`
+4. **Java.** Install **Java 21** through Popo. Write `{{ICECLIMBER_HOME}}/work/java/Report.java`
    that reads `comic.json` (extract `num` and `title` — a small regex or substring is
    fine, you don't need a JSON library) and prints
    `[java] xkcd #<num> title-length=<title length>`. Run it with the absolute java

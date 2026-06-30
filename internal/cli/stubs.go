@@ -18,7 +18,7 @@ func stubCommands() []*cobra.Command {
 			leaf("gc", "Garbage-collect the cache", "v2"),
 		),
 		// (The old "nana" sandbox-side request stub is superseded by the real `popo`
-		// client (cmd/popo, relayed to $ROOT/popo) and the `nana` launcher script.)
+		// client (cmd/popo, relayed to $ICECLIMBER_HOME/popo) and the `nana` launcher script.)
 	}
 }
 

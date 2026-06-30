@@ -64,14 +64,14 @@ func controllerFetch(ctx context.Context, fs remotefs.FS, root, method string, r
 	}
 	if blobName != "" {
 		tree := protocol.Tree{Root: root}
-		blobsDir := tree.Blobs() // canonical $ROOT/protocol/blobs (the path NANA.md documents)
+		blobsDir := tree.Blobs() // canonical $ICECLIMBER_HOME/protocol/blobs (the path NANA.md documents)
 		if err := fs.Mkdir(ctx, blobsDir); err != nil {
 			return Result{}, fmt.Errorf("ensure blobs dir: %w", err)
 		}
 		if err := fs.WriteFile(ctx, path.Join(blobsDir, blobName), body); err != nil {
 			return Result{}, fmt.Errorf("push blob to sandbox: %w", err)
 		}
-		out.BodyBlob = tree.BlobRef(blobName) // $ROOT-relative: protocol/blobs/<sha>
+		out.BodyBlob = tree.BlobRef(blobName) // $ICECLIMBER_HOME-relative: protocol/blobs/<sha>
 	} else {
 		out.Encoding, out.BodyInline = enc, inline
 	}

@@ -75,7 +75,7 @@ func (f *Fetcher) Fetch(ctx context.Context, req Request) (Result, error) {
 	}
 
 	tree := protocol.Tree{Root: f.root}
-	blobsDir := tree.Blobs() // canonical $ROOT/protocol/blobs (the path NANA.md documents)
+	blobsDir := tree.Blobs() // canonical $ICECLIMBER_HOME/protocol/blobs (the path NANA.md documents)
 	if err := f.fs.Mkdir(ctx, blobsDir); err != nil {
 		return Result{}, fmt.Errorf("ensure blobs dir: %w", err)
 	}
@@ -108,7 +108,7 @@ func (f *Fetcher) Fetch(ctx context.Context, req Request) (Result, error) {
 		if err := f.fs.Rename(ctx, bodyFile, path.Join(blobsDir, blobName)); err != nil {
 			return Result{}, fmt.Errorf("store blob: %w", err)
 		}
-		out.BodyBlob = tree.BlobRef(blobName) // $ROOT-relative: protocol/blobs/<sha>
+		out.BodyBlob = tree.BlobRef(blobName) // $ICECLIMBER_HOME-relative: protocol/blobs/<sha>
 
 	} else {
 		out.Encoding, out.BodyInline = enc, inline

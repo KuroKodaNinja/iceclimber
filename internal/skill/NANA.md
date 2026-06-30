@@ -7,7 +7,7 @@ back the results. You reach Popo through a small client called `popo`.
 
 ## Talk to Popo with `popo`
 
-Run **`popo`** (it's on your `PATH`; also at `$ROOT/popo`). It performs the whole
+Run **`popo`** (it's on your `PATH`; also at `$ICECLIMBER_HOME/popo`). It performs the whole
 request/response protocol for you and prints the result — you never format JSON or
 manage files to talk to Popo:
 
@@ -34,4 +34,4 @@ it will tell you if Popo isn't running.
 
 If your harness can only read and write files (no execute), you can't run `popo`.
 Talk to Popo with the **raw file protocol** instead — it needs only file I/O. See
-`$ROOT/skill/PROTOCOL.md`.
+`$ICECLIMBER_HOME/skill/PROTOCOL.md`.

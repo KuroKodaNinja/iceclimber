@@ -114,7 +114,7 @@ func TestFlow_DashboardChrome(t *testing.T) {
 func TestFlow_NanaPaneHint(t *testing.T) {
 	tm := startConsole(t, newRecordOps()) // no agent-log
 	// With no agent output, the [NANA] pane shows the actionable hint.
-	waitText(t, tm, "$ROOT/nana")
+	waitText(t, tm, "$ICECLIMBER_HOME/nana")
 	tm.Quit()
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 }

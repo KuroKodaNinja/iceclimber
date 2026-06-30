@@ -28,8 +28,8 @@ no `InsecureIgnoreHostKey`).
   against the **documented contract / an independent source of truth** — never just
   round-trips the implementation's own assumptions. A test that mirrors the code's
   internals can be *self-consistent with the bug* and prove nothing. **Cautionary
-  case (#59):** `web.fetch` wrote response blobs to `$ROOT/blobs` while `NANA.md`
-  (correctly) told the agent to read `$ROOT/protocol/blobs`; the functional test
+  case (#59):** `web.fetch` wrote response blobs to `$ICECLIMBER_HOME/blobs` while `NANA.md`
+  (correctly) told the agent to read `$ICECLIMBER_HOME/protocol/blobs`; the functional test
   read the blob via `path.Join(root, body_blob)` — the same wrong path the writer
   used — so it passed for months while a real agent couldn't find the file. The fix
   was to assert against the spec'd location and tie writer + published reference to
@@ -246,14 +246,14 @@ fully air-gapped sandbox — no on-target npm, no Node. It writes a 0600 auth en
 file: subscription token only — an API key is refused, `ANTHROPIC_API_KEY` is
 blanked, the token is never logged. New agents are just another `agent.Descriptor`
 (npm-prefix + platform-suffix mapping + binary path + token/env). It also writes a
-**`$ROOT/nana` launcher** (operator runs it *in* the sandbox from any dir): a generic
+**`$ICECLIMBER_HOME/nana` launcher** (operator runs it *in* the sandbox from any dir): a generic
 dispatcher picks the agent (the sole one, or `nana <agent>` when several) and execs
 a per-agent `run` script that sources the env and launches the harness with `NANA.md`
 as persistent system context (`--append-system-prompt`) plus passthrough args. The
 agent-specific launch recipe is baked from the `Descriptor` at install time, so the
-sandbox scripts stay generic. The demo dogfoods it (`demo-agent.sh` → `$ROOT/nana`).
+sandbox scripts stay generic. The demo dogfoods it (`demo-agent.sh` → `$ICECLIMBER_HOME/nana`).
 Run headless (a print flag like `-p`, or non-tty), `nana` mirrors the agent's stream to
-`$ROOT/agent/<name>/session.log` (interactive runs keep their tty, not mirrored). The
+`$ICECLIMBER_HOME/agent/<name>/session.log` (interactive runs keep their tty, not mirrored). The
 **serving process bridges** those logs to a controller-side `agent.log`
 (`bridgeAgentLog`→`pollAgentLogs` runs in the console *and* headless `serve`, since both
 hold the SSH session), and the console, `tui`, and `logs` all **default `--agent-log` to
@@ -263,7 +263,7 @@ no explicit `--output-format`, the `run` script auto-injects the descriptor's
 `StreamArgs` (`--output-format stream-json --verbose`) so `[NANA]` shows tool calls, not
 just the final summary — gated on `-p` so `--version`/diagnostics stay clean and a
 caller's own `--output-format` always wins (decision #63). The demo dogfoods the whole
-path (`demo-agent.sh` → `$ROOT/nana -p` with **no** stream flags, relying on injection;
+path (`demo-agent.sh` → `$ICECLIMBER_HOME/nana -p` with **no** stream flags, relying on injection;
 `make demo-logs/tui/console` pass no flag).
 
 The agent talks to Popo through the **`popo` client** (`cmd/popo`, decision #61), not
@@ -273,7 +273,7 @@ and prints a clean result. It reuses the leaf **`internal/wire`** package (envel
 dispatcher share one wire format. It's cross-compiled `CGO_ENABLED=0` (one static
 binary per GOARCH, musl+glibc), `go:embed`'d in `internal/popobin` (built by `make
 popo-bins`; the functional `TestMain` builds it too), and **bootstrap relays it to
-`$ROOT/popo`**. So **NANA.md is minimal** (system-prompt-sized: "run `popo help`,
+`$ICECLIMBER_HOME/popo`**. So **NANA.md is minimal** (system-prompt-sized: "run `popo help`,
 then `popo <verb>`") — the raw protocol lives in **PROTOCOL.md** (also dropped at
 bootstrap, not in the system prompt) as the **file-I/O-only fallback** for harnesses
 that can't exec. Adding a verb to `popo`: extend the `verbs` table + `buildParams`

@@ -240,8 +240,8 @@ func verifyIntegrity(file, integrity string) error {
 
 // renderEnv builds the agent's env file: the subscription token, the API-key var
 // blanked (never fall back to metered billing), the agent's extra env, the agent's
-// dir AND $ROOT on PATH (so both the agent binary and the `popo` client are runnable
-// by name), and ICECLIMBER_ROOT so popo finds the tree.
+// dir AND $ICECLIMBER_HOME on PATH (so both the agent binary and the `popo` client are runnable
+// by name), and ICECLIMBER_HOME so popo finds the tree.
 func renderEnv(d Descriptor, token, dir, root string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# iceclimber: %s agent environment (operator-written secret; chmod 600, do not commit).\n", d.DisplayName)
@@ -252,7 +252,7 @@ func renderEnv(d Descriptor, token, dir, root string) string {
 	for _, e := range d.Env {
 		fmt.Fprintf(&b, "export %s=%s\n", e.Key, remote.ShellQuote(e.Value))
 	}
-	fmt.Fprintf(&b, "export ICECLIMBER_ROOT=%s\n", remote.ShellQuote(root))
+	fmt.Fprintf(&b, "export ICECLIMBER_HOME=%s\n", remote.ShellQuote(root))
 	fmt.Fprintf(&b, "export PATH=%s:%s:\"$PATH\"\n", remote.ShellQuote(dir), remote.ShellQuote(root))
 	return b.String()
 }

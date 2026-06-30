@@ -171,7 +171,7 @@ func nanaPane(w, h int, hasNana bool, lines []string) string {
 	title := titleStyle.Render("[NANA] sandbox")
 	var content string
 	if len(lines) == 0 {
-		hint := "(no agent session yet — run $ROOT/nana in the sandbox)"
+		hint := "(no agent session yet — run $ICECLIMBER_HOME/nana in the sandbox)"
 		if hasNana {
 			hint = "(waiting for agent output…)"
 		}

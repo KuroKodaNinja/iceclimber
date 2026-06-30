@@ -84,7 +84,7 @@ func provision(ctx context.Context, sess *session) error {
 	return nil
 }
 
-// dropPopo relays the in-sandbox `popo` client binary to $ROOT/popo for the
+// dropPopo relays the in-sandbox `popo` client binary to $ICECLIMBER_HOME/popo for the
 // sandbox's platform. Best-effort: if no client is embedded for this platform (e.g.
 // built without `make`), the agent simply falls back to the raw file protocol
 // (PROTOCOL.md), so a missing client is not fatal.

@@ -66,15 +66,15 @@ func TestWebFetch(t *testing.T) {
 	if r.BodyBlob == "" {
 		t.Fatalf("expected body_blob for a large body, got inline len %d", len(r.BodyInline))
 	}
-	// body_blob must be the $ROOT-relative path NANA.md documents (protocol/blobs/…),
+	// body_blob must be the $ICECLIMBER_HOME-relative path NANA.md documents (protocol/blobs/…),
 	// and the blob must actually be there. Asserting both the prefix and that
-	// $ROOT/<body_blob> == tree.Blobs()/<name> guards the spec/impl alignment that
-	// the agent relies on (the blob once landed in $ROOT/blobs instead).
+	// $ICECLIMBER_HOME/<body_blob> == tree.Blobs()/<name> guards the spec/impl alignment that
+	// the agent relies on (the blob once landed in $ICECLIMBER_HOME/blobs instead).
 	if !strings.HasPrefix(r.BodyBlob, "protocol/blobs/") {
 		t.Errorf("body_blob = %q, want it under protocol/blobs/ (NANA.md spec)", r.BodyBlob)
 	}
 	if got, want := path.Join(root, r.BodyBlob), path.Join(tree.Blobs(), path.Base(r.BodyBlob)); got != want {
-		t.Errorf("$ROOT/body_blob = %q, want the canonical blob path %q", got, want)
+		t.Errorf("$ICECLIMBER_HOME/body_blob = %q, want the canonical blob path %q", got, want)
 	}
 	if _, err := fs.ReadFile(ctx, path.Join(root, r.BodyBlob)); err != nil {
 		t.Errorf("blob %s not found at the documented location: %v", r.BodyBlob, err)

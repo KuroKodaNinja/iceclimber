@@ -27,7 +27,7 @@ import (
 type Config struct {
 	FS         remotefs.FS   // where the interpreter is written (transport-agnostic)
 	Runner     remote.Runner // used to verify the installed binary actually runs
-	Root       string        // sandbox install root ($ICECLIMBER_ROOT)
+	Root       string        // sandbox install root ($ICECLIMBER_HOME)
 	OS         string        // probe fingerprint (expects "linux")
 	Arch       string        // "x86_64" | "aarch64"
 	Libc       string        // "musl" | "glibc"

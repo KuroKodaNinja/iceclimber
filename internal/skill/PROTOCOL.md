@@ -7,11 +7,11 @@ exec. `popo` does everything below for you; this is the same protocol, by hand.
 
 ## The tree
 
-Everything lives under one absolute **install root**, `$ROOT` (your operator tells
+Everything lives under one absolute **install root**, `$ICECLIMBER_HOME` (your operator tells
 you its value, e.g. `/home/agent/.iceclimber`). Always use absolute paths.
 
 ```
-$ROOT/
+$ICECLIMBER_HOME/
   popo                      # the client (run it if you can; see NANA.md)
   protocol/
     outbox/{tmp,new,cur}/   # your requests to Popo
@@ -36,11 +36,11 @@ $ROOT/
    The `id` can be any string unique among your requests; reuse it as the response
    filename.
 
-2. **Deliver it atomically.** Write the JSON to `$ROOT/protocol/outbox/tmp/<id>.json`,
-   then **rename** it to `$ROOT/protocol/outbox/new/<id>.json`. Never write directly
+2. **Deliver it atomically.** Write the JSON to `$ICECLIMBER_HOME/protocol/outbox/tmp/<id>.json`,
+   then **rename** it to `$ICECLIMBER_HOME/protocol/outbox/new/<id>.json`. Never write directly
    into `new/` — the rename is what guarantees Popo never reads a half-written file.
 
-3. **Wait for the response.** Poll for `$ROOT/protocol/inbox/new/<id>.json` (same id);
+3. **Wait for the response.** Poll for `$ICECLIMBER_HOME/protocol/inbox/new/<id>.json` (same id);
    read and parse it when it appears.
 
 ## Responses
@@ -62,7 +62,7 @@ $ROOT/
 
 ## Liveness
 
-While the operator runs `iceclimber serve`, Popo rewrites `$ROOT/protocol/heartbeat`
+While the operator runs `iceclimber serve`, Popo rewrites `$ICECLIMBER_HOME/protocol/heartbeat`
 with `"<seq> <iso8601>"`, `<seq>` increasing each cycle. Judge liveness on **`<seq>`
 advancing** across polls (not the timestamp — clocks differ). Back off ~2s, 5s, 10s,
 30s; if `<seq>` hasn't advanced for ~2 minutes, tell the operator to run
@@ -70,7 +70,7 @@ advancing** across polls (not the timestamp — clocks differ). Back off ~2s, 5s
 
 ## Capabilities (optional, informational)
 
-You may write `$ROOT/protocol/capabilities.json` as your first action:
+You may write `$ICECLIMBER_HOME/protocol/capabilities.json` as your first action:
 `{ "has_exec": true, "has_file_write": true }`. Popo never depends on it; it only
 informs the operator's status view.
 
@@ -88,7 +88,7 @@ informs the operator's status view.
 | `web.fetch` | `{ url, method?, headers?, body? }` | `{ status_code, venue, encoding, body_inline? , body_blob? }` |
 
 Notes: run installed runtimes by the absolute `path`/`node_path`/`classpath`
-returned. `body_blob` is a `$ROOT`-relative path — read the body at `$ROOT/<body_blob>`.
+returned. `body_blob` is a `$ICECLIMBER_HOME`-relative path — read the body at `$ICECLIMBER_HOME/<body_blob>`.
 For Node, export `NODE_PATH=<node_path>`. Java 11+ runs a single source file directly
 (`<java> Program.java`). One request, one response, matched by `id`; you never touch
 `cur/`.

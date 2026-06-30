@@ -44,8 +44,8 @@ func (f *fakeFS) Symlink(context.Context, string, string) error    { return nil 
 func (f *fakeFS) RemoveAll(context.Context, string) error          { return nil }
 
 // TestFetch_BlobLandsInCanonicalDir is the regression guard for the blob-path bug:
-// a large body must be stored at the path NANA.md documents ($ROOT/protocol/blobs),
-// and the published body_blob must resolve, against $ROOT, to that exact file.
+// a large body must be stored at the path NANA.md documents ($ICECLIMBER_HOME/protocol/blobs),
+// and the published body_blob must resolve, against $ICECLIMBER_HOME, to that exact file.
 func TestFetch_BlobLandsInCanonicalDir(t *testing.T) {
 	const root = "/srv/ice"
 	big := make([]byte, inlineMax+1) // > inlineMax → stored as a blob, not inline
@@ -64,11 +64,11 @@ func TestFetch_BlobLandsInCanonicalDir(t *testing.T) {
 	}
 
 	tree := protocol.Tree{Root: root}
-	// body_blob is the $ROOT-relative reference NANA.md documents.
+	// body_blob is the $ICECLIMBER_HOME-relative reference NANA.md documents.
 	if !strings.HasPrefix(out.BodyBlob, "protocol/blobs/") {
 		t.Errorf("body_blob = %q, want it under protocol/blobs/ (NANA.md spec)", out.BodyBlob)
 	}
-	// The blob was renamed into the canonical dir, NOT $ROOT/blobs.
+	// The blob was renamed into the canonical dir, NOT $ICECLIMBER_HOME/blobs.
 	if len(fs.renames) != 1 {
 		t.Fatalf("expected one rename (stage→final), got %v", fs.renames)
 	}
@@ -77,10 +77,10 @@ func TestFetch_BlobLandsInCanonicalDir(t *testing.T) {
 		t.Errorf("blob stored at %q, want under %q", dest, tree.Blobs())
 	}
 	if strings.HasPrefix(dest, path.Join(root, "blobs")+"/") {
-		t.Errorf("blob stored under $ROOT/blobs (the old bug): %q", dest)
+		t.Errorf("blob stored under $ICECLIMBER_HOME/blobs (the old bug): %q", dest)
 	}
-	// THE invariant: $ROOT/<body_blob> is exactly where the blob was written.
+	// THE invariant: $ICECLIMBER_HOME/<body_blob> is exactly where the blob was written.
 	if got := path.Join(root, out.BodyBlob); got != dest {
-		t.Errorf("$ROOT/body_blob = %q but blob is at %q — the agent would look in the wrong place", got, dest)
+		t.Errorf("$ICECLIMBER_HOME/body_blob = %q but blob is at %q — the agent would look in the wrong place", got, dest)
 	}
 }
