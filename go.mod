@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/exp/teatest v0.0.0-20260628005914-6eb80f72a239
+	github.com/creack/pty v1.1.24
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pkg/sftp v1.13.10
 	github.com/spf13/cobra v1.10.2
