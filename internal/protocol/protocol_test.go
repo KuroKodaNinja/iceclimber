@@ -165,6 +165,160 @@ func TestDispatch_ObserveStart_FiresAtPickup(t *testing.T) {
 	})
 }
 
+// --- maildir GC -------------------------------------------------------------
+
+func names(t *testing.T, ctx context.Context, fs remotefs.FS, dir string) []string {
+	t.Helper()
+	n, err := fs.List(ctx, dir)
+	if err != nil {
+		t.Fatalf("list %s: %v", dir, err)
+	}
+	return n
+}
+
+func has(t *testing.T, ctx context.Context, fs remotefs.FS, dir, name string) bool {
+	t.Helper()
+	for _, n := range names(t, ctx, fs, dir) {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// writeInboxResponse writes a response straight into inbox/new with a given delivery time.
+func writeInboxResponse(t *testing.T, ctx context.Context, fs remotefs.FS, tree Tree, name string, completedAt time.Time) {
+	t.Helper()
+	b, _ := json.Marshal(Response{SchemaVersion: SchemaVersion, ID: idFromName(name), Status: StatusOK, CompletedAt: completedAt})
+	if err := fs.WriteFile(ctx, path.Join(tree.Inbox().New(), name), b); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDispatch_GC_PrunesCollectedPair(t *testing.T) {
+	ctx, fs, tree, d := setup(t)
+	id := NewID()
+	name := RequestName(id)
+	if err := Deliver(ctx, fs, tree.Outbox(), name, request(id, "ping")); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.RunOnce(ctx); err != nil { // services: request→outbox/cur, response→inbox/new
+		t.Fatal(err)
+	}
+	if err := AckResponse(ctx, fs, tree, name); err != nil { // agent collects: inbox/new→inbox/cur
+		t.Fatal(err)
+	}
+	if err := d.RunOnce(ctx); err != nil { // gc reaps the collected pair
+		t.Fatal(err)
+	}
+	if len(names(t, ctx, fs, tree.Outbox().Cur())) != 0 {
+		t.Error("outbox/cur not pruned after collect")
+	}
+	if len(names(t, ctx, fs, tree.Inbox().Cur())) != 0 {
+		t.Error("inbox/cur not pruned after collect")
+	}
+}
+
+func TestDispatch_GC_LeavesUncollected(t *testing.T) {
+	ctx, fs, tree, d := setup(t)
+	id := NewID()
+	name := RequestName(id)
+	if err := Deliver(ctx, fs, tree.Outbox(), name, request(id, "ping")); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.RunOnce(ctx); err != nil { // response sits in inbox/new, NOT collected
+		t.Fatal(err)
+	}
+	if err := d.RunOnce(ctx); err != nil { // gc: nothing collected, retention off → leave it
+		t.Fatal(err)
+	}
+	if !has(t, ctx, fs, tree.Inbox().New(), name) {
+		t.Error("uncollected response was reaped (retention off)")
+	}
+	if !has(t, ctx, fs, tree.Outbox().Cur(), name) {
+		t.Error("request reaped while its response is still uncollected")
+	}
+}
+
+func TestDispatch_GC_RetentionReapsOnlyOld(t *testing.T) {
+	ctx, fs, tree, d := setup(t)
+	d.SetRetention(time.Hour)
+
+	recent := RequestName(NewID())
+	writeInboxResponse(t, ctx, fs, tree, recent, time.Now().UTC())
+
+	old := RequestName(NewID())
+	writeInboxResponse(t, ctx, fs, tree, old, time.Now().Add(-2*time.Hour).UTC())
+	if err := fs.WriteFile(ctx, path.Join(tree.Outbox().Cur(), old), request(idFromName(old), "ping")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.gc(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !has(t, ctx, fs, tree.Inbox().New(), recent) {
+		t.Error("a recently-delivered uncollected response was wrongly reaped")
+	}
+	if has(t, ctx, fs, tree.Inbox().New(), old) {
+		t.Error("an old uncollected response was not reaped")
+	}
+	if has(t, ctx, fs, tree.Outbox().Cur(), old) {
+		t.Error("the old request was not reaped with its abandoned response")
+	}
+}
+
+func TestDispatch_GC_RecoverSkipsCollected(t *testing.T) {
+	ctx := context.Background()
+	fs := remotefs.NewExecFS(remotefstest.LocalRunner{})
+	tree := Tree{Root: t.TempDir()}
+	if err := EnsureTree(ctx, fs, tree); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	d := NewDispatcher(fs, tree, Registry{"count": func(_ context.Context, req Request) Response {
+		calls++
+		return OK(req.ID, map[string]int{"n": calls})
+	}})
+	id := NewID()
+	name := RequestName(id)
+	if err := Deliver(ctx, fs, tree.Outbox(), name, request(id, "count")); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.RunOnce(ctx); err != nil || calls != 1 {
+		t.Fatalf("first cycle: calls=%d err=%v, want 1/nil", calls, err)
+	}
+	if err := AckResponse(ctx, fs, tree, name); err != nil { // collect
+		t.Fatal(err)
+	}
+	if err := d.RunOnce(ctx); err != nil { // gc reaps; recover must NOT re-fire the handler
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Errorf("handler re-fired after collect+gc: calls=%d, want 1", calls)
+	}
+}
+
+func TestDispatch_GC_Idempotent(t *testing.T) {
+	ctx, fs, tree, d := setup(t)
+	id := NewID()
+	name := RequestName(id)
+	if err := Deliver(ctx, fs, tree.Outbox(), name, request(id, "ping")); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := AckResponse(ctx, fs, tree, name); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.gc(ctx); err != nil {
+		t.Fatalf("first gc: %v", err)
+	}
+	if err := d.gc(ctx); err != nil { // pair already gone — must be a no-op, not an error
+		t.Fatalf("second gc (already reaped): %v", err)
+	}
+}
+
 func TestDispatch_RecoversStrandedRequest(t *testing.T) {
 	ctx, fs, tree, d := setup(t)
 	id := NewID()

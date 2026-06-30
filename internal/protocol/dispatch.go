@@ -23,6 +23,7 @@ type Dispatcher struct {
 	observeStart func(StartEvent)
 	gate         func(context.Context, Request) error
 	onHeartbeat  func(seq int64)
+	retention    time.Duration // reap responses uncollected this long (0 = never)
 }
 
 // CodeOperatorDenied is the error code on a response the gate rejected before the
@@ -77,10 +78,20 @@ func (d *Dispatcher) SetGate(fn func(context.Context, Request) error) { d.gate =
 // seq). The console uses it to show a live "serving / stale" indicator. Optional.
 func (d *Dispatcher) OnHeartbeat(fn func(seq int64)) { d.onHeartbeat = fn }
 
-// RunOnce performs a single dispatch cycle: recover any in-flight requests left
-// in cur/ by a previous crash, then drain new/ oldest-first. Used by
-// `serve --once` and the bootstrap smoke test.
+// SetRetention sets how long a delivered-but-uncollected response may sit in
+// inbox/new before GC reaps it (with its request). 0 (the default) disables the
+// retention sweep — collected pairs are still pruned. The clock is the response's
+// CompletedAt (delivery time), so a long install never trips it.
+func (d *Dispatcher) SetRetention(d2 time.Duration) { d.retention = d2 }
+
+// RunOnce performs a single dispatch cycle: GC completed/abandoned pairs, recover any
+// in-flight requests left in cur/ by a previous crash, then drain new/ oldest-first.
+// GC runs first so a reaped abandoned request isn't wastefully re-serviced by recover.
+// Used by `serve --once` and the bootstrap smoke test.
 func (d *Dispatcher) RunOnce(ctx context.Context) error {
+	if err := d.gc(ctx); err != nil {
+		return err
+	}
 	if err := d.recover(ctx); err != nil {
 		return err
 	}
@@ -107,6 +118,9 @@ func (d *Dispatcher) Serve(ctx context.Context, interval time.Duration) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
+		if err := d.gc(ctx); err != nil {
+			return err
+		}
 		if err := d.drainNew(ctx); err != nil {
 			return err
 		}
@@ -195,6 +209,53 @@ func (d *Dispatcher) recover(ctx context.Context) error {
 	return nil
 }
 
+// gc prunes the maildir of completed and abandoned request/response pairs — keeping the
+// "uncollected" count (inbox/new) honest and disk bounded. Runs first each cycle.
+//
+// Two passes, both keyed by the shared <id>.json basename:
+//   - Collected: a response the agent has read is moved to inbox/cur (popo renames
+//     new->cur on read). Delete the coupled pair outbox/cur/<id> + inbox/cur/<id>.
+//   - Retention (when d.retention > 0): a response delivered to inbox/new but uncollected
+//     for longer than d.retention — measured from its CompletedAt (delivery time, so a
+//     long install never trips it) — is abandoned; delete inbox/new/<id> + outbox/cur/<id>.
+//
+// Safe: a GC'd ULID is never re-delivered (unique ids; a retry uses a new id), so
+// dedup/recover never re-execute a reaped pair; and a response reaches inbox/cur only
+// AFTER the agent fully read it, so GC never races a reader. Best-effort — a listing
+// hiccup is swallowed (the drainNew that follows surfaces a real transport drop), and
+// RemoveAll is idempotent so a missing mate is fine.
+func (d *Dispatcher) gc(ctx context.Context) error {
+	// Collected pairs.
+	if collected, err := d.fs.List(ctx, d.tree.Inbox().Cur()); err == nil {
+		for _, name := range collected {
+			_ = d.fs.RemoveAll(ctx, path.Join(d.tree.Outbox().Cur(), name))
+			_ = d.fs.RemoveAll(ctx, path.Join(d.tree.Inbox().Cur(), name))
+		}
+	}
+	// Abandoned pairs: delivered but uncollected past the retention window.
+	if d.retention <= 0 {
+		return nil
+	}
+	uncollected, err := d.fs.List(ctx, d.tree.Inbox().New())
+	if err != nil {
+		return nil
+	}
+	cutoff := time.Now().Add(-d.retention)
+	for _, name := range uncollected {
+		data, rerr := d.fs.ReadFile(ctx, path.Join(d.tree.Inbox().New(), name))
+		if rerr != nil {
+			continue
+		}
+		var r Response
+		if json.Unmarshal(data, &r) != nil || r.CompletedAt.IsZero() || r.CompletedAt.After(cutoff) {
+			continue // unparseable/undated/recent — leave it (the agent may still collect)
+		}
+		_ = d.fs.RemoveAll(ctx, path.Join(d.tree.Inbox().New(), name))
+		_ = d.fs.RemoveAll(ctx, path.Join(d.tree.Outbox().Cur(), name))
+	}
+	return nil
+}
+
 // serviceFromNew dedups, picks up (new->cur), then services a request.
 func (d *Dispatcher) serviceFromNew(ctx context.Context, name string) error {
 	done, err := d.responseExists(ctx, name)
@@ -224,6 +285,9 @@ func (d *Dispatcher) serviceCur(ctx context.Context, name string) error {
 	}
 	start := time.Now()
 	resp := d.dispatch(ctx, name, data)
+	if resp.CompletedAt.IsZero() {
+		resp.CompletedAt = time.Now().UTC() // GC retention clock; OK/Errf set this, raw handlers may not
+	}
 	respBytes, err := json.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("marshal response %s: %w", name, err)

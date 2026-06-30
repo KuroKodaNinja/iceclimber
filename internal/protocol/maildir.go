@@ -52,6 +52,14 @@ func PickUp(ctx context.Context, fs remotefs.FS, m Maildir, name string) error {
 	return fs.Rename(ctx, path.Join(m.New(), name), path.Join(m.Cur(), name))
 }
 
+// AckResponse marks a response collected by moving it inbox/new -> inbox/cur, so the GC
+// can prune the request/response pair and inbox/new reflects only uncollected mail. The
+// in-sandbox agent does this (popo, on read); this is the controller-side analogue for a
+// controller that reads a response (e.g. the bootstrap smoke test).
+func AckResponse(ctx context.Context, fs remotefs.FS, t Tree, name string) error {
+	return fs.Rename(ctx, path.Join(t.Inbox().New(), name), path.Join(t.Inbox().Cur(), name))
+}
+
 // ReadResponse reads and parses a response by filename from inbox/new.
 func ReadResponse(ctx context.Context, fs remotefs.FS, t Tree, name string) (*Response, error) {
 	data, err := fs.ReadFile(ctx, path.Join(t.Inbox().New(), name))
