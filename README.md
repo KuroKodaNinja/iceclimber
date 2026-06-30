@@ -164,6 +164,22 @@ protocol tree, runs a `ping`/`pong` smoke test, drops `NANA.md` + `PROTOCOL.md`,
 relays the `popo` client to `<root>/popo`. Then wire `NANA.md` into your agent's
 instructions (see the Nana side).
 
+Bootstrap also **detects runtimes already on the box** (a corp VM that ships its own
+Python/Node/Java) and lets you choose, per language, whether to use them. By default
+iceclimber installs its own pinned runtime (`managed`); choose `system` to use the
+sandbox's. On a terminal it asks; for unattended/headless runs set it explicitly:
+
+```sh
+./iceclimber bootstrap --runtime-source python=system   # use the box's python3
+```
+
+…or pin it in the config (`runtimes: { python: { source: system } }`). In `system`
+mode, package installs go into an **iceclimber-owned venv under `$ICECLIMBER_HOME`**
+(never the system site-packages — sidestepping PEP 668 and write permissions), and
+relayed wheels are matched to the discovered interpreter. iceclimber uses what's on
+the box and fails clearly if the agent asks for a version that isn't there — it never
+changes the system toolchain.
+
 ### 4. Serve — the console, or headless
 
 Bare **`iceclimber`** launches the interactive **console**: it serves the sandbox,
@@ -214,7 +230,7 @@ operation the agent requests, with context, and you approve inline:
 | `logs -f` | Tail Popo's activity (`[POPO]`) merged with the agent's stream (`[NANA]`, bridged automatically; `--agent-log <file>` overrides) |
 | `tui` | A live split-pane `[POPO]`/`[NANA]` dashboard (`[NANA]` bridged automatically; `--snapshot` for one static frame) |
 | `pending` / `approve <id>` / `deny <id>` | Async egress approval (when not serving on a TTY) |
-| `install python <minor>` · `install pip <pkg> --python <minor>` | Provision Python directly, without the agent |
+| `install python <minor>` · `install pip <pkg> --python <minor>` | Provision Python directly, without the agent. `--pip-arg` (repeatable) passes an allowlisted pip flag through, e.g. `--pip-arg=--index-url --pip-arg=https://download.pytorch.org/whl/cpu` |
 | `install node <version>` · `install npm <pkg> --node <version>` | Provision Node/npm directly |
 | `install java <version>` | Provision a Temurin JDK (javac bundled) directly |
 | `install maven <group:artifact:version> --java <version>` | Resolve JVM deps into a classpath (Coursier) |
@@ -258,7 +274,7 @@ context. To learn the protocol by hand, see [`test/PLAYGROUND.md`](test/PLAYGROU
 |---|---|
 | `ping` | Liveness check (`pong`) |
 | `python.install` | A portable Python (python-build-standalone), run by absolute path |
-| `pip.install` | Python packages — from a sandbox-reachable mirror (Tier 0) or relayed in by Popo for air-gapped boxes (Tier 1) |
+| `pip.install` | Python packages — from a sandbox-reachable mirror (Tier 0) or relayed in by Popo for air-gapped boxes (Tier 1). Accepts allowlisted `extra_args` (e.g. `--index-url`, `--pre`) so complex installs like PyTorch work |
 | `node.install` | A portable Node.js runtime (npm bundled), run by absolute path |
 | `npm.install` | npm packages (Tier 0 mirror / Tier 1 relay); returns a `NODE_PATH` to `require()` them |
 | `java.install` | A portable Temurin JDK (javac bundled), run by absolute path |
