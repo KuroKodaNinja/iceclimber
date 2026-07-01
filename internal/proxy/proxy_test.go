@@ -201,6 +201,41 @@ func TestProxy_StreamsChunkedAndLargeBody(t *testing.T) {
 	}
 }
 
+func TestProxy_PathDenier(t *testing.T) {
+	// The host is admitted (allow-all decider), but a per-request path veto blocks one
+	// package path — that request gets a 403 response (the CONNECT already succeeded),
+	// while other paths on the same host pass. Package/path-level policy.
+	up, tr := upstreamTLS(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "reached "+r.URL.Path) })
+	defer up.Close()
+	ca, _ := NewCA()
+	p := New(ca, nil, nil, tr) // host allow-all
+	p.SetPathDenier(func(r Request) (bool, string) {
+		return strings.Contains(r.Path, "/blocked/"), "package blocked"
+	})
+	client, stop := clientThroughProxy(t, p)
+	defer stop()
+
+	// An allowed path passes.
+	ok, err := client.Get(up.URL + "/simple/six/")
+	if err != nil {
+		t.Fatalf("allowed path: %v", err)
+	}
+	ok.Body.Close()
+	if ok.StatusCode != 200 {
+		t.Errorf("allowed path status = %d, want 200", ok.StatusCode)
+	}
+	// A blocked path is 403 (a response, since the host/CONNECT was admitted).
+	bad, err := client.Get(up.URL + "/blocked/evil/")
+	if err != nil {
+		t.Fatalf("blocked path: %v", err)
+	}
+	body, _ := io.ReadAll(bad.Body)
+	bad.Body.Close()
+	if bad.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "package blocked") {
+		t.Errorf("blocked path = %d %q, want 403 + reason", bad.StatusCode, body)
+	}
+}
+
 func TestProxy_NoContentStatus(t *testing.T) {
 	// A 204 must be serialized bodyless (no Content-Length, no hang waiting for a body).
 	up, tr := upstreamTLS(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })

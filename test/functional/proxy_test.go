@@ -4,7 +4,9 @@ package functional
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -48,6 +50,51 @@ func TestProxyPipEgress(t *testing.T) {
 	den := limaSh(t, `eval "$(`+root+`/popo shellenv)"; wget -qO- https://example.org/ >/dev/null 2>&1 && echo REACHED || echo BLOCKED`)
 	if !strings.Contains(den, "BLOCKED") {
 		t.Errorf("unlisted host should be blocked by the egress policy, got: %s", den)
+	}
+}
+
+// TestProxyPackagePathDeny proves package/path-level egress policy: on an ALLOWED registry
+// host, a deny rule that includes a path ("https://pypi.org/simple/six/*") blocks just that
+// one package (the proxy's per-request path veto returns 403) while every other package on
+// the same host still installs. The domain-level relay never saw paths; the MITM proxy does.
+func TestProxyPackagePathDeny(t *testing.T) {
+	sb := requireSandbox(t)
+	root := "/tmp/iceclimber-proxypath-" + protocol.NewID()
+	scheduleRootCleanup(t, root)
+	approvals := filepath.Join(t.TempDir(), "approvals.json")
+	if err := os.WriteFile(approvals, []byte(`{"allow":null,"deny":["https://pypi.org/simple/six/*"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := writeProxyConfig(t, sb, root, `approvals_file: `+approvals+`
+network:
+  allowed_domains:
+    - { pattern: "pypi.org", reachable_from: controller }
+    - { pattern: "files.pythonhosted.org", reachable_from: controller }`)
+
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
+	runIceclimber(t, "install", "python", "3.12", "--config", cfg, "--transport", "sftp")
+
+	stop := startProxyServe(t, cfg)
+	defer stop()
+
+	py := root + "/runtimes/python/*/bin/python3"
+	// six is on an allowed host but matched by the path-deny rule → pip can't resolve it.
+	six := limaSh(t, `eval "$(`+root+`/popo shellenv)"; `+py+
+		` -m pip install --disable-pip-version-check --no-cache-dir --target `+root+`/site --no-input six `+
+		`>/dev/null 2>&1 && echo SIX_INSTALLED || echo SIX_BLOCKED`)
+	if !strings.Contains(six, "SIX_BLOCKED") {
+		t.Errorf("six should be blocked by the package-path deny rule, got: %s", six)
+	}
+	// idna, same host, no matching rule → installs normally (proves it's path- not host-level).
+	idna := limaSh(t, `eval "$(`+root+`/popo shellenv)"; `+py+
+		` -m pip install --disable-pip-version-check --no-cache-dir --target `+root+`/site --no-input idna `+
+		`>/dev/null 2>&1 && echo IDNA_INSTALLED || echo IDNA_FAILED`)
+	if !strings.Contains(idna, "IDNA_INSTALLED") {
+		t.Fatalf("idna (same host, not denied) should install through the proxy, got: %s", idna)
+	}
+	imp := limaSh(t, `PYTHONPATH=`+root+`/site `+py+` -c 'import idna; print("IMPORT_OK", idna.__version__)'`)
+	if !strings.Contains(imp, "IMPORT_OK") {
+		t.Errorf("import idna from proxy-installed pkg: %s", imp)
 	}
 }
 

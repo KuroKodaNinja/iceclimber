@@ -37,14 +37,23 @@ type Decider func(Request) Verdict
 // AuditFunc records a serviced request (nil = no audit).
 type AuditFunc func(Request, Verdict, int)
 
+// PathDenier is an optional per-request (full-URL) veto applied AFTER the host was
+// admitted at CONNECT: it enforces package/path-level deny rules (e.g. block one package
+// on an otherwise-allowed registry). Returns (denied, reason). nil = no path-level policy.
+type PathDenier func(Request) (bool, string)
+
 // Proxy is the MITM egress proxy: it terminates TLS with CA-minted leaves, consults the
 // Decider, forwards allowed requests upstream over real TLS, and audits each one.
 type Proxy struct {
-	ca     *CA
-	decide Decider
-	audit  AuditFunc
-	tr     *http.Transport
+	ca       *CA
+	decide   Decider
+	pathDeny PathDenier
+	audit    AuditFunc
+	tr       *http.Transport
 }
+
+// SetPathDenier installs the per-request path-level veto (see PathDenier).
+func (p *Proxy) SetPathDenier(fn PathDenier) { p.pathDeny = fn }
 
 // New builds a proxy. A nil decider allows everything; a nil audit is silent. upstream
 // may override the upstream transport (tests inject a root pool); nil uses a default that
@@ -153,6 +162,13 @@ func requestOf(req *http.Request) Request {
 // streams the response back to w. Returns whether the client connection can be reused.
 func (p *Proxy) forward(w net.Conn, req *http.Request, v Verdict) bool {
 	pr := requestOf(req)
+	// Package/path-level veto: the host was admitted at CONNECT, but a per-request rule may
+	// block this specific URL (e.g. one package on an allowed registry).
+	if v.Allow && p.pathDeny != nil {
+		if denied, reason := p.pathDeny(pr); denied {
+			v = Verdict{Allow: false, Reason: reason}
+		}
+	}
 	if !v.Allow {
 		if p.audit != nil {
 			p.audit(pr, v, http.StatusForbidden)

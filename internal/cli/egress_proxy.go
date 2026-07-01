@@ -63,6 +63,18 @@ func startEgressProxy(sess *session, cfg *config.Config, out io.Writer) (func(),
 	// + rewrite table), reusing the interactive approver when serve is supervised.
 	pp := newProxyPolicy(sess.policy, sess.approver, cfg.SandboxID)
 	p := proxy.New(ca, pp.decide, audit, nil)
+	// Package/path-level enforcement on an already-admitted host: a deny rule whose glob
+	// includes a path (e.g. "https://pypi.org/simple/leftpad/*") blocks just that URL. The
+	// host-level gate (pp.decide at CONNECT) can't see the path; this per-request veto can.
+	p.SetPathDenier(func(r proxy.Request) (bool, string) {
+		// r.URL carries the upstream port (":443"); deny globs are written without it
+		// (e.g. "https://pypi.org/simple/six/*"), so match against a normalized,
+		// port-free URL built from the already-stripped host and the request path.
+		if sess.policy != nil && sess.policy.StoreDenied("https://"+r.Host+r.Path) {
+			return true, "blocked by rule"
+		}
+		return false, ""
+	})
 	go func() { _ = p.Serve(ln) }()
 	fmt.Fprintf(out, "  egress proxy up: sandbox 127.0.0.1:%d → controller MITM\n", cfg.EgressPort())
 	return func() { _ = ln.Close() }, nil
