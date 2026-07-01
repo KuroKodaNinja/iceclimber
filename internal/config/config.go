@@ -65,10 +65,11 @@ type Config struct {
 	// "30m"); empty = the 1h default; "0" disables the retention sweep (collected pairs
 	// are still pruned). See Config.Retention.
 	MaildirRetention string `yaml:"maildir_retention"`
-	// EgressMode selects how the sandbox obtains packages: "relay" (default — the
-	// controller resolves + relays artifacts in; the sandbox has no network) or "proxy"
-	// (the sandbox's own package managers reach real registries through a controller-run
-	// MITM proxy over the SSH reverse tunnel; still no direct sandbox internet).
+	// EgressMode selects how the sandbox obtains packages: "proxy" (default — the sandbox's
+	// own package managers reach real registries through a controller-run MITM proxy over
+	// the SSH reverse tunnel; still no direct sandbox internet) or "relay" (the controller
+	// resolves + relays artifacts in; the sandbox never opens a connection at all — the
+	// stricter air-gap for compliance regimes that want only relayed files). Empty = proxy.
 	EgressMode string `yaml:"egress_mode"`
 	// EgressProxyPort is the sandbox loopback port the reverse tunnel exposes the proxy on
 	// (what the sandbox's HTTPS_PROXY points at). Empty/0 = the default (see EgressPort).
@@ -96,8 +97,12 @@ func (c *Config) Retention() time.Duration {
 // when egress_proxy_port is unset.
 const DefaultEgressProxyPort = 18080
 
-// EgressProxy reports whether the operator selected the MITM-proxy egress mode.
-func (c *Config) EgressProxy() bool { return strings.EqualFold(c.EgressMode, "proxy") }
+// EgressProxy reports whether egress runs through the MITM proxy — the default; only an
+// explicit egress_mode: relay opts out (to the stricter relay-only air-gap).
+func (c *Config) EgressProxy() bool { return !strings.EqualFold(c.EgressMode, "relay") }
+
+// EgressRelay reports whether egress uses the relay tier (explicit egress_mode: relay).
+func (c *Config) EgressRelay() bool { return strings.EqualFold(c.EgressMode, "relay") }
 
 // EgressPort is the configured sandbox loopback proxy port, or the default.
 func (c *Config) EgressPort() int {

@@ -35,6 +35,9 @@ func TestJavaMavenBuild(t *testing.T) {
 	}
 	sb := harness.Require(t)
 	root := sb.NewRoot(t)
+	// This exercises the RELAY maven build (controller primes an offline .m2, sandbox builds
+	// `mvn -o`); the harness pins egress_mode: relay for all scenarios. The proxy-mode online
+	// build is covered by TestProxyMavenBuild (it needs a live serve for the tunnel).
 	cfg := sb.WriteConfig(t, root, `network:
   allowed_domains:
     - pattern: "xkcd.com"

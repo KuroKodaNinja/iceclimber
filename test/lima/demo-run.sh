@@ -27,9 +27,13 @@ CFG="$REPO/.demo/config.yaml"
 [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "$REPO/.demo/token.env" ] && . "$REPO/.demo/token.env"
 : "${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or stash it in .demo/token.env — subscription, not API}"
 
-# 1. Point a config at the VM (remote_root pinned) and create the tree.
+# 1. Point a config at the VM (remote_root pinned) and create the tree. This demo is the
+#    RELAY air-gap proof (the sandbox opens no connection at all — only relayed files), so
+#    pin relay explicitly now that proxy is the default egress mode; the proxy path has its
+#    own coverage (TestProxy* functional).
 root="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"
 bash "$HERE/gen-config.sh" "$DEMO" "$CFG" "$root"
+printf 'egress_mode: relay\n' >> "$CFG"
 "$BIN" bootstrap --config "$CFG"
 
 # 2. Pre-approve the fetch host (operator-owned allow rule) so the unattended

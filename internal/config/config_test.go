@@ -208,13 +208,17 @@ func TestRetention(t *testing.T) {
 }
 
 func TestEgressMode(t *testing.T) {
-	// Defaults: relay (proxy off), default port.
+	// Defaults: proxy (the primary path), default port.
 	c := &Config{}
-	if c.EgressProxy() {
-		t.Error("empty egress_mode should be relay (proxy off)")
+	if !c.EgressProxy() || c.EgressRelay() {
+		t.Error("empty egress_mode should default to proxy")
 	}
 	if c.EgressPort() != DefaultEgressProxyPort {
 		t.Errorf("EgressPort default = %d, want %d", c.EgressPort(), DefaultEgressProxyPort)
+	}
+	// Explicit relay opts out of the proxy.
+	if r := (&Config{EgressMode: "relay"}); r.EgressProxy() || !r.EgressRelay() {
+		t.Error("egress_mode: relay should disable the proxy")
 	}
 	// Proxy mode + explicit port.
 	c = &Config{EgressMode: "proxy", EgressProxyPort: 9999}

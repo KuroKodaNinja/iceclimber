@@ -190,15 +190,12 @@ for air-gapped boxes — via the **relay**: the operator's controller conda (con
 sandbox-platform packages, synthesizes a self-contained local channel, and the sandbox
 installs from it **offline**. `pip.install` also works into a conda env.
 
-### Egress: relay (default) or proxy
+### Egress: proxy (default) or relay
 
 There are two ways the sandbox gets packages, both keeping it off the open internet:
 
-- **`egress_mode: relay`** (default) — the controller resolves + downloads artifacts on
-  its network and relays them in; the sandbox installs offline. iceclimber integrates
-  each manager (pip/npm/maven/conda) explicitly.
-- **`egress_mode: proxy`** — the sandbox runs its **own** package managers against real
-  registries through a controller-run **MITM proxy**, exposed over an `ssh -R` reverse
+- **`egress_mode: proxy`** (default) — the sandbox runs its **own** package managers against
+  real registries through a controller-run **MITM proxy**, exposed over an `ssh -R` reverse
   tunnel (the sandbox still has **no direct network** — its only egress is a loopback
   port). Popo mints a CA the sandbox trusts (installed no-root: the cert env is written at
   bootstrap; the Java keystore is built at JDK-install / first build, since it needs a JDK)
@@ -215,9 +212,14 @@ There are two ways the sandbox gets packages, both keeping it off the open inter
   conda, cargo, go, `git`, `apt`, … Java is the one ecosystem needing more than a cert env
   (the JVM ignores those): Popo builds a JVM truststore from the CA, so `maven build` runs
   **online through the proxy** (resolving plugins + deps from Maven Central) instead of the
-  relay's offline `.m2`. Set `egress_mode: proxy` (optionally `egress_proxy_port`) and, for
-  headless serve, list your registries under `network.allowed_domains` (interactive serve
-  prompts for unlisted hosts). Runtimes are still installed via the relay.
+  relay's offline `.m2`. For headless serve, list your registries under
+  `network.allowed_domains` (interactive serve prompts for unlisted hosts); native-tool
+  egress needs an active `serve` (that's what runs the proxy). Runtimes are still installed
+  via the relay.
+- **`egress_mode: relay`** — the controller resolves + downloads artifacts on its network
+  and relays them in; the sandbox installs offline and **never opens a connection at all**.
+  iceclimber integrates each manager (pip/npm/maven/conda) explicitly. This is the stricter
+  air-gap — only relayed files, no live egress — for compliance regimes that require it.
 
 ### 4. Serve — the console, or headless
 

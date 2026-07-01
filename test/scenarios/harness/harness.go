@@ -113,6 +113,10 @@ func (s *Sandbox) NewRoot(t *testing.T) string {
 // a network.allowed_domains block), into the test's temp dir.
 func (s *Sandbox) WriteConfig(t *testing.T, root, extraYAML string) string {
 	t.Helper()
+	// Scenarios exercise the language toolchains (install → build → run + Fetch), not the
+	// egress mode; pin relay so a one-shot `serve --once` fetch doesn't stand up (and contend
+	// on) the proxy reverse tunnel now that proxy is the default. Proxy egress has its own
+	// coverage (TestProxy* functional).
 	content := fmt.Sprintf(`sandbox_id: %s
 ssh:
   host: %s
@@ -121,6 +125,7 @@ ssh:
   identity_file: %s
   known_hosts: %s
 remote_root: %s
+egress_mode: relay
 `, s.name, s.conn.Host, s.conn.Port, s.conn.User, s.conn.IdentityFile, s.conn.KnownHosts, root)
 	if extraYAML != "" {
 		content += strings.TrimRight(extraYAML, "\n") + "\n"
