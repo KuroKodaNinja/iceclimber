@@ -93,7 +93,7 @@ type hbStatus struct {
 	age   time.Duration
 }
 
-func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, conn ConnState, hb hbStatus, serving string, popoLines []popoLine, nanaLines []string, showNana, hasAgentLog, hasOps bool, running, meter string) string {
+func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS time.Time, conn ConnState, hb hbStatus, serving string, popoLines []popoLine, nanaLines []string, showNana, hasAgentLog, hasOps bool, running, meter string, scroll int) string {
 	if w < 40 {
 		w = 40
 	}
@@ -117,9 +117,9 @@ func dashboard(w, h int, sandboxID string, served, approved, denied int, lastTS 
 	if showNana {
 		lw := (w - 1) / 2
 		rw := w - 1 - lw
-		body = lipgloss.JoinHorizontal(lipgloss.Top, popoPane(lw, bodyH, popoLines), " ", nanaPane(rw, bodyH, hasAgentLog, nanaLines))
+		body = lipgloss.JoinHorizontal(lipgloss.Top, popoPane(lw, bodyH, scroll, popoLines), " ", nanaPane(rw, bodyH, scroll, hasAgentLog, nanaLines))
 	} else {
-		body = popoPane(w, bodyH, popoLines)
+		body = popoPane(w, bodyH, scroll, popoLines)
 	}
 	rows := []string{hdr}
 	if banner != "" {
@@ -210,20 +210,24 @@ func pct(ratio float64) int {
 	return p
 }
 
-func popoPane(w, h int, lines []popoLine) string {
+func popoPane(w, h, scroll int, lines []popoLine) string {
 	cw, ch := w-2, h-2
 	if ch < 2 {
 		ch = 2
 	}
-	rows := make([]string, 0, ch-1)
-	for _, pl := range lastPopo(lines, ch-1) {
-		rows = append(rows, pl.style.Render(truncate(pl.plain, cw)))
+	// Wrap each logical line to the pane width (so a long error is fully readable, not cut),
+	// then window the wrapped rows to the pane height with a scrollback offset.
+	var wrapped []string
+	for _, pl := range lines {
+		for _, seg := range wrapPlain(pl.plain, cw) {
+			wrapped = append(wrapped, pl.style.Render(seg))
+		}
 	}
-	content := titleStyle.Render("[POPO] controller") + "\n" + strings.Join(rows, "\n")
+	content := titleStyle.Render("[POPO] controller") + "\n" + strings.Join(windowRows(wrapped, ch-1, scroll), "\n")
 	return paneBox(cPopo, cw, ch).Render(content)
 }
 
-func nanaPane(w, h int, hasNana bool, lines []string) string {
+func nanaPane(w, h, scroll int, hasNana bool, lines []string) string {
 	cw, ch := w-2, h-2
 	if ch < 2 {
 		ch = 2
@@ -237,17 +241,37 @@ func nanaPane(w, h int, hasNana bool, lines []string) string {
 		}
 		content = title + "\n" + dimStyle.Render(hint)
 	} else {
-		start := 0
-		if n := len(lines); n > ch-1 {
-			start = n - (ch - 1)
+		var wrapped []string
+		for _, l := range lines {
+			wrapped = append(wrapped, wrapPlain(l, cw)...)
 		}
-		rows := make([]string, 0, ch-1)
-		for _, l := range lines[start:] {
-			rows = append(rows, truncate(l, cw))
-		}
-		content = title + "\n" + strings.Join(rows, "\n")
+		content = title + "\n" + strings.Join(windowRows(wrapped, ch-1, scroll), "\n")
 	}
 	return paneBox(cNana, cw, ch).Render(content)
+}
+
+// windowRows returns at most n rows from the tail of rows, shifted up by scroll (0 = follow
+// the tail / newest). scroll is clamped so it can't page past the top; the visible slice
+// always ends at len(rows)-scroll.
+func windowRows(rows []string, n, scroll int) []string {
+	if n < 1 {
+		n = 1
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+	if max := len(rows) - n; scroll > max {
+		if max < 0 {
+			max = 0
+		}
+		scroll = max
+	}
+	end := len(rows) - scroll
+	start := end - n
+	if start < 0 {
+		start = 0
+	}
+	return rows[start:end]
 }
 
 // modalView renders a centred approval modal over a blank screen.
@@ -400,11 +424,4 @@ func paneBox(border lipgloss.Color, w, h int) lipgloss.Style {
 		Width(w).
 		Height(h).
 		MaxHeight(h + 2)
-}
-
-func lastPopo(lines []popoLine, n int) []popoLine {
-	if n <= 0 || n >= len(lines) {
-		return lines
-	}
-	return lines[len(lines)-n:]
 }

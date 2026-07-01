@@ -228,6 +228,7 @@ type Console struct {
 	panelErr     string // last egress action error, shown in the panel ("" = none)
 	width        int
 	height       int
+	scroll       int       // pane scrollback offset in wrapped rows (0 = follow the newest)
 	connState    ConnState // SSH link state (connected vs reconnecting)
 	// Heartbeat freshness — distinct from the link: a connected-but-wedged dispatcher
 	// stops advancing the seq, which the header surfaces as "stale".
@@ -313,6 +314,25 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
 			return c, tea.Quit
+		case "up", "k":
+			c.scroll++ // scroll back into history (windowRows clamps at the top)
+			return c, nil
+		case "down", "j":
+			if c.scroll > 0 {
+				c.scroll--
+			}
+			return c, nil
+		case "pgup":
+			c.scroll += 10
+			return c, nil
+		case "pgdown":
+			if c.scroll -= 10; c.scroll < 0 {
+				c.scroll = 0
+			}
+			return c, nil
+		case "end", "G":
+			c.scroll = 0 // jump back to following the newest
+			return c, nil
 		case "i":
 			if c.ops != nil {
 				return c.openForm("install")
@@ -517,7 +537,7 @@ func (c Console) View() string {
 		hb = hbStatus{known: true, seq: c.heartbeatSeq, age: time.Since(c.lastHeartbeat)}
 	}
 	return dashboard(c.width, c.height, c.sandboxID, c.served, c.approved, c.denied,
-		c.lastTS, c.connState, hb, serving, c.popoLines, c.nanaLines, true, c.nana != nil, c.ops != nil, c.running, meter)
+		c.lastTS, c.connState, hb, serving, c.popoLines, c.nanaLines, true, c.nana != nil, c.ops != nil, c.running, meter, c.scroll)
 }
 
 // openForm builds and focuses the named operator form.

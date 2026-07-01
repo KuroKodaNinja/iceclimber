@@ -7,6 +7,7 @@ package tui
 import (
 	"encoding/json"
 	"regexp"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -90,7 +91,7 @@ func (m *Model) addNana(raw string) {
 // View renders the passive dashboard frame.
 func (m Model) View() string {
 	return dashboard(m.width, m.height, m.sandboxID, m.served, m.approved, m.denied,
-		m.lastTS, ConnViewing, hbStatus{}, "", m.popoLines, m.nanaLines, m.nana != nil, m.nana != nil, false, "", "")
+		m.lastTS, ConnViewing, hbStatus{}, "", m.popoLines, m.nanaLines, m.nana != nil, m.nana != nil, false, "", "", 0)
 }
 
 // Init starts the poll ticker.
@@ -148,6 +149,53 @@ func truncate(s string, w int) string {
 		return string(r[:w])
 	}
 	return string(r[:w-1]) + "…"
+}
+
+// wrapPlain word-wraps s to width w so a long line (e.g. a full error message) is fully
+// readable instead of truncated. A line that already fits is returned unchanged (preserving
+// its column alignment); only over-width lines are wrapped, breaking on spaces and hard-
+// breaking any single token longer than w. Rune-aware, plain text only. Always ≥1 line.
+func wrapPlain(s string, w int) []string {
+	if w < 1 {
+		w = 1
+	}
+	if len([]rune(s)) <= w {
+		return []string{s}
+	}
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	var lines []string
+	cur := ""
+	flush := func() {
+		if cur != "" {
+			lines = append(lines, cur)
+			cur = ""
+		}
+	}
+	for _, word := range words {
+		for len([]rune(word)) > w { // hard-break an over-long token
+			flush()
+			r := []rune(word)
+			lines = append(lines, string(r[:w]))
+			word = string(r[w:])
+		}
+		switch {
+		case cur == "":
+			cur = word
+		case len([]rune(cur))+1+len([]rune(word)) <= w:
+			cur += " " + word
+		default:
+			flush()
+			cur = word
+		}
+	}
+	flush()
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
 }
 
 func ago(t time.Time) string {

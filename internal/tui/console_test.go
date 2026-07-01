@@ -250,13 +250,66 @@ func TestEventToLine_StartedStyle(t *testing.T) {
 }
 
 // TestDashboard_ServingAndRunningCoexist: the agent in-flight banner and the operator
+func TestWrapPlain(t *testing.T) {
+	// A short line is untouched (alignment preserved).
+	if got := wrapPlain("abc def", 40); len(got) != 1 || got[0] != "abc def" {
+		t.Errorf("short line wrapped: %q", got)
+	}
+	// A long line wraps into width-bounded rows that reconstruct the words.
+	long := "egress proxy unavailable native-tool egress disabled this session connection refused"
+	rows := wrapPlain(long, 20)
+	if len(rows) < 2 {
+		t.Fatalf("long line should wrap to multiple rows, got %d: %v", len(rows), rows)
+	}
+	for _, r := range rows {
+		if len([]rune(r)) > 20 {
+			t.Errorf("wrapped row exceeds width: %q (%d)", r, len([]rune(r)))
+		}
+	}
+	if strings.Join(rows, " ") != long {
+		t.Errorf("wrapped rows lost content:\n got %q\nwant %q", strings.Join(rows, " "), long)
+	}
+	// An over-long single token is hard-broken.
+	hb := wrapPlain(strings.Repeat("x", 25), 10)
+	if len(hb) != 3 || len([]rune(hb[0])) != 10 {
+		t.Errorf("over-long token not hard-broken to width: %v", hb)
+	}
+}
+
+func TestWindowRows(t *testing.T) {
+	rows := []string{"a", "b", "c", "d", "e"}
+	if got := windowRows(rows, 2, 0); strings.Join(got, "") != "de" { // follow tail
+		t.Errorf("tail window = %v, want [d e]", got)
+	}
+	if got := windowRows(rows, 2, 1); strings.Join(got, "") != "cd" { // scrolled up one
+		t.Errorf("scroll=1 window = %v, want [c d]", got)
+	}
+	if got := windowRows(rows, 2, 99); strings.Join(got, "") != "ab" { // clamped at top
+		t.Errorf("over-scroll window = %v, want [a b] (clamped)", got)
+	}
+}
+
+func TestPopoPaneRendersLongLineFully(t *testing.T) {
+	// A long error line must be fully readable (wrapped), not cut with an ellipsis.
+	long := "egress proxy unavailable — native-tool egress disabled this session: ssh: tcpip-forward request denied by peer on port 18080"
+	out := popoPane(40, 12, 0, []popoLine{{plain: long, style: dimStyle}})
+	if strings.Contains(out, "…") {
+		t.Errorf("long line was truncated with an ellipsis; want wrapped:\n%s", out)
+	}
+	for _, frag := range []string{"tcpip-forward", "denied", "18080"} {
+		if !strings.Contains(out, frag) {
+			t.Errorf("wrapped pane is missing %q — message not fully readable:\n%s", frag, out)
+		}
+	}
+}
+
 // footer meter are independent — both must render in the same frame (an operator action
 // and an agent request can be in flight at once) without clobbering each other.
 func TestDashboard_ServingAndRunningCoexist(t *testing.T) {
 	out := dashboard(120, 40, "sbx", 0, 0, 0, time.Time{}, ConnConnected, hbStatus{},
 		servingLine("⠋", "pip.install", 3*time.Second), // agent in-flight banner
 		nil, nil, true, false, true,
-		"install python", "⠋ install python · transferring") // operator running + meter
+		"install python", "⠋ install python · transferring", 0) // operator running + meter + scroll
 	if !strings.Contains(out, "▸ servicing pip.install") {
 		t.Error("agent serving banner missing from the frame")
 	}
