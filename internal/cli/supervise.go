@@ -55,6 +55,13 @@ func superviseServe(ctx context.Context, cfg *config.Config, transport string, d
 		if err != nil {
 			return false, false, err // dial failed — not authenticated, nothing served
 		}
+		// Don't serve an unprovisioned sandbox: without the tree, disp.Serve returns instantly
+		// and the loop would spin. Fail fast with a clear, non-retryable error (bootstrap is a
+		// separate, explicit step).
+		if !sess.isBootstrapped(ctx) {
+			_ = sess.Close()
+			return true, false, notBootstrappedErr(cfg.SandboxID)
+		}
 		holder.Set(sess)
 		if hooks.onConnected != nil {
 			hooks.onConnected(sess, attempt)
@@ -78,6 +85,15 @@ func superviseServe(ctx context.Context, cfg *config.Config, transport string, d
 		return true, true, err // reached Serve — a healthy cycle resets backoff
 	}
 	return runSupervisor(ctx, prompter, cycle, hooks.onDown, sleepCtx)
+}
+
+// errNotBootstrapped marks a sandbox that has no iceclimber tree yet. runSupervisor stops
+// (rather than reconnect-loops) on it, and serve surfaces the wrapped message.
+var errNotBootstrapped = errors.New("sandbox not bootstrapped")
+
+// notBootstrappedErr wraps errNotBootstrapped with an operator-facing message naming the box.
+func notBootstrappedErr(sandboxID string) error {
+	return fmt.Errorf("sandbox %q is not bootstrapped — run `iceclimber bootstrap` first: %w", sandboxID, errNotBootstrapped)
 }
 
 // passwordCache is the Commit/Forget face of CachingPrompter the supervisor drives:
@@ -116,6 +132,12 @@ func runSupervisor(ctx context.Context, cache passwordCache, cycle cycleFunc, on
 		// A cancelled context (Ctrl-C / SIGTERM) is a clean stop, not a drop.
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 			return nil
+		}
+		// An unprovisioned sandbox isn't a transient drop — stop with the error rather than
+		// reconnect-looping. (The console cycle handles this differently: it waits for an
+		// in-place bootstrap instead of returning this.)
+		if errors.Is(err, errNotBootstrapped) {
+			return err
 		}
 
 		// Transient: back off and reconnect.

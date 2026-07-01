@@ -97,6 +97,10 @@ func withDispatcher(ctx context.Context, cfg *config.Config, transport string, d
 		return err
 	}
 	defer sess.Close()
+	// Don't serve an unprovisioned sandbox (no tree → the dispatcher errors immediately).
+	if !sess.isBootstrapped(ctx) {
+		return notBootstrappedErr(cfg.SandboxID)
+	}
 	h := &sessionHolder{}
 	h.Set(sess)
 	startAgentLogBridge(ctx, cfg, h)

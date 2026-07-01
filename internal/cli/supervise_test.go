@@ -125,6 +125,30 @@ func TestSupervisor_BackoffResetsAfterHealthyCycle(t *testing.T) {
 	}
 }
 
+// TestSupervisor_NotBootstrappedStops: an unprovisioned sandbox is not a transient drop —
+// runSupervisor must STOP with the error, not reconnect-loop.
+func TestSupervisor_NotBootstrappedStops(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cache := &fakeCache{}
+	var sleeps []time.Duration
+	calls := 0
+	cycle := func(_ context.Context, _ int) (authenticated, served bool, err error) {
+		calls++
+		return true, false, notBootstrappedErr("box-1")
+	}
+	err := runSupervisor(ctx, cache, cycle, nil, instantSleep(&sleeps))
+	if !errors.Is(err, errNotBootstrapped) {
+		t.Errorf("runSupervisor should return the not-bootstrapped error, got %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("cycle ran %d times, want 1 (no reconnect loop)", calls)
+	}
+	if len(sleeps) != 0 {
+		t.Errorf("not-bootstrapped must not back off/retry; got sleeps=%v", sleeps)
+	}
+}
+
 // TestSupervisor_AuthenticatedNotServedEscalates guards the runSupervisor invariant: a cycle
 // that authenticates but never serves (authenticated=true, served=false) must NOT reset the
 // backoff (else it would spin forever at the initial interval); the password is still

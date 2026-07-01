@@ -3,7 +3,9 @@ package protocol
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	iofs "io/fs"
 	"path"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
@@ -33,6 +35,22 @@ func EnsureTree(ctx context.Context, fs remotefs.FS, t Tree) error {
 		}
 	}
 	return nil
+}
+
+// IsBootstrapped reports whether the sandbox at t has been provisioned. It checks for
+// skill/NANA.md — written unconditionally by bootstrap's provision and never by serve — so it
+// distinguishes a real iceclimber sandbox from a bare/fresh remote_root. A missing file is a
+// clean false (not an error); a transport error propagates so callers don't misread an
+// unreachable box as unprovisioned.
+func IsBootstrapped(ctx context.Context, fs remotefs.FS, t Tree) (bool, error) {
+	_, err := fs.ReadFile(ctx, t.SkillFile())
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, iofs.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 // Deliver atomically publishes data into the maildir: write to tmp/, then rename

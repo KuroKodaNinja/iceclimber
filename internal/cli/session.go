@@ -83,6 +83,14 @@ func (h *sessionHolder) Get() *session {
 	return h.cur
 }
 
+// isBootstrapped reports whether this sandbox has been provisioned (skill/NANA.md present).
+// A transport error is treated as "not bootstrapped" for gating purposes — the caller is
+// about to serve, and a bare/unreachable box shouldn't enter the serve loop either way.
+func (s *session) isBootstrapped(ctx context.Context) bool {
+	ok, err := protocol.IsBootstrapped(ctx, s.fs, s.tree)
+	return ok && err == nil
+}
+
 // systemRuntimePath returns the system interpreter path for a language in system
 // mode: the source's explicit Path, else the binary probe discovered on PATH, else
 // "" (the manager falls back to the bare name on PATH).

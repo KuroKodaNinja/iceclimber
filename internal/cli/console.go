@@ -109,6 +109,21 @@ type consoleOps struct {
 	holder *sessionHolder // current session; the supervisor swaps it on reconnect
 	act    *activity.Logger
 	events chan tea.Msg
+	// bootstrapped nudges the serve cycle to start serving right after an in-place bootstrap
+	// (non-blocking; buffered 1).
+	bootstrapped chan<- struct{}
+}
+
+// nudgeBootstrapped signals the serve cycle that the sandbox is now provisioned (no-op if a
+// nudge is already queued or the console has none wired).
+func (o *consoleOps) nudgeBootstrapped() {
+	if o.bootstrapped == nil {
+		return
+	}
+	select {
+	case o.bootstrapped <- struct{}{}:
+	default:
+	}
 }
 
 // sess returns the current session. After an SSH drop the supervisor reconnects and
@@ -255,6 +270,7 @@ func (o *consoleOps) RunBootstrap() tea.Cmd {
 			// provision's smoke test already round-tripped a ping/pong through the
 			// sandbox maildir — that IS the sandbox echoing back.
 			o.echo(echo{"sandbox echoed pong (ping/pong smoke test)", true})
+			o.nudgeBootstrapped() // let the serve cycle start now, not after a backoff
 		}
 		return tui.OpResultMsg{}
 	}
@@ -275,6 +291,7 @@ func (o *consoleOps) RunBootstrapReset() tea.Cmd {
 		o.record("bootstrap", "RESET — wiped runtimes + state, then reprovisioned", err)
 		if err == nil {
 			o.echo(echo{"sandbox reset + reprovisioned (ping/pong smoke test)", true})
+			o.nudgeBootstrapped()
 		}
 		return tui.OpResultMsg{}
 	}
@@ -756,9 +773,13 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	if err != nil {
 		return err
 	}
-	prompter.Commit() // the startup dial authenticated — remember the password for reconnects
+	prompter.Commit()   // the startup dial authenticated — remember the password for reconnects
+	uiReady.Store(true) // from here every dial is a reconnect → route its prompt to the modal, never /dev/tty
 
 	act := activity.New(activityPath(cfg))
+	// bootstrapped nudges the serve cycle to re-check + start serving the instant the operator
+	// bootstraps in-place (below), instead of waiting on the reconnect backoff.
+	bootstrapped := make(chan struct{}, 1)
 
 	// The supervisor owns the session: it swaps the holder on each (re)connect and
 	// closes each session when its serve cycle ends. Close the current one on return
@@ -820,6 +841,22 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 					Type: "serve", Status: "ok", Detail: "reconnected to sandbox",
 				})
 			}
+			// Don't serve/tunnel an unprovisioned sandbox — that spun the reconnect loop and
+			// stormed the password prompt. Surface a clear state and WAIT (no spin) for an
+			// in-place bootstrap (the operator presses `b`), which nudges `bootstrapped`.
+			for !s.isBootstrapped(ctx) {
+				emit(activity.Event{
+					TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindOperated,
+					Type: "bootstrap", Status: "needs",
+					Detail: "sandbox not bootstrapped — press b to set it up (nothing is served until then)",
+				})
+				select {
+				case <-bootstrapped:
+				case <-ctx.Done():
+					_ = s.Close()
+					return true, false, ctx.Err()
+				}
+			}
 			disp := buildConsoleDispatcher(ctx, s, cfg, act, events)
 			// In proxy egress mode, bring up the reverse-tunneled MITM proxy for this
 			// connection so the sandbox's tools egress through it, gated by the console's
@@ -851,10 +888,9 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 		_ = runSupervisor(ctx, prompter, cycle, onDown, sleepCtx)
 	}()
 
-	ops := &consoleOps{ctx: ctx, holder: holder, act: act, events: events}
+	ops := &consoleOps{ctx: ctx, holder: holder, act: act, events: events, bootstrapped: bootstrapped}
 	model := tui.NewConsole(cfg.SandboxID, events, logPath, ops).
 		WithSeedCounts(seedServed, seedApproved, seedDenied)
-	uiReady.Store(true) // the alt-screen is about to run — route reconnect prompts to the modal
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 	cancel() // stop serving; any pending approval fails safe via done
 	return err
