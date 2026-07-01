@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"io"
@@ -162,6 +163,59 @@ func TestProxy_KeepAliveMultipleRequests(t *testing.T) {
 	}
 	if n != 3 {
 		t.Errorf("audited %d requests, want 3 (keep-alive loop served each)", n)
+	}
+}
+
+func TestProxy_StreamsChunkedAndLargeBody(t *testing.T) {
+	// An upstream that flushes without a Content-Length → the proxy must chunk it back to
+	// the client, streaming (not buffering) a large body. This is the case that hung when
+	// re-serializing via resp.Write; explicit framing must handle it.
+	const chunks, size = 32, 64 * 1024 // 2 MiB total
+	up, tr := upstreamTLS(t, func(w http.ResponseWriter, r *http.Request) {
+		fl, _ := w.(http.Flusher)
+		buf := bytes.Repeat([]byte("x"), size)
+		for i := 0; i < chunks; i++ {
+			w.Write(buf)
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+	})
+	defer up.Close()
+	ca, _ := NewCA()
+	p := New(ca, nil, nil, tr)
+	client, stop := clientThroughProxy(t, p)
+	defer stop()
+
+	resp, err := client.Get(up.URL + "/big")
+	if err != nil {
+		t.Fatalf("get big body through proxy: %v", err)
+	}
+	defer resp.Body.Close()
+	n, err := io.Copy(io.Discard, resp.Body)
+	if err != nil {
+		t.Fatalf("read big body: %v", err)
+	}
+	if n != int64(chunks*size) {
+		t.Errorf("streamed %d bytes, want %d", n, chunks*size)
+	}
+}
+
+func TestProxy_NoContentStatus(t *testing.T) {
+	// A 204 must be serialized bodyless (no Content-Length, no hang waiting for a body).
+	up, tr := upstreamTLS(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	defer up.Close()
+	ca, _ := NewCA()
+	p := New(ca, nil, nil, tr)
+	client, stop := clientThroughProxy(t, p)
+	defer stop()
+	resp, err := client.Get(up.URL + "/empty")
+	if err != nil {
+		t.Fatalf("get 204: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("status = %d, want 204", resp.StatusCode)
 	}
 }
 

@@ -2,12 +2,13 @@ package proxy
 
 import (
 	"bufio"
-	"bytes"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"strconv"
 	"time"
 )
 
@@ -184,31 +185,71 @@ func (p *Proxy) forward(w net.Conn, req *http.Request, v Verdict) bool {
 		writeStatus(w, http.StatusBadGateway, "upstream error")
 		return false
 	}
-	body, rerr := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if rerr != nil {
-		if p.audit != nil {
-			p.audit(pr, v, http.StatusBadGateway)
-		}
-		writeStatus(w, http.StatusBadGateway, "upstream read error")
-		return false
-	}
+	defer resp.Body.Close()
 	if p.audit != nil {
 		p.audit(pr, v, resp.StatusCode)
 	}
+	return writeResponse(w, resp)
+}
 
-	// Re-serialize to the client as HTTP/1.1 with a definite length: the upstream may have
-	// answered over HTTP/2 (whose "HTTP/2.0" status line an HTTP/1.1 client rejects) or
-	// chunked, and buffering lets us present a clean Content-Length the tunneled client
-	// frames unambiguously. (Full-body buffering is a known limitation for very large
-	// artifacts — relay mode is the path for those; streaming here is future work.)
-	resp.Body = io.NopCloser(bytes.NewReader(body))
-	resp.ContentLength = int64(len(body))
-	resp.Header.Set("Content-Length", fmt.Sprint(len(body)))
-	resp.TransferEncoding = nil
-	resp.Proto, resp.ProtoMajor, resp.ProtoMinor = "HTTP/1.1", 1, 1
-	resp.Close = false
-	return resp.Write(w) == nil
+// writeResponse serializes an upstream response to the client as HTTP/1.1, STREAMING the
+// body (no full-body buffering — large artifacts must not sit in controller memory). The
+// upstream may have answered over HTTP/2, so we build the status line + framing ourselves
+// rather than relying on resp.Write (which would emit an "HTTP/2.0" status line an
+// HTTP/1.1 client rejects). The transport already decompressed gzip (we stripped
+// Accept-Encoding), so stale content/transfer-encoding headers are dropped and framing is
+// chosen from the known length: Content-Length when the upstream gave one, else chunked.
+func writeResponse(w net.Conn, resp *http.Response) bool {
+	h := resp.Header
+	h.Del("Transfer-Encoding")
+	h.Del("Content-Encoding")
+	h.Del("Connection")
+	h.Del("Proxy-Connection")
+
+	if _, err := fmt.Fprintf(w, "HTTP/1.1 %d %s\r\n", resp.StatusCode, http.StatusText(resp.StatusCode)); err != nil {
+		return false
+	}
+	if resp.ContentLength >= 0 && !bodyless(resp.StatusCode) {
+		h.Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+		if err := writeHeaders(w, h); err != nil {
+			return false
+		}
+		_, err := io.Copy(w, resp.Body)
+		return err == nil
+	}
+	if bodyless(resp.StatusCode) {
+		h.Del("Content-Length")
+		return writeHeaders(w, h) == nil
+	}
+	// Unknown length → chunked.
+	h.Del("Content-Length")
+	h.Set("Transfer-Encoding", "chunked")
+	if err := writeHeaders(w, h); err != nil {
+		return false
+	}
+	cw := httputil.NewChunkedWriter(w)
+	if _, err := io.Copy(cw, resp.Body); err != nil {
+		return false
+	}
+	if err := cw.Close(); err != nil {
+		return false
+	}
+	_, err := io.WriteString(w, "\r\n") // trailing CRLF after the final chunk
+	return err == nil
+}
+
+// writeHeaders writes h followed by the blank line ending the header block.
+func writeHeaders(w net.Conn, h http.Header) error {
+	if err := h.Write(w); err != nil {
+		return err
+	}
+	_, err := io.WriteString(w, "\r\n")
+	return err
+}
+
+// bodyless reports whether a status code must not carry a response body.
+func bodyless(code int) bool {
+	return code == http.StatusNoContent || code == http.StatusNotModified || (code >= 100 && code < 200)
 }
 
 func stripHopByHop(h http.Header) {
