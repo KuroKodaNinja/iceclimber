@@ -95,6 +95,17 @@ func (s *session) systemRuntimePath(lang string, src runtimes.Source) string {
 	return ""
 }
 
+// condaPath returns the sandbox conda binary the probe discovered (for env_manager
+// conda), or "" if none — EnsureEnv errors clearly on the empty case.
+func (s *session) condaPath() string {
+	if s.fp != nil {
+		if rt, ok := s.fp.Runtime("python"); ok {
+			return rt.CondaPath
+		}
+	}
+	return ""
+}
+
 // Close releases the SFTP client (if any) and the SSH connection.
 func (s *session) Close() error {
 	if s.sftp != nil {

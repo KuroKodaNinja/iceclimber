@@ -152,6 +152,16 @@ runtimes:
 	if _, err := Load(nodeSys, ""); err == nil {
 		t.Error("node source=system should be rejected (only python supports system mode)")
 	}
+
+	// env_manager must be venv|conda, and only python has one.
+	badMgr := writeTemp(t, "sandbox_id: box-1\nssh:\n  host: prod\nruntimes:\n  python:\n    source: system\n    env_manager: poetry\n")
+	if _, err := Load(badMgr, ""); err == nil {
+		t.Error("an unknown env_manager should be rejected")
+	}
+	nodeMgr := writeTemp(t, "sandbox_id: box-1\nssh:\n  host: prod\nruntimes:\n  node:\n    env_manager: conda\n")
+	if _, err := Load(nodeMgr, ""); err == nil {
+		t.Error("env_manager on a non-python runtime should be rejected")
+	}
 }
 
 func TestLoad_SandboxMismatch(t *testing.T) {

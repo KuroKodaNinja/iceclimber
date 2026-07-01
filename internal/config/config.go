@@ -222,6 +222,14 @@ func (c *Config) validate(selectSandbox string) error {
 		default:
 			return fmt.Errorf("runtimes.%s.source %q must be \"managed\" or \"system\"", lang, pref.Source)
 		}
+		switch pref.EnvManager {
+		case "", "venv", "conda":
+			if pref.EnvManager != "" && lang != "python" {
+				return fmt.Errorf("runtimes.%s.env_manager: only python has an env_manager", lang)
+			}
+		default:
+			return fmt.Errorf("runtimes.%s.env_manager %q must be \"venv\" or \"conda\"", lang, pref.EnvManager)
+		}
 	}
 	return nil
 }

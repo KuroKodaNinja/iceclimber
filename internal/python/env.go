@@ -17,9 +17,12 @@ type EnvSpec struct {
 	Mode string
 	// SystemPath pins the system interpreter (system mode); empty uses "python3" on PATH.
 	SystemPath string
-	// EnvManager selects the isolation tool for system mode: "" / "venv" (default).
-	// "conda" is handled by a separate manager (added later).
+	// EnvManager selects the isolation tool for system mode: "" / "venv" (default) or
+	// "conda". For conda, CondaBin must point at the sandbox's conda.
 	EnvManager string
+	// CondaBin is the sandbox conda binary (from the probe); required for EnvManager
+	// "conda", ignored otherwise.
+	CondaBin string
 }
 
 // system reports whether the spec wants a pre-existing system runtime.
@@ -42,10 +45,19 @@ func EnsureEnv(ctx context.Context, fs remotefs.FS, runner remote.Runner, root, 
 	if !spec.system() {
 		return Locate(ctx, fs, root, version, arch, libc)
 	}
-	if spec.EnvManager != "" && spec.EnvManager != "venv" {
-		return "", fmt.Errorf("python env_manager %q not supported yet (use venv)", spec.EnvManager)
+	switch spec.EnvManager {
+	case "", "venv":
+		return ensureVenv(ctx, runner, root, version, spec)
+	case "conda":
+		return ensureCondaEnv(ctx, runner, root, version, spec)
+	default:
+		return "", fmt.Errorf("python env_manager %q not supported (use venv or conda)", spec.EnvManager)
 	}
+}
 
+// ensureVenv creates/reuses an iceclimber-owned venv at <root>/envs/python-<minor> from
+// the system python, pinning the requested minor to the box's toolchain.
+func ensureVenv(ctx context.Context, runner remote.Runner, root, version string, spec EnvSpec) (string, error) {
 	sysPy := spec.SystemPath
 	if sysPy == "" {
 		sysPy = "python3"
@@ -72,6 +84,37 @@ func EnsureEnv(ctx context.Context, fs remotefs.FS, runner remote.Runner, root, 
 	}
 	if v, err := runner.Run(ctx, remote.ShellQuote(bin)+" --version", nil); err != nil || v.ExitCode != 0 {
 		return "", fmt.Errorf("venv interpreter not runnable at %s", bin)
+	}
+	return bin, nil
+}
+
+// ensureCondaEnv creates/reuses an iceclimber-owned conda env at
+// <root>/envs/conda-python-<minor> with the requested python minor pinned, and returns
+// its interpreter. Tier-0: uses the sandbox's conda + its channel access. (The relay
+// tier builds the env offline from a pushed channel in the conda manager instead.)
+func ensureCondaEnv(ctx context.Context, runner remote.Runner, root, version string, spec EnvSpec) (string, error) {
+	if spec.CondaBin == "" {
+		return "", fmt.Errorf("no conda on the sandbox (probe reported none); cannot use env_manager conda")
+	}
+	minor := minorOf(version)
+	if minor == "" {
+		return "", fmt.Errorf("conda env requires a python_version (e.g. 3.12)")
+	}
+	prefix := path.Join(root, "envs", "conda-python-"+minor)
+	bin := path.Join(prefix, "bin", "python")
+	if existsExecutable(ctx, runner, bin) {
+		return bin, nil // reuse (idempotent)
+	}
+	cmd := remote.ShellQuote(spec.CondaBin) + " create -y -p " + remote.ShellQuote(prefix) + " " + remote.ShellQuote("python="+minor)
+	res, err := runner.Run(ctx, cmd, nil)
+	if err != nil {
+		return "", fmt.Errorf("conda create env: %w", err)
+	}
+	if res.ExitCode != 0 {
+		return "", fmt.Errorf("conda create env at %s: %s", prefix, strings.TrimSpace(string(res.Stderr)))
+	}
+	if v, err := runner.Run(ctx, remote.ShellQuote(bin)+" --version", nil); err != nil || v.ExitCode != 0 {
+		return "", fmt.Errorf("conda env interpreter not runnable at %s", bin)
 	}
 	return bin, nil
 }

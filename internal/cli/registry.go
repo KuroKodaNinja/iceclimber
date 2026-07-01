@@ -107,6 +107,7 @@ func pipDeps(sess *session, pr progress.Func) pip.Deps {
 		RuntimeMode:        string(src.Mode),
 		SystemPath:         sess.systemRuntimePath("python", src),
 		EnvManager:         src.EnvManager,
+		CondaBin:           sess.condaPath(),
 	}
 }
 

@@ -33,7 +33,8 @@ type Deps struct {
 	// iceclimber runtime) or "system" (install into a venv built from a system python).
 	RuntimeMode string
 	SystemPath  string // system interpreter (system mode); "" → python3 on PATH
-	EnvManager  string // system mode: "" / "venv"
+	EnvManager  string // system mode: "" / "venv" / "conda"
+	CondaBin    string // sandbox conda binary (for EnvManager "conda"); "" otherwise
 }
 
 // extraArgAllow is the per-request pip flag allowlist (decision: validated
@@ -70,7 +71,7 @@ func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, ti
 	// runtime, or a venv built from a system python (created on demand). Both yield an
 	// absolute interpreter the rest of the install path uses unchanged.
 	bin, err := python.EnsureEnv(ctx, d.FS, d.Runner, d.Root, pythonVersion, d.Arch, d.Libc,
-		python.EnvSpec{Mode: d.RuntimeMode, SystemPath: d.SystemPath, EnvManager: d.EnvManager})
+		python.EnvSpec{Mode: d.RuntimeMode, SystemPath: d.SystemPath, EnvManager: d.EnvManager, CondaBin: d.CondaBin})
 	if err != nil {
 		return pkg.Outcome{}, err
 	}

@@ -402,7 +402,7 @@ func (o *consoleOps) ensurePython(ver string, pr progress.Func) ([]echo, error) 
 	if src.Mode == runtimes.ModeSystem {
 		// System mode: create/reuse an iceclimber-owned venv from the system python.
 		bin, err := python.EnsureEnv(o.ctx, sess.fs, sess.runner, sess.tree.Root, ver, sess.fp.Arch, sess.fp.Libc.Family,
-			python.EnvSpec{Mode: string(src.Mode), SystemPath: sess.systemRuntimePath("python", src), EnvManager: src.EnvManager})
+			python.EnvSpec{Mode: string(src.Mode), SystemPath: sess.systemRuntimePath("python", src), EnvManager: src.EnvManager, CondaBin: sess.condaPath()})
 		if err != nil {
 			return nil, err
 		}
