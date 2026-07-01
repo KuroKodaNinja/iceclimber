@@ -243,7 +243,8 @@ func TestAwait_CollectFailureNonFatal(t *testing.T) {
 
 func TestShellEnvBlock(t *testing.T) {
 	got := shellEnvBlock("/home/agent/.iceclimber")
-	want := "export ICECLIMBER_HOME='/home/agent/.iceclimber'\nexport PATH='/home/agent/.iceclimber':\"$PATH\"\n"
+	want := "export ICECLIMBER_HOME='/home/agent/.iceclimber'\nexport PATH='/home/agent/.iceclimber':\"$PATH\"\n" +
+		"[ -f '/home/agent/.iceclimber'/egress-env.sh ] && . '/home/agent/.iceclimber'/egress-env.sh\n"
 	if got != want {
 		t.Errorf("shellEnvBlock:\n got %q\nwant %q", got, want)
 	}

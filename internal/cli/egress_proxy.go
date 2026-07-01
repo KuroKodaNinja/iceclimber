@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
@@ -51,4 +53,64 @@ func startEgressProxy(sess *session, cfg *config.Config, out io.Writer) (func(),
 	go func() { _ = p.Serve(ln) }()
 	fmt.Fprintf(out, "  egress proxy up: sandbox 127.0.0.1:%d → controller MITM\n", cfg.EgressPort())
 	return func() { _ = ln.Close() }, nil
+}
+
+// writeEgressTrust installs, at bootstrap in proxy mode, the CA the sandbox trusts plus
+// the per-tool config that routes tools through the proxy and points their TLS trust at
+// that CA — all under $ICECLIMBER_HOME, no root. `popo shellenv` (and the agent launcher)
+// source egress-env.sh, so an interactive/agent shell picks it up automatically. A no-op
+// in relay mode. (Java's truststore needs a JDK, so it's built when Maven runs.)
+func writeEgressTrust(ctx context.Context, sess *session, cfg *config.Config) error {
+	if !cfg.EgressProxy() {
+		return nil
+	}
+	certPath, keyPath := egressCAPaths(cfg)
+	ca, err := proxy.LoadOrCreateCA(certPath, keyPath)
+	if err != nil {
+		return fmt.Errorf("egress CA: %w", err)
+	}
+	if err := sess.fs.Mkdir(ctx, path.Join(sess.tree.Root, "certs")); err != nil {
+		return err
+	}
+	if err := sess.fs.WriteFile(ctx, path.Join(sess.tree.Root, "certs", "egress-ca.pem"), ca.CertPEM()); err != nil {
+		return fmt.Errorf("write egress CA: %w", err)
+	}
+	if err := sess.fs.WriteFile(ctx, path.Join(sess.tree.Root, "egress-env.sh"), []byte(egressEnvScript(cfg.EgressPort()))); err != nil {
+		return fmt.Errorf("write egress-env.sh: %w", err)
+	}
+	if err := sess.fs.WriteFile(ctx, path.Join(sess.tree.Root, "maven-settings.xml"), []byte(mavenProxySettings(cfg.EgressPort()))); err != nil {
+		return fmt.Errorf("write maven-settings.xml: %w", err)
+	}
+	return nil
+}
+
+// egressEnvScript is the sh block (sourced by popo shellenv / the agent launcher) that
+// routes the sandbox's package managers through the proxy and trusts the egress CA. Uses
+// $ICECLIMBER_HOME so it stays relocatable; the many env vars cover each ecosystem's own
+// TLS-trust knob (OpenSSL/requests/pip/curl/git/cargo and Node's additive store).
+func egressEnvScript(port int) string {
+	p := fmt.Sprintf("http://127.0.0.1:%d", port)
+	return "# iceclimber egress proxy — route package managers through Popo (no direct network)\n" +
+		"export HTTPS_PROXY=" + p + "\n" +
+		"export https_proxy=$HTTPS_PROXY\n" +
+		"export HTTP_PROXY=$HTTPS_PROXY\n" +
+		"export http_proxy=$HTTPS_PROXY\n" +
+		`CA="$ICECLIMBER_HOME/certs/egress-ca.pem"` + "\n" +
+		"export SSL_CERT_FILE=\"$CA\"\n" +
+		"export REQUESTS_CA_BUNDLE=\"$CA\"\n" +
+		"export PIP_CERT=\"$CA\"\n" +
+		"export CURL_CA_BUNDLE=\"$CA\"\n" +
+		"export GIT_SSL_CAINFO=\"$CA\"\n" +
+		"export CARGO_HTTP_CAINFO=\"$CA\"\n" +
+		"export NODE_EXTRA_CA_CERTS=\"$CA\"\n" +
+		"export npm_config_https_proxy=$HTTPS_PROXY\n" +
+		"export npm_config_proxy=$HTTPS_PROXY\n"
+}
+
+// mavenProxySettings is a Maven settings.xml <proxies> block (Maven routes via settings,
+// not JVM proxy props). Trust comes from a JDK truststore built when Maven runs.
+func mavenProxySettings(port int) string {
+	return fmt.Sprintf(`<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"><proxies><proxy>`+
+		`<id>iceclimber-egress</id><active>true</active><protocol>http</protocol><host>127.0.0.1</host><port>%d</port>`+
+		`</proxy></proxies></settings>`+"\n", port)
 }

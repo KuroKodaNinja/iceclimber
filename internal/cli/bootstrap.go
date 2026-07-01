@@ -56,6 +56,11 @@ func newBootstrapCmd() *cobra.Command {
 			if err := provision(ctx, sess); err != nil {
 				return err
 			}
+			// In proxy egress mode, install the CA + per-tool trust/proxy config so the
+			// sandbox's own package managers reach registries through Popo's MITM proxy.
+			if err := writeEgressTrust(ctx, sess, cfg); err != nil {
+				return err
+			}
 
 			fmt.Fprintf(cmd.OutOrStdout(),
 				"bootstrap ok\n  sandbox:    %s\n  root:       %s\n  transport:  %s\n  smoke test: ping/pong round-trip passed\n  skill:      wrote %s\n  runtimes:   %s\n",

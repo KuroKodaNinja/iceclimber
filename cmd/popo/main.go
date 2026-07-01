@@ -101,9 +101,12 @@ var verbs = map[string]string{
 }
 
 // shellEnvBlock renders the eval-able export block: ICECLIMBER_HOME + root on PATH
-// (so popo/nana resolve by name). Minimal by design — no secrets.
+// (so popo/nana resolve by name), then sources egress-env.sh when present so the
+// egress-proxy trust/proxy vars apply to the shell's package managers. Minimal by
+// design — no secrets (the CA is a public cert; the proxy is a loopback port).
 func shellEnvBlock(root string) string {
-	return fmt.Sprintf("export ICECLIMBER_HOME=%s\nexport PATH=%s:\"$PATH\"\n", shellQuote(root), shellQuote(root))
+	q := shellQuote(root)
+	return fmt.Sprintf("export ICECLIMBER_HOME=%s\nexport PATH=%s:\"$PATH\"\n[ -f %s/egress-env.sh ] && . %s/egress-env.sh\n", q, q, q, q)
 }
 
 // shellQuote wraps s in single quotes, escaping embedded single quotes — a tiny
