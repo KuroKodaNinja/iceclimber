@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -30,8 +31,8 @@ type Verdict struct {
 	Reason      string
 }
 
-// Decider judges a request. The full URL is available, so a decider MAY gate at
-// package/path granularity — though v1 policy is domain-level (see PX4).
+// Decider judges a request at CONNECT (domain-level; only the host is known then). Full-URL
+// package/path granularity is enforced separately, per request, by the PathDenier.
 type Decider func(Request) Verdict
 
 // AuditFunc records a serviced request (nil = no audit).
@@ -93,9 +94,15 @@ type bufConn struct {
 
 func (b *bufConn) Read(p []byte) (int, error) { return b.r.Read(p) }
 
+// idleReadTimeout bounds how long a connection may sit before its next request line
+// arrives (and how long the CONNECT/handshake reads may stall) — a slowloris/goroutine-hold
+// cap for the semi-trusted sandbox. It covers idle + header reads, not body streaming.
+const idleReadTimeout = 5 * time.Minute
+
 func (p *Proxy) handleConn(c net.Conn) {
 	defer c.Close()
 	br := bufio.NewReader(c)
+	_ = c.SetReadDeadline(time.Now().Add(idleReadTimeout))
 	req, err := http.ReadRequest(br)
 	if err != nil {
 		return
@@ -103,11 +110,12 @@ func (p *Proxy) handleConn(c net.Conn) {
 	if req.Method != http.MethodConnect {
 		// Plain HTTP: gate then forward the absolute-URL request.
 		req.RequestURI = ""
+		_ = c.SetReadDeadline(time.Time{})
 		p.forward(c, req, p.decide(requestOf(req)))
 		return
 	}
-	authority := req.Host // "host:port" — the upstream target, port preserved
-	host := hostOnly(authority)
+	authority := req.Host                  // "host:port" — the upstream target, port preserved
+	host := canonHost(hostOnly(authority)) // policy/leaf key: lower-cased, trailing-dot stripped
 
 	// Gate at CONNECT — BEFORE minting a leaf — so the untrusted sandbox can't force
 	// unbounded RSA keygen for hosts it can't reach anyway (domain-level policy needs only
@@ -126,14 +134,17 @@ func (p *Proxy) handleConn(c net.Conn) {
 		return
 	}
 	tlsConn := tls.Server(&bufConn{br, c}, &tls.Config{
-		GetCertificate: func(hi *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			name := hi.ServerName
-			if name == "" {
-				name = host // clients send no SNI for IP-addressed hosts; use the CONNECT target
-			}
-			return p.ca.leafFor(name)
+		MinVersion: tls.VersionTLS12,
+		// Mint for the ADMITTED CONNECT host, not the client-chosen SNI: SNI is
+		// attacker-controlled, so honoring it would let the sandbox drive a fresh RSA keygen
+		// per arbitrary name (a CPU lever). Keying on the policy-gated host bounds distinct
+		// leaves to admitted hosts, and the forwarded request targets the CONNECT authority
+		// anyway, so the leaf name always matches the real destination.
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return p.ca.leafFor(host)
 		},
 	})
+	_ = c.SetReadDeadline(time.Now().Add(idleReadTimeout))
 	if err := tlsConn.Handshake(); err != nil {
 		return
 	}
@@ -142,10 +153,12 @@ func (p *Proxy) handleConn(c net.Conn) {
 	// One MITM'd connection may carry several keep-alive requests (all to the admitted host).
 	tbr := bufio.NewReader(tlsConn)
 	for {
+		_ = c.SetReadDeadline(time.Now().Add(idleReadTimeout)) // bound the idle wait for the next request
 		r2, err := http.ReadRequest(tbr)
 		if err != nil {
 			return
 		}
+		_ = c.SetReadDeadline(time.Time{}) // unbounded during the body forward / response stream
 		r2.URL.Scheme, r2.URL.Host, r2.RequestURI = "https", authority, ""
 		if !p.forward(tlsConn, r2, v) {
 			return
@@ -153,9 +166,16 @@ func (p *Proxy) handleConn(c net.Conn) {
 	}
 }
 
-// requestOf builds the policy Request from an *http.Request (host without port).
+// canonHost canonicalizes a host for policy matching and leaf minting: lower-cased (DNS is
+// case-insensitive) with a single trailing dot stripped (fully-qualified form) — so a
+// deny/allow rule can't be evaded by casing or a trailing "." the upstream tolerates.
+func canonHost(h string) string {
+	return strings.TrimSuffix(strings.ToLower(h), ".")
+}
+
+// requestOf builds the policy Request from an *http.Request (host canonicalized, no port).
 func requestOf(req *http.Request) Request {
-	return Request{Method: req.Method, Host: hostOnly(req.URL.Host), Path: req.URL.Path, URL: req.URL.String()}
+	return Request{Method: req.Method, Host: canonHost(hostOnly(req.URL.Host)), Path: req.URL.Path, URL: req.URL.String()}
 }
 
 // forward applies the (already-decided) verdict, forwards an allowed request upstream, and
@@ -205,7 +225,7 @@ func (p *Proxy) forward(w net.Conn, req *http.Request, v Verdict) bool {
 	if p.audit != nil {
 		p.audit(pr, v, resp.StatusCode)
 	}
-	return writeResponse(w, resp)
+	return writeResponse(w, req.Method, resp)
 }
 
 // writeResponse serializes an upstream response to the client as HTTP/1.1, STREAMING the
@@ -215,7 +235,7 @@ func (p *Proxy) forward(w net.Conn, req *http.Request, v Verdict) bool {
 // HTTP/1.1 client rejects). The transport already decompressed gzip (we stripped
 // Accept-Encoding), so stale content/transfer-encoding headers are dropped and framing is
 // chosen from the known length: Content-Length when the upstream gave one, else chunked.
-func writeResponse(w net.Conn, resp *http.Response) bool {
+func writeResponse(w net.Conn, method string, resp *http.Response) bool {
 	h := resp.Header
 	h.Del("Transfer-Encoding")
 	h.Del("Content-Encoding")
@@ -224,6 +244,18 @@ func writeResponse(w net.Conn, resp *http.Response) bool {
 
 	if _, err := fmt.Fprintf(w, "HTTP/1.1 %d %s\r\n", resp.StatusCode, http.StatusText(resp.StatusCode)); err != nil {
 		return false
+	}
+	// A HEAD response carries the header a GET WOULD have (including its declared
+	// Content-Length) but NO body — Go's transport leaves resp.ContentLength as the declared
+	// length while resp.Body is empty, so the normal CL/chunked framing would announce bytes
+	// that never come and hang the client (and desync the keep-alive tunnel). Emit headers only.
+	if method == http.MethodHead {
+		if resp.ContentLength >= 0 {
+			h.Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+		} else {
+			h.Del("Content-Length")
+		}
+		return writeHeaders(w, h) == nil
 	}
 	if resp.ContentLength >= 0 && !bodyless(resp.StatusCode) {
 		h.Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))

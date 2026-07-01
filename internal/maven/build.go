@@ -218,7 +218,9 @@ func (d BuildDeps) buildOnlineProxy(ctx context.Context, projectDir, javaVersion
 	return BuildResult{Artifacts: d.collectArtifacts(ctx, projectDir), Tier: "proxy"}, nil
 }
 
-// collectArtifacts lists the build's target/*.jar outputs (sandbox paths), sorted.
+// collectArtifacts lists the build's target/*.jar outputs (sandbox paths), sorted. Runs only
+// after a successful build, so a List error is treated as "no jars produced" (best-effort
+// reporting — the build itself already succeeded); it is intentionally not surfaced.
 func (d BuildDeps) collectArtifacts(ctx context.Context, projectDir string) []string {
 	target := path.Join(projectDir, "target")
 	var artifacts []string

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
@@ -35,8 +36,9 @@ func egressCAPaths(cfg *config.Config) (certPath, keyPath string) {
 // controller with no direct network. Returns a stop func (called when the serve cycle
 // ends; the next reconnect re-establishes) and any startup error. A no-op in relay mode.
 //
-// The policy/approval/audit wiring lands in PX4; this cut serves allow-all (behind the
-// opt-in egress_mode: proxy) and logs each request.
+// Every request is gated through the egress policy at CONNECT (host-level allow/hold/deny +
+// persistent approval + rewrite table) and re-checked per request by a package/path-level
+// PathDenier; each is audited with its verdict.
 func startEgressProxy(sess *session, cfg *config.Config, out io.Writer) (func(), error) {
 	if !cfg.EgressProxy() {
 		return func() {}, nil
@@ -68,10 +70,7 @@ func startEgressProxy(sess *session, cfg *config.Config, out io.Writer) (func(),
 	// includes a path (e.g. "https://pypi.org/simple/leftpad/*") blocks just that URL. The
 	// host-level gate (pp.decide at CONNECT) can't see the path; this per-request veto can.
 	p.SetPathDenier(func(r proxy.Request) (bool, string) {
-		// r.URL carries the upstream port (":443"); deny globs are written without it
-		// (e.g. "https://pypi.org/simple/six/*"), so match against a normalized,
-		// port-free URL built from the already-stripped host and the request path.
-		if sess.policy != nil && sess.policy.StoreDenied("https://"+r.Host+r.Path) {
+		if sess.policy != nil && sess.policy.StoreDenied(pathDenyURL(r)) {
 			return true, "blocked by rule"
 		}
 		return false, ""
@@ -224,6 +223,33 @@ func (pp *proxyPolicy) evaluate(r proxy.Request, resolved, rewriteHost string) p
 			return proxy.Verdict{Allow: false, Reason: "denied by operator"}
 		}
 	}
+}
+
+// pathDenyURL builds the canonical URL the package/path-level deny rules match against. It
+// defends the match against tricks an upstream would silently normalize away — otherwise a
+// glob like "https://pypi.org/simple/six/*" is trivially evaded by "/simple/./six/",
+// "/simple//six/", a %2e-encoded dot, a cased host, or the ":443" port. So: the real scheme,
+// the already-canonical host (proxy.canonHost: lower-cased, port-free, no trailing dot), a
+// path.Clean'd path (dot-segments + duplicate slashes collapsed; a trailing slash preserved
+// so "/six/" still matches "/six/*"), and the query appended (a rule may target it).
+func pathDenyURL(r proxy.Request) string {
+	scheme := "https"
+	var rawQuery string
+	if u, err := url.Parse(r.URL); err == nil {
+		if u.Scheme != "" {
+			scheme = u.Scheme
+		}
+		rawQuery = u.RawQuery
+	}
+	clean := path.Clean("/" + strings.TrimPrefix(r.Path, "/"))
+	if strings.HasSuffix(r.Path, "/") && !strings.HasSuffix(clean, "/") {
+		clean += "/" // path.Clean strips a trailing slash; keep it so "/six/" matches "/six/*"
+	}
+	match := scheme + "://" + r.Host + clean
+	if rawQuery != "" {
+		match += "?" + rawQuery
+	}
+	return match
 }
 
 // urlHost extracts the hostname from a URL (no port), for rewrite detection.

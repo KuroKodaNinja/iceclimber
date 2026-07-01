@@ -101,7 +101,7 @@ install`/`wrap` — to inform the operator's `status` view. **You don't write it
 | `npm.install` | `{ node_version, packages:[{name,version?}] }` or `{ node_version, project:"<dir>" }` | `{ installed, failed, node_path }` |
 | `java.install` | `{ version }` (feature, e.g. "21") | `{ version, path, already_installed }` |
 | `maven.install` | `{ java_version, packages:[{name:"group:artifact",version}] }` | `{ installed, failed, classpath }` |
-| `maven.build` | `{ project, java_version, goals?:["package"], maven_version? }` | `{ artifacts:[<jar path>], tier:"relay" }` |
+| `maven.build` | `{ project, java_version, goals?:["package"], maven_version? }` | `{ artifacts:[<jar path>], tier:"relay"\|"proxy" }` |
 | `conda.install` | `{ python_version, packages:[{name,version?}], extra_args?:["-c","conda-forge",…] }` or `{ file:"<environment.yml>" }` | `{ installed:[{name,version,tier,sha256?}], failed }` |
 | `web.fetch` | `{ url, method?, headers?, body? }` | `{ status_code, venue, encoding, body_inline? , body_blob? }` |
 
@@ -110,8 +110,11 @@ returned. `body_blob` is a `$ICECLIMBER_HOME`-relative path — read the body at
 For Node, export `NODE_PATH=<node_path>` — or, with `npm.install project:"<dir>"`, the
 whole `package.json` is installed and its `node_modules` lands in the project dir (local
 resolution, no `NODE_PATH`). `maven.build` builds a sandbox `pom.xml` project with `mvn`
-air-gapped (the operator's controller Maven+JDK prime an offline repo; needs both present)
-and returns the built jar path(s) under `<project>/target/`. Java 11+ also runs a single
+and returns the built jar path(s) under `<project>/target/`. In relay mode it builds
+air-gapped (`tier:"relay"` — the operator's controller Maven+JDK prime an offline repo;
+needs both present); in `egress_mode: proxy` it builds **online through the proxy**
+(`tier:"proxy"` — no controller Maven needed; a JVM truststore for the egress CA is built
+automatically). Java 11+ also runs a single
 source file directly (`<java> Program.java`). `conda.install` needs the operator to have selected the conda
 env_manager for python; it installs into a conda env at `<root>/envs/conda-python-<minor>`
 (run its interpreter by that path) and uses conda match-specs (`name=version`, single `=`).

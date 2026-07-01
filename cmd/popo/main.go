@@ -93,7 +93,7 @@ var verbs = map[string]string{
 	"npm.install":    "popo npm.install --node <line> <pkg[@version]>... | --project <dir>",
 	"java.install":   "popo java.install <feature>             e.g. 21",
 	"maven.install":  "popo maven.install --java <feature> <group:artifact:version>...",
-	"maven.build":    "popo maven.build --java <feature> --project <dir> [goal]...   build a pom.xml project (mvn -o package)",
+	"maven.build":    "popo maven.build --java <feature> --project <dir> [goal]...   build a pom.xml project (offline in relay mode, online via the proxy in proxy mode)",
 	"conda.install":  "popo conda.install --python <minor> [-c <channel>]... [--offline] <pkg[=version]>... | --file <environment.yml>",
 	"web.fetch":      "popo web.fetch <url> [--method M] [--header K:V]... [--body STR]",
 	"collect":        "popo collect <id>                       mark a response collected (usually automatic)",

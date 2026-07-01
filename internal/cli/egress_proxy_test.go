@@ -119,3 +119,32 @@ func TestProxyPolicy_StoreDenyOverridesConfigAllow(t *testing.T) {
 		t.Error("an explicit store Deny must override a config allow")
 	}
 }
+
+// TestPathDenyURL locks in the normalization that stops a package/path deny glob from being
+// evaded by tricks an upstream silently collapses: the :443 port, dot-segments, duplicate
+// slashes, a decoded dot (arrives decoded in Path), and a preserved trailing slash so
+// "/six/" still matches "/six/*". Host is already canonicalized upstream (proxy.canonHost).
+func TestPathDenyURL(t *testing.T) {
+	cases := []struct {
+		name       string
+		host, path string
+		url        string
+		want       string
+	}{
+		{"port stripped", "pypi.org", "/simple/six/", "https://pypi.org:443/simple/six/", "https://pypi.org/simple/six/"},
+		{"dot-segment", "pypi.org", "/simple/./six/", "https://pypi.org:443/simple/./six/", "https://pypi.org/simple/six/"},
+		{"double slash", "pypi.org", "/simple//six/", "https://pypi.org/simple//six/", "https://pypi.org/simple/six/"},
+		{"parent traversal", "pypi.org", "/simple/x/../six/", "https://pypi.org/simple/x/../six/", "https://pypi.org/simple/six/"},
+		{"no trailing slash preserved", "pypi.org", "/simple/six", "https://pypi.org/simple/six", "https://pypi.org/simple/six"},
+		{"query kept", "pypi.org", "/a/b/", "https://pypi.org/a/b/?k=v", "https://pypi.org/a/b/?k=v"},
+		{"http scheme kept", "mirror.internal", "/x/", "http://mirror.internal/x/", "http://mirror.internal/x/"},
+		{"root path", "pypi.org", "/", "https://pypi.org/", "https://pypi.org/"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := pathDenyURL(proxy.Request{Host: c.host, Path: c.path, URL: c.url}); got != c.want {
+				t.Errorf("pathDenyURL(host=%q path=%q url=%q) = %q, want %q", c.host, c.path, c.url, got, c.want)
+			}
+		})
+	}
+}

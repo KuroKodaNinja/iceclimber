@@ -29,15 +29,17 @@ func TestEnsureEgressTrustStore_Command(t *testing.T) {
 		t.Fatalf("EnsureEgressTrustStore: %v", err)
 	}
 	cmd := fr.lastCmd
-	// keytool must be resolved next to bin/java, import the CA into the target store as PKCS12,
-	// and be idempotent (skip when the store already exists).
+	// keytool must be resolved next to bin/java, import the CA into a FRESH temp PKCS12,
+	// atomically rename it into place, and be idempotent (skip when the store already exists).
 	for _, want := range []string{
 		"[ -f '/root/certs/java-truststore.p12' ] ||",
+		"rm -f '/root/certs/java-truststore.p12.tmp'",
 		"/root/runtimes/java/21/bin/keytool",
 		"-importcert -noprompt -trustcacerts -alias iceclimber-egress",
 		"-file '/root/certs/egress-ca.pem'",
-		"-keystore '/root/certs/java-truststore.p12'",
+		"-keystore '/root/certs/java-truststore.p12.tmp'",
 		"-storetype PKCS12 -storepass '" + EgressTrustStorePass + "'",
+		"mv '/root/certs/java-truststore.p12.tmp' '/root/certs/java-truststore.p12'",
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("keytool command missing %q\ngot: %s", want, cmd)

@@ -16,7 +16,7 @@ import (
 func newMavenCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "maven",
-		Short: "Run the Maven build tool in the sandbox (air-gapped)",
+		Short: "Run the Maven build tool in the sandbox (air-gapped relay, or online in egress-proxy mode)",
 	}
 	cmd.AddCommand(newMavenBuildCmd())
 	return cmd
@@ -26,7 +26,7 @@ func newMavenBuildCmd() *cobra.Command {
 	var transport, javaVersion, mavenVersion, project string
 	cmd := &cobra.Command{
 		Use:   "build [goal...]",
-		Short: "Build a sandbox Maven project (pom.xml) with mvn, air-gapped: the controller primes an offline .m2 repo, the sandbox runs `mvn -o package`",
+		Short: "Build a sandbox Maven project (pom.xml) with mvn: air-gapped in relay mode (controller primes an offline .m2, sandbox runs `mvn -o package`); online through the proxy in egress_mode: proxy",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if project == "" || javaVersion == "" {

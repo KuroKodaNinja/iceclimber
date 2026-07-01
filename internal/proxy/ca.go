@@ -1,5 +1,6 @@
-// Package proxy is the egress-proxy mode (decision forthcoming): an alternative to the
-// relay tier where the sandbox's own package managers reach real registries through a
+// Package proxy is the egress-proxy mode (relay remains the default; the proxy-primary call
+// is pending): an alternative to the relay tier where the sandbox's own package managers
+// reach real registries through a
 // controller-run MITM proxy, exposed to the sandbox over an `ssh -R` reverse tunnel (so
 // the sandbox keeps zero direct network). The proxy terminates TLS with a controller-held
 // CA the sandbox trusts (installed no-root via per-tool cert env/keystores), giving it

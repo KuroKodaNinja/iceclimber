@@ -222,7 +222,13 @@ scriptable, and how the functional test drives it).
 against a real Alpine/musl sandbox, and the **acceptance demo** (phase 8,
 [`DEMO.md`](./DEMO.md)) proves the whole premise with a real Claude agent under a
 true air-gap. Remaining work: incremental polish + the v2 backlog (sub-agent/
-`web.research`, Tier 2 build, true fleet multiplexing — plan §0). The `ExecFS`
+`web.research`, Tier 2 build, true fleet multiplexing — plan §0).
+**Egress modes** (decisions #76/#77): the default is **relay** (controller fetches,
+Popo relays artifacts in, sandbox installs offline), but `egress_mode: proxy` is an
+additive alternative where the sandbox's own package managers reach real registries
+through a controller-run MITM proxy over the `ssh -R` tunnel (host + package/path-level
+policy; `maven build` builds online there). Relay stays default until the proxy-primary
+call is made. The `ExecFS`
 bulk-transfer shipped (decision #55): runtime trees push in one `tar -xf -` exec,
 so all languages install over either transport (no SFTP-only constraint).
 `iceclimber trust` records a sandbox's SSH host key in-CLI (decision #56) — the

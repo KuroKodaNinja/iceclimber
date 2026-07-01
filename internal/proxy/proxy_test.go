@@ -236,6 +236,114 @@ func TestProxy_PathDenier(t *testing.T) {
 	}
 }
 
+func TestProxy_HeadRequest(t *testing.T) {
+	// A HEAD carries the header a GET would (its declared Content-Length) but NO body. The
+	// proxy must not announce those bytes and then send none — that hangs the client and
+	// desyncs the keep-alive tunnel for the next request.
+	up, tr := upstreamTLS(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1024")
+		if r.Method == http.MethodHead {
+			return // headers only
+		}
+		w.Write(bytes.Repeat([]byte("y"), 1024))
+	})
+	defer up.Close()
+	ca, _ := NewCA()
+	p := New(ca, nil, nil, tr)
+	client, stop := clientThroughProxy(t, p)
+	defer stop()
+
+	resp, err := client.Head(up.URL + "/pkg")
+	if err != nil {
+		t.Fatalf("head through proxy (hang/desync?): %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 || resp.ContentLength != 1024 {
+		t.Errorf("head = %d, content-length %d; want 200 / 1024", resp.StatusCode, resp.ContentLength)
+	}
+	// The tunnel must remain usable — a follow-up GET on the reused transport still works.
+	g, err := client.Get(up.URL + "/pkg")
+	if err != nil {
+		t.Fatalf("get after head (tunnel desynced): %v", err)
+	}
+	n, _ := io.Copy(io.Discard, g.Body)
+	g.Body.Close()
+	if n != 1024 {
+		t.Errorf("get after head read %d bytes, want 1024", n)
+	}
+}
+
+func TestProxy_ContentLengthZero(t *testing.T) {
+	// An explicit Content-Length: 0 on a non-bodyless status must be framed as zero bytes
+	// (not chunked, no hang) and leave the tunnel reusable.
+	up, tr := upstreamTLS(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "0")
+		w.WriteHeader(200)
+	})
+	defer up.Close()
+	ca, _ := NewCA()
+	p := New(ca, nil, nil, tr)
+	client, stop := clientThroughProxy(t, p)
+	defer stop()
+	resp, err := client.Get(up.URL + "/empty")
+	if err != nil {
+		t.Fatalf("get cl:0: %v", err)
+	}
+	n, _ := io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || n != 0 {
+		t.Errorf("cl:0 response = %d, %d bytes; want 200 / 0", resp.StatusCode, n)
+	}
+	if _, err := client.Get(up.URL + "/again"); err != nil {
+		t.Errorf("second request after cl:0 failed: %v", err)
+	}
+}
+
+func TestProxy_PathDenyDrainsBodyKeepsTunnel(t *testing.T) {
+	// A path-denied request WITH a body: the proxy must drain the request body before the
+	// 403 so the next keep-alive request on the same connection parses cleanly.
+	up, tr := upstreamTLS(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "reached "+r.URL.Path) })
+	defer up.Close()
+	ca, _ := NewCA()
+	p := New(ca, nil, nil, tr)
+	p.SetPathDenier(func(r Request) (bool, string) { return strings.Contains(r.Path, "/blocked/"), "blocked" })
+	client, stop := clientThroughProxy(t, p)
+	defer stop()
+
+	bad, err := client.Post(up.URL+"/blocked/x", "text/plain", strings.NewReader(strings.Repeat("z", 8192)))
+	if err != nil {
+		t.Fatalf("post to denied path: %v", err)
+	}
+	body, _ := io.ReadAll(bad.Body)
+	bad.Body.Close()
+	if bad.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "blocked") {
+		t.Errorf("denied POST = %d %q, want 403 + reason", bad.StatusCode, body)
+	}
+	// Same tunnel, next request must parse (body was drained).
+	ok, err := client.Get(up.URL + "/ok")
+	if err != nil {
+		t.Fatalf("get after denied POST (tunnel desynced by undrained body): %v", err)
+	}
+	g, _ := io.ReadAll(ok.Body)
+	ok.Body.Close()
+	if ok.StatusCode != 200 || !strings.Contains(string(g), "/ok") {
+		t.Errorf("request after denied POST = %d %q", ok.StatusCode, g)
+	}
+}
+
+func TestCanonHost(t *testing.T) {
+	for in, want := range map[string]string{
+		"PyPI.org":  "pypi.org",
+		"pypi.org.": "pypi.org",
+		"Pypi.ORG.": "pypi.org",
+		"pypi.org":  "pypi.org",
+	} {
+		if got := canonHost(in); got != want {
+			t.Errorf("canonHost(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestProxy_NoContentStatus(t *testing.T) {
 	// A 204 must be serialized bodyless (no Content-Length, no hang waiting for a body).
 	up, tr := upstreamTLS(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
