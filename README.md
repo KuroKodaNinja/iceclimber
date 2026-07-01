@@ -190,6 +190,26 @@ for air-gapped boxes — via the **relay**: the operator's controller conda (con
 sandbox-platform packages, synthesizes a self-contained local channel, and the sandbox
 installs from it **offline**. `pip.install` also works into a conda env.
 
+### Egress: relay (default) or proxy
+
+There are two ways the sandbox gets packages, both keeping it off the open internet:
+
+- **`egress_mode: relay`** (default) — the controller resolves + downloads artifacts on
+  its network and relays them in; the sandbox installs offline. iceclimber integrates
+  each manager (pip/npm/maven/conda) explicitly.
+- **`egress_mode: proxy`** — the sandbox runs its **own** package managers against real
+  registries through a controller-run **MITM proxy**, exposed over an `ssh -R` reverse
+  tunnel (the sandbox still has **no direct network** — its only egress is a loopback
+  port). Popo mints a CA the sandbox trusts (installed no-root at bootstrap via each
+  tool's cert env / the Java keystore) and terminates TLS at the proxy, so it sees every
+  full URL for **policy + audit** (the same allow/deny + persistent-approval + rewrite
+  table as `web.fetch`, gated per host) while the native tools do resolution. The payoff:
+  lockfiles, transitive/plugin resolution, and download-during-build "just work," and
+  **any** HTTP(S)-honoring tool works with no per-tool Go — pip, npm, cargo, go, `git`,
+  `apt`, … Set `egress_mode: proxy` (optionally `egress_proxy_port`) and, for headless
+  serve, list your registries under `network.allowed_domains` (interactive serve prompts
+  for unlisted hosts). Runtimes are still installed via the relay.
+
 ### 4. Serve — the console, or headless
 
 Bare **`iceclimber`** launches the interactive **console**: it serves the sandbox,
