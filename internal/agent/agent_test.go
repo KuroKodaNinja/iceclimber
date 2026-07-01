@@ -89,7 +89,7 @@ func TestRenderRun(t *testing.T) {
 		`nana='/r/skill/NANA.md'`, // references NANA.md
 		`set -- '--append-system-prompt' "$(cat "$nana")" "$@"`, // NANA as system context, then passthrough
 		`bin='/r/agent/claude/claude'`,
-		`[ -t 1 ] || headless=1`, // capture when not a tty…
+		`[ -t 1 ] || headless=1`,                             // capture when not a tty…
 		`case "$a" in -p|--print) headless=1; printrun=1 ;;`, // …or a print flag is present
 		`if [ "$headless" = 1 ]; then`,
 		// a print run with no --output-format → inject the parseable stream so [NANA]
