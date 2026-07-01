@@ -40,6 +40,7 @@ type session struct {
 	auditPath        string
 	policy           *egress.Policy
 	sandboxID        string
+	egressProxy      bool              // egress_mode: proxy (native tools egress through the MITM proxy)
 	approver         webfetch.Approver // non-nil only in interactive serve
 	// Runtime source is resolved LAZILY (runtimeSourcesNow) from these, not cached, so
 	// a choice persisted mid-session (e.g. via the console bootstrap modal) takes
@@ -171,7 +172,7 @@ func openSessionWith(ctx context.Context, cfg *config.Config, transport string, 
 		}
 	}
 
-	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, controllerConda: cfg.ControllerConda, controllerMvn: cfg.ControllerMvn, auditPath: auditPath(cfg), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID, runtimeStore: runtimesStore(cfg), runtimeConfig: configRuntimeSources(cfg.Runtimes)}
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, controllerConda: cfg.ControllerConda, controllerMvn: cfg.ControllerMvn, auditPath: auditPath(cfg), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID, egressProxy: cfg.EgressProxy(), runtimeStore: runtimesStore(cfg), runtimeConfig: configRuntimeSources(cfg.Runtimes)}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"

@@ -12,6 +12,7 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/egress"
+	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/proxy"
 	"github.com/KuroKodaNinja/iceclimber/internal/webfetch"
 )
@@ -80,6 +81,18 @@ func startEgressProxy(sess *session, cfg *config.Config, out io.Writer) (func(),
 	return func() { _ = ln.Close() }, nil
 }
 
+// ensureEgressJavaTrust builds the JVM truststore (egress CA) after a JDK install in proxy
+// mode, so Maven — and any other JVM tool — validates the proxy's leaves. A no-op in relay
+// mode. Idempotent (see java.EnsureEgressTrustStore); javaBin is the just-installed bin/java.
+func ensureEgressJavaTrust(ctx context.Context, sess *session, javaBin string) error {
+	if !sess.egressProxy {
+		return nil
+	}
+	caPath := path.Join(sess.tree.Root, "certs", "egress-ca.pem")
+	storePath := path.Join(sess.tree.Root, "certs", "java-truststore.p12")
+	return java.EnsureEgressTrustStore(ctx, sess.runner, javaBin, caPath, storePath)
+}
+
 // writeEgressTrust installs, at bootstrap in proxy mode, the CA the sandbox trusts plus
 // the per-tool config that routes tools through the proxy and points their TLS trust at
 // that CA — all under $ICECLIMBER_HOME, no root. `popo shellenv` (and the agent launcher)
@@ -129,7 +142,15 @@ func egressEnvScript(port int) string {
 		"export CARGO_HTTP_CAINFO=\"$CA\"\n" +
 		"export NODE_EXTRA_CA_CERTS=\"$CA\"\n" +
 		"export npm_config_https_proxy=$HTTPS_PROXY\n" +
-		"export npm_config_proxy=$HTTPS_PROXY\n"
+		"export npm_config_proxy=$HTTPS_PROXY\n" +
+		// Java: the JVM ignores the OpenSSL/Node knobs above, so trust comes from a PKCS12
+		// truststore holding the egress CA (built when a JDK is installed in proxy mode).
+		// Guarded on existence so a JVM still starts before that store exists.
+		`JAVA_TS="$ICECLIMBER_HOME/certs/java-truststore.p12"` + "\n" +
+		`if [ -f "$JAVA_TS" ]; then export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=$JAVA_TS -Djavax.net.ssl.trustStorePassword=` + java.EgressTrustStorePass + `${JAVA_TOOL_OPTIONS:+ $JAVA_TOOL_OPTIONS}"; fi` + "\n" +
+		// Maven routes through the proxy via settings.xml <proxies> (mvn honors settings, not
+		// JVM proxy props); MAVEN_ARGS (Maven 3.9+) injects it as a default arg.
+		`[ -f "$ICECLIMBER_HOME/maven-settings.xml" ] && export MAVEN_ARGS="-s $ICECLIMBER_HOME/maven-settings.xml${MAVEN_ARGS:+ $MAVEN_ARGS}"` + "\n"
 }
 
 // proxyPolicy gates proxied requests against the egress policy — the same allow/hold/deny

@@ -119,6 +119,10 @@ func newInstallJavaCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// In proxy mode, build the JVM truststore now so any JVM tool trusts the egress CA.
+			if err := ensureEgressJavaTrust(ctx, sess, res.Path); err != nil {
+				return err
+			}
 			w := cmd.OutOrStdout()
 			verb := "installed"
 			if res.AlreadyInstalled {

@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
+
 	"github.com/KuroKodaNinja/iceclimber/internal/agent"
 	"github.com/KuroKodaNinja/iceclimber/internal/audit"
 	"github.com/KuroKodaNinja/iceclimber/internal/conda"
@@ -101,6 +104,7 @@ func mavenBuildDeps(sess *session, pr progress.Func) maven.BuildDeps {
 		Libc:           sess.fp.Libc.Family,
 		ControllerMvn:  sess.controllerMvn,
 		ControllerJava: sess.controllerJava,
+		EgressProxy:    sess.egressProxy,
 		Progress:       pr,
 	}
 }
@@ -168,11 +172,40 @@ func buildRegistry(sess *session, pr progress.Func) protocol.Registry {
 		"pip.install":    pip.Handler(pipDeps(sess, pr)),
 		"node.install":   node.Handler(newNodeInstaller(sess, pr)),
 		"npm.install":    npm.Handler(npmDeps(sess, pr)),
-		"java.install":   java.Handler(newJavaInstaller(sess, pr)),
+		"java.install":   javaInstallHandler(sess, pr),
 		"maven.install":  maven.Handler(mavenDeps(sess, pr)),
 		"maven.build":    maven.BuildHandler(mavenBuildDeps(sess, pr)),
 		"conda.install":  conda.Handler(condaDeps(sess, pr)),
 		"web.fetch":      webfetch.Handler(webfetchDeps(sess)),
+	}
+}
+
+// javaInstallHandler is the java.install handler, extended in proxy mode to build the JVM
+// egress truststore after a successful install (the agent-path counterpart of the CLI
+// `install java`) so a Nana-installed JDK trusts the proxy's leaves. In relay mode it's the
+// plain installer handler.
+func javaInstallHandler(sess *session, pr progress.Func) protocol.Handler {
+	base := java.Handler(newJavaInstaller(sess, pr))
+	if !sess.egressProxy {
+		return base
+	}
+	return func(ctx context.Context, req protocol.Request) protocol.Response {
+		resp := base(ctx, req)
+		if resp.Status == protocol.StatusError {
+			return resp
+		}
+		var p struct {
+			Version string `json:"version"`
+		}
+		_ = json.Unmarshal(req.Params, &p)
+		javaBin, err := java.Locate(ctx, sess.fs, sess.tree.Root, p.Version, sess.fp.Arch, sess.fp.Libc.Family)
+		if err != nil {
+			return protocol.Errf(req.ID, "egress_trust_failed", "locate installed JDK for egress truststore: %v", err)
+		}
+		if err := ensureEgressJavaTrust(ctx, sess, javaBin); err != nil {
+			return protocol.Errf(req.ID, "egress_trust_failed", "%v", err)
+		}
+		return resp
 	}
 }
 

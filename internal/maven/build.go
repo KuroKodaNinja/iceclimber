@@ -51,6 +51,7 @@ type BuildDeps struct {
 	Libc           string
 	ControllerMvn  string // operator's mvn on the controller (default "mvn")
 	ControllerJava string // operator's java on the controller (default "java")
+	EgressProxy    bool   // egress_mode: proxy → build ONLINE through the MITM proxy (no controller prime)
 	Progress       progress.Func
 }
 
@@ -72,6 +73,13 @@ type BuildResult struct {
 func Build(ctx context.Context, d BuildDeps, projectDir, javaVersion, mavenVersion string, goals []string) (BuildResult, error) {
 	if len(goals) == 0 {
 		goals = []string{"package"}
+	}
+	if d.EgressProxy {
+		// Proxy mode: the sandbox reaches the real registry through Popo's MITM proxy, so
+		// the native mvn resolves + downloads + runs plugins ONLINE — no controller prime,
+		// no offline repo relay. This is the proxy's payoff: full Maven behavior (lifecycle
+		// plugins, transitive + plugin resolution, download-during-build) with no bespoke Go.
+		return d.buildOnlineProxy(ctx, projectDir, javaVersion, mavenVersion, goals)
 	}
 	cmvn := firstNonEmptyStr(d.ControllerMvn, "mvn")
 	vout, err := exec.CommandContext(ctx, cmvn, "-v").CombinedOutput()
@@ -156,6 +164,62 @@ func Build(ctx context.Context, d BuildDeps, projectDir, javaVersion, mavenVersi
 	}
 
 	// 5. Collect the built artifacts (target/*.jar).
+	return BuildResult{Artifacts: d.collectArtifacts(ctx, projectDir), Tier: "relay"}, nil
+}
+
+// buildOnlineProxy runs the build in egress-proxy mode: push the native Maven tool, build a
+// JVM truststore for the egress CA (the JVM ignores the OpenSSL/Node CA env vars), then run
+// mvn ONLINE against the real registry through the proxy — routed via the bootstrap-written
+// maven-settings.xml <proxies> block (Maven honors settings, not the JVM proxy props). No
+// controller-side prime, no offline repo relay: the proxy IS the network mediation.
+func (d BuildDeps) buildOnlineProxy(ctx context.Context, projectDir, javaVersion, mavenVersion string, goals []string) (BuildResult, error) {
+	javaBin, err := java.Locate(ctx, d.FS, d.Root, javaVersion, d.Arch, d.Libc)
+	if err != nil {
+		return BuildResult{}, err
+	}
+	javaHome := path.Dir(path.Dir(javaBin)) // <jdk>/bin/java → <jdk>
+	if mavenVersion == "" {
+		mavenVersion = DefaultMavenToolVersion
+	}
+	mvnBin, err := d.ensureMavenTool(ctx, mavenVersion)
+	if err != nil {
+		return BuildResult{}, err
+	}
+
+	// Trust: import the egress CA (written to certs/egress-ca.pem at bootstrap) into a JVM
+	// truststore so mvn validates the proxy's minted leaves.
+	d.Progress.Phase("egress truststore")
+	caPath := path.Join(d.Root, "certs", "egress-ca.pem")
+	storePath := path.Join(d.Root, "certs", "java-truststore.p12")
+	settings := path.Join(d.Root, "maven-settings.xml")
+	if err := java.EnsureEgressTrustStore(ctx, d.Runner, javaBin, caPath, storePath); err != nil {
+		return BuildResult{}, err
+	}
+
+	d.Progress.Phase("building (online via proxy)")
+	mavenOpts := fmt.Sprintf("-Djavax.net.ssl.trustStore=%s -Djavax.net.ssl.trustStorePassword=%s", storePath, java.EgressTrustStorePass)
+	args := []string{
+		"JAVA_HOME=" + remote.ShellQuote(javaHome),
+		"MAVEN_OPTS=" + remote.ShellQuote(mavenOpts),
+		remote.ShellQuote(mvnBin), "-B", "-ntp",
+		"-s", remote.ShellQuote(settings),
+		"-f", remote.ShellQuote(path.Join(projectDir, "pom.xml")),
+	}
+	for _, g := range goals {
+		args = append(args, remote.ShellQuote(g))
+	}
+	res, err := d.Runner.Run(ctx, strings.Join(args, " "), nil)
+	if err != nil {
+		return BuildResult{}, fmt.Errorf("run online mvn: %w", err)
+	}
+	if res.ExitCode != 0 {
+		return BuildResult{}, fmt.Errorf("online mvn build failed: %s", lastLines(res.Stderr, 8))
+	}
+	return BuildResult{Artifacts: d.collectArtifacts(ctx, projectDir), Tier: "proxy"}, nil
+}
+
+// collectArtifacts lists the build's target/*.jar outputs (sandbox paths), sorted.
+func (d BuildDeps) collectArtifacts(ctx context.Context, projectDir string) []string {
 	target := path.Join(projectDir, "target")
 	var artifacts []string
 	if names, lerr := d.FS.List(ctx, target); lerr == nil {
@@ -166,7 +230,7 @@ func Build(ctx context.Context, d BuildDeps, projectDir, javaVersion, mavenVersi
 		}
 	}
 	sort.Strings(artifacts)
-	return BuildResult{Artifacts: artifacts, Tier: "relay"}, nil
+	return artifacts
 }
 
 // ensureMavenTool relays the Apache Maven distribution into the sandbox once and returns

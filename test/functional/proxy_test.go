@@ -117,6 +117,48 @@ func TestProxyCondaEgress(t *testing.T) {
 	}
 }
 
+// TestProxyMavenBuild is the maven parity anchor and the hardest case: unlike pip/npm/conda
+// (which honor the OpenSSL/Node CA env vars), the JVM ignores them, and there's no native
+// mvn in the sandbox. In egress_mode: proxy, `maven build` pushes the Maven tool, builds a
+// JVM truststore from the egress CA, and runs mvn ONLINE through the proxy (routed via the
+// bootstrap-written settings.xml <proxies>) — resolving plugins + a real Gson dependency
+// from Maven Central. Success is only possible if that egress worked (no offline repo is
+// primed in proxy mode), so a produced jar tagged "(proxy)" IS the parity proof.
+func TestProxyMavenBuild(t *testing.T) {
+	sb := requireGlibcSandbox(t) // Temurin JDK is glibc-linked
+	root := "/tmp/iceclimber-proxymvn-" + protocol.NewID()
+	scheduleRootCleanupOn(t, sb.Name, root)
+	cfg := writeProxyConfigFor(t, sb, root, `network:
+  allowed_domains:
+    - { pattern: "repo.maven.apache.org", reachable_from: controller }`)
+
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
+	runIceclimber(t, "install", "java", "21", "--config", cfg, "--transport", "sftp")
+
+	// A minimal real project: a Gson dependency forces a Maven Central download through the
+	// proxy; the compiler/jar plugins are fetched online too (nothing is pre-seeded).
+	proj := root + "/mvnproj"
+	pkg := proj + "/src/main/java/com/example"
+	pom := `<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>` +
+		`<groupId>com.example</groupId><artifactId>proxyapp</artifactId><version>1.0</version>` +
+		`<properties><maven.compiler.release>17</maven.compiler.release>` +
+		`<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties><dependencies>` +
+		`<dependency><groupId>com.google.code.gson</groupId><artifactId>gson</artifactId><version>2.10.1</version></dependency>` +
+		`</dependencies></project>`
+	app := "package com.example;\nimport com.google.gson.Gson;\n" +
+		"public class App { public static void main(String[] a){ System.out.println(new Gson().toJson(\"ok\")); } }\n"
+	limaShOn(t, sb.Name, "mkdir -p "+pkg+" && cat > "+proj+"/pom.xml <<'POM'\n"+pom+"\nPOM\n"+
+		"cat > "+pkg+"/App.java <<'APP'\n"+app+"APP")
+
+	stop := startProxyServe(t, cfg)
+	defer stop()
+
+	out := string(runIceclimber(t, "maven", "build", "--project", proj, "--java", "21", "--config", cfg, "--transport", "sftp"))
+	if !strings.Contains(out, ".jar") || !strings.Contains(out, "(proxy)") {
+		t.Fatalf("maven build through the proxy did not produce a proxy-tier jar:\n%s", out)
+	}
+}
+
 // TestProxyPackagePathDeny proves package/path-level egress policy: on an ALLOWED registry
 // host, a deny rule that includes a path ("https://pypi.org/simple/six/*") blocks just that
 // one package (the proxy's per-request path veto returns 403) while every other package on
