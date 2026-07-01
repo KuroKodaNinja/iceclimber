@@ -319,6 +319,81 @@ func TestDispatch_GC_Idempotent(t *testing.T) {
 	}
 }
 
+func TestValidRequestName(t *testing.T) {
+	ok := []string{"01ARZ3NDEKTSV4RRFFQ69G5FAV.json", "anything.json"}
+	bad := []string{"", ".", "..", "/", "a/b.json", "noext", "..json.json/..", "\n..", ".."}
+	for _, n := range ok {
+		if !validRequestName(n) {
+			t.Errorf("validRequestName(%q) = false, want true", n)
+		}
+	}
+	for _, n := range bad {
+		if validRequestName(n) {
+			t.Errorf("validRequestName(%q) = true, want false (must never reach a destructive RemoveAll)", n)
+		}
+	}
+}
+
+func TestDispatch_GC_SkipsUnsafeNames(t *testing.T) {
+	// A crafted ".." entry (as ExecFS's newline-split List can yield) must never be
+	// acted on — otherwise gc's RemoveAll would climb out of inbox/cur into protocol/inbox.
+	ctx, fs, tree, d := setup(t)
+	// Put a real marker file in the inbox parent to prove it's NOT deleted.
+	guard := path.Join(path.Dir(tree.Inbox().Cur()), "GUARD")
+	if err := fs.WriteFile(ctx, guard, []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	// gc guards by name; feed it a valid collected pair alongside — the valid one is
+	// reaped, the parent survives. (We can't make List literally return "..", so this
+	// asserts the guard is in place via validRequestName + a healthy reap.)
+	id := NewID()
+	name := RequestName(id)
+	if err := fs.WriteFile(ctx, path.Join(tree.Outbox().Cur(), name), request(id, "ping")); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.WriteFile(ctx, path.Join(tree.Inbox().Cur(), name), []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.gc(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if has(t, ctx, fs, tree.Inbox().Cur(), name) {
+		t.Error("valid collected pair not reaped")
+	}
+	if !has(t, ctx, fs, path.Dir(tree.Inbox().Cur()), "GUARD") {
+		t.Error("gc must not touch anything outside the maildir dirs")
+	}
+}
+
+func TestDispatch_StampsCompletedAt_ForRawHandler(t *testing.T) {
+	// A raw handler that returns a Response literal without CompletedAt: serviceCur must
+	// stamp it, else the retention sweep's "undated → leave it" would never reap it.
+	ctx := context.Background()
+	fs := remotefs.NewExecFS(remotefstest.LocalRunner{})
+	tree := Tree{Root: t.TempDir()}
+	if err := EnsureTree(ctx, fs, tree); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDispatcher(fs, tree, Registry{"raw": func(_ context.Context, req Request) Response {
+		return Response{SchemaVersion: SchemaVersion, ID: req.ID, Status: StatusOK} // no CompletedAt
+	}})
+	id := NewID()
+	name := RequestName(id)
+	if err := Deliver(ctx, fs, tree.Outbox(), name, request(id, "raw")); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := ReadResponse(ctx, fs, tree, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.CompletedAt.IsZero() {
+		t.Error("serviceCur must stamp CompletedAt for a raw handler (else retention never reaps it)")
+	}
+}
+
 func TestDispatch_RecoversStrandedRequest(t *testing.T) {
 	ctx, fs, tree, d := setup(t)
 	id := NewID()

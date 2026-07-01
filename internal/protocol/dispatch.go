@@ -82,7 +82,7 @@ func (d *Dispatcher) OnHeartbeat(fn func(seq int64)) { d.onHeartbeat = fn }
 // inbox/new before GC reaps it (with its request). 0 (the default) disables the
 // retention sweep — collected pairs are still pruned. The clock is the response's
 // CompletedAt (delivery time), so a long install never trips it.
-func (d *Dispatcher) SetRetention(d2 time.Duration) { d.retention = d2 }
+func (d *Dispatcher) SetRetention(dur time.Duration) { d.retention = dur }
 
 // RunOnce performs a single dispatch cycle: GC completed/abandoned pairs, recover any
 // in-flight requests left in cur/ by a previous crash, then drain new/ oldest-first.
@@ -228,6 +228,9 @@ func (d *Dispatcher) gc(ctx context.Context) error {
 	// Collected pairs.
 	if collected, err := d.fs.List(ctx, d.tree.Inbox().Cur()); err == nil {
 		for _, name := range collected {
+			if !validRequestName(name) {
+				continue // never let a crafted name steer the destructive RemoveAll
+			}
 			_ = d.fs.RemoveAll(ctx, path.Join(d.tree.Outbox().Cur(), name))
 			_ = d.fs.RemoveAll(ctx, path.Join(d.tree.Inbox().Cur(), name))
 		}
@@ -242,6 +245,9 @@ func (d *Dispatcher) gc(ctx context.Context) error {
 	}
 	cutoff := time.Now().Add(-d.retention)
 	for _, name := range uncollected {
+		if !validRequestName(name) {
+			continue
+		}
 		data, rerr := d.fs.ReadFile(ctx, path.Join(d.tree.Inbox().New(), name))
 		if rerr != nil {
 			continue
@@ -254,6 +260,18 @@ func (d *Dispatcher) gc(ctx context.Context) error {
 		_ = d.fs.RemoveAll(ctx, path.Join(d.tree.Outbox().Cur(), name))
 	}
 	return nil
+}
+
+// validRequestName reports whether name is a safe maildir entry to act on: a
+// "<id>.json" basename, never "."/".."/a path with separators. gc guards its
+// destructive RemoveAll with this — on the exec transport a filename containing a
+// newline splits in `ls -1` output (List) into a ".." fragment, which would otherwise
+// steer RemoveAll one directory up. (SFTP returns clean basenames; this is defense in
+// depth for both.)
+func validRequestName(name string) bool {
+	return name != "" && name != "." && name != ".." &&
+		name == path.Base(name) && !strings.ContainsRune(name, '/') &&
+		strings.HasSuffix(name, ".json")
 }
 
 // serviceFromNew dedups, picks up (new->cur), then services a request.
