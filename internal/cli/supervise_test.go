@@ -125,12 +125,12 @@ func TestSupervisor_BackoffResetsAfterHealthyCycle(t *testing.T) {
 	}
 }
 
-// TestSupervisor_ProxyStartupFailureEscalates: a cycle that authenticates but never serves
-// (the proxy-startup failure shape: authenticated=true, served=false) must NOT reset the
-// backoff — otherwise a persistently forwarded egress port spins forever at the initial
-// interval. The password is still Committed (the dial did authenticate), but the backoff
-// grows 1s→2s→4s like any transient drop.
-func TestSupervisor_ProxyStartupFailureEscalates(t *testing.T) {
+// TestSupervisor_AuthenticatedNotServedEscalates guards the runSupervisor invariant: a cycle
+// that authenticates but never serves (authenticated=true, served=false) must NOT reset the
+// backoff (else it would spin forever at the initial interval); the password is still
+// Committed, but the backoff grows 1s→2s→4s. (A failed egress proxy no longer produces this
+// shape — it degrades and serves — but the invariant still protects any future not-served path.)
+func TestSupervisor_AuthenticatedNotServedEscalates(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cache := &fakeCache{}

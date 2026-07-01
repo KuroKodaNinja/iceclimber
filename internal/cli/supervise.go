@@ -64,10 +64,13 @@ func superviseServe(ctx context.Context, cfg *config.Config, transport string, d
 		// proxy for this connection so it gates through that same approver. Torn down at
 		// cycle end; the next reconnect re-establishes it.
 		disp := buildServeDispatcher(ctx, sess, cfg, deny, out, supervised)
-		stopProxy, perr := startEgressProxy(sess, cfg, out)
+		stopProxy, perr := startEgressProxy(ctx, sess, cfg, out)
 		if perr != nil {
-			_ = sess.Close()
-			return true, false, perr // authenticated, but the cycle never served — don't reset backoff
+			// The proxy is an enhancement, not the session: a failed reverse tunnel must NOT
+			// tear down the healthy connection (that looped forever). Warn and serve without it
+			// — popo install verbs (relay) still work; native-tool egress is disabled.
+			fmt.Fprintf(out, "  egress proxy unavailable — native-tool egress disabled this session: %v\n", perr)
+			stopProxy = func() {}
 		}
 		err = disp.Serve(ctx, interval)
 		stopProxy()

@@ -749,10 +749,16 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 			// In proxy egress mode, bring up the reverse-tunneled MITM proxy for this
 			// connection so the sandbox's tools egress through it, gated by the console's
 			// interactive approver (set by buildConsoleDispatcher above).
-			stopProxy, perr := startEgressProxy(s, cfg, io.Discard)
+			stopProxy, perr := startEgressProxy(ctx, s, cfg, io.Discard)
 			if perr != nil {
-				_ = s.Close()
-				return true, false, perr // authenticated, but never served — keep backing off
+				// Don't kill the healthy session when the proxy tunnel can't bind (that looped
+				// forever); surface a readable warning and serve without it — relay verbs still work.
+				emit(activity.Event{
+					TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindOperated,
+					Type: "egress", Status: "failed",
+					Detail: "egress proxy unavailable — native-tool egress disabled this session: " + perr.Error(),
+				})
+				stopProxy = func() {}
 			}
 			serveErr := disp.Serve(ctx, 2*time.Second)
 			stopProxy()

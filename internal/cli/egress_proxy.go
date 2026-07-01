@@ -42,7 +42,7 @@ func egressCAPaths(cfg *config.Config) (certPath, keyPath string) {
 // Every request is gated through the egress policy at CONNECT (host-level allow/hold/deny +
 // persistent approval + rewrite table) and re-checked per request by a package/path-level
 // PathDenier; each is audited with its verdict.
-func startEgressProxy(sess *session, cfg *config.Config, out io.Writer) (func(), error) {
+func startEgressProxy(ctx context.Context, sess *session, cfg *config.Config, out io.Writer) (func(), error) {
 	if !cfg.EgressProxy() {
 		return func() {}, nil
 	}
@@ -74,10 +74,6 @@ func startEgressProxy(sess *session, cfg *config.Config, out io.Writer) (func(),
 	// Gate every request through the egress policy (allow/hold/deny + persistent approval
 	// + rewrite table), reusing the interactive approver when serve is supervised.
 	pp := newProxyPolicy(sess.policy, sess.approver, cfg.SandboxID)
-	// Seed the artifact-deny set from packages already denied at startup (their index is
-	// 403'd, so learn-on-serve never sees them) — resolve each denied pip index to its exact
-	// artifact URLs, wherever they're hosted. Best-effort; runs off the serve path.
-	pp.seedDeniedArtifacts(controllerIndexFetch)
 	p := proxy.New(ca, pp.decide, audit, nil)
 	// Package/path-level enforcement on an already-admitted host: (1) a deny rule whose glob
 	// includes a path blocks just that URL; (2) a denied package's artifact (on a name-less
@@ -102,6 +98,11 @@ func startEgressProxy(sess *session, cfg *config.Config, out io.Writer) (func(),
 		},
 	)
 	go func() { _ = p.Serve(ln) }()
+	// Seed the artifact-deny set from packages already denied at startup (their index is
+	// 403'd, so learn-on-serve never sees them) — resolve each denied pip index to its exact
+	// artifact URLs, wherever they're hosted. Async + ctx-aware so it never blocks serve
+	// startup; the tiny pre-seed window is covered by the index-deny + learn-on-serve.
+	go pp.seedDeniedArtifacts(ctx, controllerIndexFetch)
 	fmt.Fprintf(out, "  egress proxy up: sandbox 127.0.0.1:%d → controller MITM\n", cfg.EgressPort())
 	return func() { _ = ln.Close() }, nil
 }
@@ -123,10 +124,10 @@ func isPipIndexPath(p string) bool {
 func indexContentType(proxy.Request) string { return "application/vnd.pypi.simple.v1+json" }
 
 // controllerIndexFetch fetches a package index from the controller's network (used to resolve
-// a denied package's artifacts). Short timeout; asks for PEP 691 JSON; TLS validated against
-// the controller's real roots. Returns (body, contentType, err).
-func controllerIndexFetch(indexURL string) ([]byte, string, error) {
-	req, err := http.NewRequest(http.MethodGet, indexURL, nil)
+// a denied package's artifacts). ctx-cancellable + short timeout; asks for PEP 691 JSON; TLS
+// validated against the controller's real roots. Returns (body, contentType, err).
+func controllerIndexFetch(ctx context.Context, indexURL string) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, indexURL, nil)
 	if err != nil {
 		return nil, "", err
 	}
@@ -309,16 +310,19 @@ func (pp *proxyPolicy) recordIndex(indexURL string, artifacts []string) {
 // fetch) and pre-populates deniedArtifacts, so a package denied BEFORE serve starts (its
 // index is 403'd, never served, so never learned) still has its artifacts blocked. Best
 // effort: a fetch/parse failure is skipped (the index-deny still blocks normal installs).
-func (pp *proxyPolicy) seedDeniedArtifacts(fetch func(url string) (body []byte, contentType string, err error)) {
+func (pp *proxyPolicy) seedDeniedArtifacts(ctx context.Context, fetch func(ctx context.Context, url string) (body []byte, contentType string, err error)) {
 	if pp.policy == nil || fetch == nil {
 		return
 	}
 	for _, glob := range pp.policy.Store().Deny() {
+		if ctx.Err() != nil {
+			return // serve cycle ended — stop resolving
+		}
 		indexURL, ok := egress.IndexURLFromDenyGlob(glob)
 		if !ok {
 			continue
 		}
-		body, ct, err := fetch(indexURL)
+		body, ct, err := fetch(ctx, indexURL)
 		if err != nil {
 			continue
 		}

@@ -183,7 +183,7 @@ func TestProxyPolicy_ArtifactDeny(t *testing.T) {
 	}
 	pp := newProxyPolicy(pol, nil, "s")
 	fixture := []byte(`{"files":[{"url":"https://files.pythonhosted.org/packages/ab/cd/six-1.16.0-py3-none-any.whl#sha256=x"}]}`)
-	pp.seedDeniedArtifacts(func(u string) ([]byte, string, error) {
+	pp.seedDeniedArtifacts(context.Background(), func(_ context.Context, u string) ([]byte, string, error) {
 		if u != "https://pypi.org/simple/six/" {
 			t.Errorf("resolve fetched %q, want the index URL", u)
 		}
