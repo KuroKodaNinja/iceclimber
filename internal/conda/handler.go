@@ -50,9 +50,20 @@ func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, ti
 	if d.CondaBin == "" {
 		return pkg.Outcome{}, fmt.Errorf("no conda on the sandbox (probe reported none)")
 	}
-	if tier == pkg.TierRelay {
-		return pkg.Outcome{}, fmt.Errorf("conda relay tier is not implemented yet")
+
+	// The relay tier builds the env OFFLINE from a controller-pushed channel, so it
+	// bypasses python.EnsureEnv (which would try an online `conda create`) and targets the
+	// env prefix directly. Tier-0 goes through EnsureEnv against the sandbox's channel.
+	if resolveTier(tier, extraArgs) == pkg.TierRelay {
+		m := New(Config{
+			Runner: d.Runner, FS: d.FS, CondaBin: d.CondaBin,
+			EnvPrefix: python.CondaEnvPrefix(d.Root, pythonVersion),
+			Root:      d.Root, Progress: d.Progress, ExtraArgs: extraArgs,
+			Arch: d.Arch, Libc: d.Libc, ControllerConda: d.ControllerConda,
+		})
+		return m.RelayInstall(ctx, specs, python.MinorOf(pythonVersion))
 	}
+
 	d.Progress.Phase("resolving")
 	// A conda env is always a conda env regardless of the operator's python source, so
 	// force EnvManager=conda; EnsureEnv creates/reuses <root>/envs/conda-python-<minor>.
@@ -68,6 +79,23 @@ func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, ti
 		Arch: d.Arch, Libc: d.Libc, ControllerConda: d.ControllerConda,
 	})
 	return m.Install(ctx, specs)
+}
+
+// resolveTier maps the requested tier to a concrete one. "relay"/"mirror" force it; "auto"
+// (or "") picks relay when the agent asked for offline (there is no cheap probe of channel
+// reachability at request time, so an explicit --offline is the auto signal), else mirror.
+func resolveTier(tier string, extraArgs []string) string {
+	switch tier {
+	case pkg.TierRelay:
+		return pkg.TierRelay
+	case pkg.TierMirror:
+		return pkg.TierMirror
+	default: // "auto" or ""
+		if pkg.ExtraArgsHaveFlag(extraArgs, "--offline") {
+			return pkg.TierRelay
+		}
+		return pkg.TierMirror
+	}
 }
 
 type installParams struct {

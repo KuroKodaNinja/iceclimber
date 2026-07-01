@@ -57,10 +57,19 @@ func (m *Manager) Install(ctx context.Context, specs []pkg.Spec) (pkg.Outcome, e
 	if err != nil {
 		return pkg.Outcome{}, fmt.Errorf("run conda install: %w", err)
 	}
+	return m.resultOutcome(res, specs, m.tier())
+}
+
+// resultOutcome maps a finished `conda … --json` run (install or offline create) to a
+// pkg.Outcome. A solve failure is reported per requested spec in Failed (a request-level
+// nil error) unless the command itself produced no parseable JSON and failed. The tier
+// tag is stamped on each Installed. Shared by Tier-0 Install and the relay's offline
+// create (relay.go).
+func (m *Manager) resultOutcome(res remote.Result, specs []pkg.Spec, tier string) (pkg.Outcome, error) {
 	cr, perr := parseCondaJSON(res.Stdout)
 	if perr != nil {
 		if res.ExitCode != 0 {
-			return pkg.Outcome{}, fmt.Errorf("conda install failed: %s", lastLines(res.Stderr, 4))
+			return pkg.Outcome{}, fmt.Errorf("conda failed: %s", lastLines(res.Stderr, 4))
 		}
 		return pkg.Outcome{}, fmt.Errorf("parse conda --json output: %w", perr)
 	}
@@ -84,19 +93,15 @@ func (m *Manager) Install(ctx context.Context, specs []pkg.Spec) (pkg.Outcome, e
 		if lv, ok := linked[s.Name]; ok {
 			v = lv
 		}
-		out.Installed = append(out.Installed, pkg.Installed{Name: s.Name, Version: v, Tier: m.tier()})
+		out.Installed = append(out.Installed, pkg.Installed{Name: s.Name, Version: v, Tier: tier})
 	}
 	return out, nil
 }
 
-// tier reports which tier tag to stamp on installed packages (relay when the offline
-// flags are in play — set by RelayInstall — else mirror/direct).
-func (m *Manager) tier() string {
-	if pkg.ExtraArgsHaveFlag(m.cfg.ExtraArgs, "--offline") {
-		return pkg.TierRelay
-	}
-	return pkg.TierMirror
-}
+// tier reports the tag stamped on Tier-0 installs: always mirror (the relay path stamps
+// pkg.TierRelay itself in RelayInstall). Kept as a method so the stamp lives next to the
+// install it describes.
+func (m *Manager) tier() string { return pkg.TierMirror }
 
 func (m *Manager) installCmd(specs []pkg.Spec) string {
 	args := []string{
@@ -146,15 +151,22 @@ type condaJSON struct {
 // leading non-JSON noise on stderr but the stdout doc is clean; we take the first
 // balanced {...} object.
 func parseCondaJSON(stdout []byte) (condaJSON, error) {
-	s := strings.TrimSpace(string(stdout))
-	if i := strings.IndexByte(s, '{'); i > 0 {
-		s = s[i:] // tolerate a stray prefix line
-	}
 	var cr condaJSON
-	if err := json.Unmarshal([]byte(s), &cr); err != nil {
+	if err := json.Unmarshal(trimToJSON(stdout), &cr); err != nil {
 		return condaJSON{}, err
 	}
 	return cr, nil
+}
+
+// trimToJSON drops any leading non-JSON noise conda occasionally prints before the
+// document (e.g. a stray "Collecting package metadata..." line) and returns the bytes
+// from the first '{' onward. Shared by parseCondaJSON and the relay solve parser.
+func trimToJSON(b []byte) []byte {
+	s := strings.TrimSpace(string(b))
+	if i := strings.IndexByte(s, '{'); i > 0 {
+		s = s[i:]
+	}
+	return []byte(s)
 }
 
 func firstNonEmpty(ss ...string) string {

@@ -100,7 +100,7 @@ func ensureCondaEnv(ctx context.Context, runner remote.Runner, root, version str
 	if minor == "" {
 		return "", fmt.Errorf("conda env requires a python_version (e.g. 3.12)")
 	}
-	prefix := path.Join(root, "envs", "conda-python-"+minor)
+	prefix := CondaEnvPrefix(root, version)
 	bin := path.Join(prefix, "bin", "python")
 	if existsExecutable(ctx, runner, bin) {
 		return bin, nil // reuse (idempotent)
@@ -139,6 +139,18 @@ func existsExecutable(ctx context.Context, runner remote.Runner, p string) bool 
 	res, err := runner.Run(ctx, "[ -x "+remote.ShellQuote(p)+" ] && echo ok", nil)
 	return err == nil && strings.TrimSpace(string(res.Stdout)) == "ok"
 }
+
+// CondaEnvPrefix is the path of the iceclimber-owned conda env for a python version:
+// <root>/envs/conda-python-<minor>. The single source of truth for the env location,
+// shared by EnsureEnv (Tier-0 online create) and the conda relay tier (offline create).
+func CondaEnvPrefix(root, version string) string {
+	return path.Join(root, "envs", "conda-python-"+minorOf(version))
+}
+
+// MinorOf reduces a version to its "<maj>.<min>" prefix ("3.12.3" -> "3.12"), the same
+// reduction EnsureEnv uses to name the conda env prefix. Exported so the conda relay tier
+// (which builds the env offline instead of via EnsureEnv) can target the identical path.
+func MinorOf(v string) string { return minorOf(v) }
 
 // minorOf reduces a version to its "<maj>.<min>" prefix: "3.12.3" -> "3.12",
 // "3.12" -> "3.12", "" -> "".
