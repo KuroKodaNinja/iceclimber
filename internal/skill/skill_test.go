@@ -5,16 +5,24 @@ import (
 	"testing"
 )
 
-// NANA.md is the system-prompt contract: it must stay MINIMAL (it's injected into the
-// agent's system prompt) and default to the `popo` client, with the file-protocol
-// fallback pointer. The heavy mechanics live in PROTOCOL.md, not here.
+// NANA.md is the system-prompt contract: it stays FOCUSED (it's injected into the agent's
+// system prompt) and defaults to the `popo` client, with the file-protocol fallback pointer.
+// The heavy raw mechanics live in PROTOCOL.md, not here — but load-bearing behavioral guidance
+// (e.g. defaulting runtime versions to the latest) does belong, so the bound is generous.
 func TestNanaMDIsMinimalAndPointsToPopo(t *testing.T) {
-	if len(NanaMD) > 2500 {
-		t.Errorf("NANA.md is meant to be minimal (system prompt); got %d bytes", len(NanaMD))
+	if len(NanaMD) > 4500 {
+		t.Errorf("NANA.md should stay focused (system prompt); got %d bytes", len(NanaMD))
 	}
 	for _, want := range []string{"popo", "popo help", "absolute path", "PROTOCOL.md"} {
 		if !strings.Contains(NanaMD, want) {
 			t.Errorf("NANA.md missing %q", want)
+		}
+	}
+	// Runtime-version guidance must be present: default to the latest, don't guess a number
+	// (the whole point of the section — an agent left to guess picks an older line).
+	for _, want := range []string{"node.install", "latest"} {
+		if !strings.Contains(NanaMD, want) {
+			t.Errorf("NANA.md missing runtime-version guidance %q", want)
 		}
 	}
 	// The raw mechanics must NOT be in the system prompt — they belong in PROTOCOL.md.

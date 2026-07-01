@@ -13,8 +13,8 @@ manage files to talk to Popo:
 
 ```
 popo help                              # list verbs and their usage (the source of truth)
-popo python.install 3.12               # install a runtime
-popo pip.install --python 3.12 rich    # install packages into it
+popo node.install                      # install the current recommended runtime (no version = latest)
+popo pip.install --python 3.12 rich    # install packages into a runtime you installed
 popo web.fetch https://example.com     # fetch a URL through Popo's network
 ```
 
@@ -29,6 +29,33 @@ Run anything Popo installs by the **absolute path** `popo` prints — e.g.
 
 That is the whole contract. If a request seems stuck, `popo` is just waiting on Popo;
 it will tell you if Popo isn't running.
+
+## Choosing runtime versions — default to the latest
+
+When you install a runtime (`python.install`, `node.install`, `java.install`) and the task
+does **not** name a specific version, **install the latest** — the current, most capable
+line. Get it by **omitting the version** or passing **`latest`**; Popo resolves it for you:
+
+```
+popo node.install            # the current recommended Node (latest) — preferred
+popo node.install latest     # identical — explicit
+popo python.install          # latest recommended Python
+popo java.install            # latest recommended JDK
+popo node.install 22         # a SPECIFIC line — use only when the task requires it
+```
+
+Rules of thumb:
+
+- **Do not guess or hard-code a version, and do not pick an older one to be "safe."** If the
+  task says "build a Node app" with no version, run `popo node.install` (latest) — never
+  `popo node.install 22` from memory. An older runtime you assume is stable is often *not*
+  the one available here, and may lack features the packages need.
+- **Only name a version when the task requires it** — e.g. "target Python 3.11", a lockfile
+  pinning an engine, or a dependency that needs an exact line.
+- **Reuse the version Popo actually installed.** Every install result prints the resolved
+  version and absolute path — use *that* version for the matching package installs (e.g. if
+  `node.install` reports Node 24, run `popo npm.install --node 24 …`, not a different line).
+  One runtime line per app; don't mix.
 
 ## Popo is your only way out — be patient
 

@@ -19,10 +19,17 @@ func buildParams(verb string, args []string) (any, error) {
 		return nil, nil
 
 	case "python.install", "node.install", "java.install":
-		if len(args) != 1 {
-			return nil, fmt.Errorf("want exactly one version")
+		// The version is optional: omit it (or pass "latest") to install the current
+		// recommended line — Popo resolves it, so an agent never has to guess a number and
+		// won't pick an older one. Pass a specific line only when the task requires it.
+		if len(args) > 1 {
+			return nil, fmt.Errorf("want at most one version (omit or 'latest' for the recommended line, or e.g. 24)")
 		}
-		return map[string]any{"version": args[0]}, nil
+		version := "latest"
+		if len(args) == 1 {
+			version = args[0]
+		}
+		return map[string]any{"version": version}, nil
 
 	case "pip.install":
 		ver, rest, err := requireFlag(args, "--python")

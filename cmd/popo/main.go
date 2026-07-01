@@ -87,11 +87,11 @@ func main() {
 // verbs is the catalog: name → one-line usage (also drives `popo help`).
 var verbs = map[string]string{
 	"ping":           "popo ping",
-	"python.install": "popo python.install <minor>            e.g. 3.12",
+	"python.install": "popo python.install [minor]             omit/latest = recommended, or e.g. 3.12",
 	"pip.install":    "popo pip.install --python <minor> <pkg[==version]>...",
-	"node.install":   "popo node.install <version-line>        e.g. 24",
+	"node.install":   "popo node.install [version-line]        omit/latest = recommended, or e.g. 24",
 	"npm.install":    "popo npm.install --node <line> <pkg[@version]>... | --project <dir>",
-	"java.install":   "popo java.install <feature>             e.g. 21",
+	"java.install":   "popo java.install [feature]             omit/latest = recommended, or e.g. 21",
 	"maven.install":  "popo maven.install --java <feature> <group:artifact:version>...",
 	"maven.build":    "popo maven.build --java <feature> --project <dir> [goal]...   build a pom.xml project (offline in relay mode, online via the proxy in proxy mode)",
 	"conda.install":  "popo conda.install --python <minor> [-c <channel>]... [--offline] <pkg[=version]>... | --file <environment.yml>",

@@ -21,6 +21,11 @@ func TestBuildParams(t *testing.T) {
 		{"ping", nil, "null"},
 		{"python.install", []string{"3.12"}, `{"version":"3.12"}`},
 		{"java.install", []string{"21"}, `{"version":"21"}`},
+		// The version is optional: omitting it (or "latest") sends "latest" so Popo installs the
+		// recommended line — an agent never has to guess a number.
+		{"node.install", nil, `{"version":"latest"}`},
+		{"node.install", []string{"latest"}, `{"version":"latest"}`},
+		{"python.install", nil, `{"version":"latest"}`},
 		{"pip.install", []string{"--python", "3.12", "requests", "rich==13.7"},
 			`{"packages":[{"name":"requests"},{"name":"rich","version":"13.7"}],"python_version":"3.12"}`},
 		{"npm.install", []string{"--node", "24", "left-pad@1.3.0", "@scope/x"},
@@ -61,7 +66,7 @@ func TestBuildParams_Errors(t *testing.T) {
 		verb string
 		args []string
 	}{
-		{"python.install", nil},                                                 // missing version
+		{"node.install", []string{"22", "23"}},                                  // too many versions
 		{"pip.install", []string{"requests"}},                                   // missing --python
 		{"conda.install", []string{"numpy"}},                                    // missing --python
 		{"conda.install", []string{"--file", "/p/env.yml", "--python", "3.12"}}, // --file + --python

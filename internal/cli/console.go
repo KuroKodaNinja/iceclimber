@@ -669,19 +669,21 @@ func firstLine(s string) string {
 	return ""
 }
 
-// defaultVersion supplies a sane runtime version when the operator left it blank:
-// Python 3.12, JavaScript (Node) 24 (musl arm64 needs Node ≥ 24), Java 21 (LTS).
+// defaultVersion supplies a sane runtime version when the operator left it blank, resolving to
+// the SAME recommended line the agent's `popo <lang>.install` (no version / "latest") uses — one
+// source of truth per runtime (node/python/java.RecommendedLine) so the console, the CLI, the
+// agent, and NANA.md never drift.
 func defaultVersion(lang, v string) string {
 	if s := strings.TrimSpace(v); s != "" {
 		return s
 	}
 	switch lang {
 	case "javascript":
-		return "24"
+		return node.RecommendedLine
 	case "java":
-		return "21"
+		return java.RecommendedLine
 	default:
-		return "3.12"
+		return python.RecommendedLine
 	}
 }
 

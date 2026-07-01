@@ -95,18 +95,20 @@ install`/`wrap` — to inform the operator's `status` view. **You don't write it
 | verb | params | result (key fields) |
 |---|---|---|
 | `ping` | `{}` | `{ pong_at, popo_version }` |
-| `python.install` | `{ version }` (minor, e.g. "3.12") | `{ version, path, already_installed }` |
+| `python.install` | `{ version? }` (minor, e.g. "3.12"; omit or "latest" = recommended) | `{ version, path, already_installed }` |
 | `pip.install` | `{ python_version, packages:[{name,version?}] }` | `{ installed:[{name,version,tier,sha256}], failed:[{name,version,error}] }` |
-| `node.install` | `{ version }` (line, e.g. "24") | `{ version, path, already_installed }` |
+| `node.install` | `{ version? }` (line, e.g. "24"; omit or "latest" = recommended) | `{ version, path, already_installed }` |
 | `npm.install` | `{ node_version, packages:[{name,version?}] }` or `{ node_version, project:"<dir>" }` | `{ installed, failed, node_path }` |
-| `java.install` | `{ version }` (feature, e.g. "21") | `{ version, path, already_installed }` |
+| `java.install` | `{ version? }` (feature, e.g. "21"; omit or "latest" = recommended) | `{ version, path, already_installed }` |
 | `maven.install` | `{ java_version, packages:[{name:"group:artifact",version}] }` | `{ installed, failed, classpath }` |
 | `maven.build` | `{ project, java_version, goals?:["package"], maven_version? }` | `{ artifacts:[<jar path>], tier:"relay"\|"proxy" }` |
 | `conda.install` | `{ python_version, packages:[{name,version?}], extra_args?:["-c","conda-forge",…] }` or `{ file:"<environment.yml>" }` | `{ installed:[{name,version,tier,sha256?}], failed }` |
 | `web.fetch` | `{ url, method?, headers?, body? }` | `{ status_code, venue, encoding, body_inline? , body_blob? }` |
 
-Notes: run installed runtimes by the absolute `path`/`node_path`/`classpath`
-returned. `body_blob` is a `$ICECLIMBER_HOME`-relative path — read the body at `$ICECLIMBER_HOME/<body_blob>`.
+Notes: for a runtime install, **omit `version` (or set it to `"latest"`) to get the current
+recommended line** unless the task requires a specific one — don't guess or pick an older
+version; then reuse the `version` the result reports for the matching package installs. Run
+installed runtimes by the absolute `path`/`node_path`/`classpath` returned. `body_blob` is a `$ICECLIMBER_HOME`-relative path — read the body at `$ICECLIMBER_HOME/<body_blob>`.
 For Node, export `NODE_PATH=<node_path>` — or, with `npm.install project:"<dir>"`, the
 whole `package.json` is installed and its `node_modules` lands in the project dir (local
 resolution, no `NODE_PATH`). `maven.build` builds a sandbox `pom.xml` project with `mvn`
