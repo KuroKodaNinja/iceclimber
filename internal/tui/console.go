@@ -59,6 +59,15 @@ type ApprovalRequest struct {
 	Reply         chan int
 }
 
+// PasswordRequest is a no-echo secret prompt (an SSH password / kbd-interactive challenge
+// during a reconnect) shown as a masked modal, so the prompt never writes to /dev/tty and
+// corrupts the alt-screen. The cli's TUI-backed prompter sends it on the event channel and
+// blocks; the typed value is sent back on Reply (empty string if the operator cancels).
+type PasswordRequest struct {
+	Label string
+	Reply chan string
+}
+
 // InstallRequest is an operator-initiated install (not an agent maildir request),
 // filled from the console's install form and handed to the OpRunner. The operator
 // picks a language (Python / JavaScript) and the packages to install; the cli layer
@@ -205,6 +214,8 @@ type Console struct {
 	denied    int
 	lastTS    time.Time
 	modal     *ApprovalRequest
+	pwReq     *PasswordRequest // active no-echo password modal ("" = none)
+	pwInput   string           // typed secret so far (rendered masked)
 	form      *huh.Form
 	formKind  string // "install" | "bootstrap" while a form is open
 	running   string // label of an in-flight operator action ("" = idle)
@@ -290,6 +301,27 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			c.form = c.form.WithWidth(formWidth(c.width)).WithHeight(formHeight(c.height))
 		}
 	case tea.KeyMsg:
+		// A password prompt (a reconnect re-auth) preempts everything and is answered by
+		// typing into a masked field — so it never writes to /dev/tty and corrupts the screen.
+		if c.pwReq != nil {
+			switch msg.String() {
+			case "enter":
+				c.pwReq.Reply <- c.pwInput
+				c.pwReq, c.pwInput = nil, ""
+			case "esc", "ctrl+c":
+				c.pwReq.Reply <- "" // cancel — the dial fails and the supervisor backs off
+				c.pwReq, c.pwInput = nil, ""
+			case "backspace":
+				if r := []rune(c.pwInput); len(r) > 0 {
+					c.pwInput = string(r[:len(r)-1])
+				}
+			default:
+				if msg.Type == tea.KeyRunes {
+					c.pwInput += string(msg.Runes)
+				}
+			}
+			return c, nil
+		}
 		// Input precedence is intentional: an approval modal preempts everything —
 		// a held operation (the dispatcher blocked, waiting) is urgent, so it must be
 		// answered before a form/panel resumes. A modal can arrive over an open form
@@ -370,6 +402,9 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return c, c.waitEvent()
 	case *ApprovalRequest:
 		c.modal = msg
+		return c, c.waitEvent()
+	case *PasswordRequest:
+		c.pwReq, c.pwInput = msg, ""
 		return c, c.waitEvent()
 	case ConnStateMsg:
 		c.connState = msg.State
@@ -512,6 +547,9 @@ func (c *Console) clampCursor() {
 }
 
 func (c Console) View() string {
+	if c.pwReq != nil {
+		return passwordView(c.width, c.height, c.pwReq.Label, len([]rune(c.pwInput)))
+	}
 	if c.modal != nil {
 		return modalView(c.width, c.height, c.modal)
 	}

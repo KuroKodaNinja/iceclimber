@@ -110,3 +110,7 @@ func (c *CachingPrompter) Forget() {
 // Raw returns the underlying (uncached) prompter — used for keyboard-interactive,
 // whose challenges may be one-time codes that must never be replayed.
 func (c *CachingPrompter) Raw() PasswordPrompter { return c.inner }
+
+// TTYPrompter returns the default no-echo /dev/tty prompter — used as the pre-alt-screen
+// fallback by a TUI-backed prompter (before the Bubble Tea program is live to render a modal).
+func TTYPrompter() PasswordPrompter { return ttyPrompter{} }

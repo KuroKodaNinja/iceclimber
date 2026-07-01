@@ -302,6 +302,24 @@ func modalView(w, h int, req *ApprovalRequest) string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box)
 }
 
+// passwordView renders a centred masked secret prompt (SSH reconnect re-auth) over a blank
+// screen — the in-TUI replacement for a /dev/tty prompt that would corrupt the alt-screen.
+// n is the number of characters typed so far (shown as bullets, never the secret).
+func passwordView(w, h int, label string, n int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n\n", titleStyle.Render("Authenticate"))
+	fmt.Fprintf(&b, "%s\n", lipgloss.NewStyle().Bold(true).Render(strings.TrimSpace(label)))
+	fmt.Fprintf(&b, "  %s\n", strings.Repeat("•", n))
+	fmt.Fprintf(&b, "\n%s\n", dimStyle.Render("[enter] submit   [esc] cancel"))
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(cWarn).
+		Padding(1, 2).
+		MaxWidth(w - 4).
+		Render(b.String())
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box)
+}
+
 // formView frames an operator form (huh) centred over a blank screen, matching the
 // modal's look.
 func formView(w, h int, title, body string) string {

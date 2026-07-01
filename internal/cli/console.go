@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -66,6 +67,35 @@ func (t *tuiAsker) ask(p prompt) choice {
 		}
 	case <-t.done:
 		return choiceDenyOnce
+	}
+}
+
+// tuiPasswordPrompter is a remote.PasswordPrompter that reads a secret through the console's
+// masked modal instead of /dev/tty (which would corrupt the alt-screen). Until the Bubble Tea
+// program is live (ready), it falls back to the tty — the initial dial runs before the
+// alt-screen. It mirrors tuiAsker: send a request on the event channel, block on the reply.
+type tuiPasswordPrompter struct {
+	events chan tea.Msg
+	done   <-chan struct{}
+	ready  *atomic.Bool
+	tty    remote.PasswordPrompter
+}
+
+func (p *tuiPasswordPrompter) Prompt(label string) (string, error) {
+	if p.ready == nil || !p.ready.Load() {
+		return p.tty.Prompt(label) // pre-alt-screen (initial dial / host-key trust)
+	}
+	reply := make(chan string, 1)
+	select {
+	case p.events <- &tui.PasswordRequest{Label: label, Reply: reply}:
+	case <-p.done:
+		return "", errors.New("console closed")
+	}
+	select {
+	case v := <-reply:
+		return v, nil
+	case <-p.done:
+		return "", errors.New("console closed")
 	}
 }
 
@@ -661,10 +691,19 @@ func splitSpecs(s string) []string {
 // ctx.Done), and the deferred `holder.Get().Close()` backstops teardown (idempotent
 // if the supervisor already closed it).
 func runConsole(parent context.Context, cfg *config.Config, transport, agentLog string) error {
-	// The initial connect (and host-key trust prompt) runs before the alt-screen TUI
-	// so a /dev/tty password/trust prompt isn't fighting the rendered UI. A single
-	// CachingPrompter is reused for reconnects so a password typed now is remembered.
-	prompter := remote.NewCachingPrompter(nil)
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	events := make(chan tea.Msg, 64)
+
+	// The initial connect (and host-key trust prompt) runs before the alt-screen TUI, so its
+	// prompt uses the tty (uiReady=false); once the program is live it flips to true and
+	// reconnect prompts route to the masked modal instead of corrupting the screen. A single
+	// CachingPrompter is reused for reconnects so a password typed now is remembered (and a
+	// single-prompt PAM challenge is reused silently — see kbdAnswers).
+	var uiReady atomic.Bool
+	prompter := remote.NewCachingPrompter(&tuiPasswordPrompter{
+		events: events, done: ctx.Done(), ready: &uiReady, tty: remote.TTYPrompter(),
+	})
 	sess, err := openSessionWith(parent, cfg, transport, prompter)
 	if hke := (*remote.HostKeyError)(nil); errors.As(err, &hke) {
 		// First contact with an untrusted (often ephemeral) sandbox: offer to
@@ -679,10 +718,6 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	}
 	prompter.Commit() // the startup dial authenticated — remember the password for reconnects
 
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
-
-	events := make(chan tea.Msg, 64)
 	act := activity.New(activityPath(cfg))
 
 	// The supervisor owns the session: it swaps the holder on each (re)connect and
@@ -779,6 +814,7 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	ops := &consoleOps{ctx: ctx, holder: holder, act: act, events: events}
 	model := tui.NewConsole(cfg.SandboxID, events, logPath, ops).
 		WithSeedCounts(seedServed, seedApproved, seedDenied)
+	uiReady.Store(true) // the alt-screen is about to run — route reconnect prompts to the modal
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 	cancel() // stop serving; any pending approval fails safe via done
 	return err

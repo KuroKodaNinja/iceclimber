@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,6 +36,41 @@ func TestTuiAsker_ShutdownDenies(t *testing.T) {
 	ta := &tuiAsker{events: make(chan tea.Msg), done: done} // no reader
 	if got := ta.ask(prompt{title: "x"}); got != choiceDenyOnce {
 		t.Errorf("shutdown should fail safe to deny, got %v", got)
+	}
+}
+
+type fakeTTY struct{ ret string }
+
+func (f fakeTTY) Prompt(string) (string, error) { return f.ret, nil }
+
+func TestTuiPasswordPrompter(t *testing.T) {
+	// Not ready (pre-alt-screen): uses the tty fallback, sends nothing on the event channel.
+	var ready atomic.Bool
+	events := make(chan tea.Msg, 1)
+	p := &tuiPasswordPrompter{events: events, done: make(chan struct{}), ready: &ready, tty: fakeTTY{ret: "ttypw"}}
+	if got, _ := p.Prompt("Password: "); got != "ttypw" {
+		t.Errorf("pre-ready Prompt = %q, want the tty fallback", got)
+	}
+	if len(events) != 0 {
+		t.Error("pre-ready Prompt must not send a modal request")
+	}
+
+	// Ready: sends a PasswordRequest to the modal and returns the typed reply.
+	ready.Store(true)
+	go func() {
+		req := (<-events).(*tui.PasswordRequest)
+		req.Reply <- "typed-secret"
+	}()
+	if got, err := p.Prompt("Password: "); err != nil || got != "typed-secret" {
+		t.Errorf("ready Prompt = %q, %v; want the modal reply", got, err)
+	}
+
+	// Console closed: returns an error rather than blocking forever.
+	done := make(chan struct{})
+	close(done)
+	p2 := &tuiPasswordPrompter{events: make(chan tea.Msg), done: done, ready: &ready, tty: fakeTTY{}}
+	if _, err := p2.Prompt("x"); err == nil {
+		t.Error("a closed console should make Prompt error, not block")
 	}
 }
 

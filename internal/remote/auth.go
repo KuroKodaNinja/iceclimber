@@ -28,7 +28,11 @@ func authMethods(p *dialPlan) ([]ssh.AuthMethod, error) {
 		}
 	}
 
-	passwordPr, kbdPr := promptersFor(p.prompter)
+	passwordPr, _ := promptersFor(p.prompter)
+	kbdPr := p.prompter
+	if kbdPr == nil {
+		kbdPr = ttyPrompter{}
+	}
 	if p.allowKbd {
 		methods = append(methods, keyboardInteractiveAuth(kbdPr))
 	}
@@ -42,10 +46,9 @@ func authMethods(p *dialPlan) ([]ssh.AuthMethod, error) {
 	return methods, nil
 }
 
-// promptersFor splits the dial prompter into the password and keyboard-interactive
-// prompters (nil → the /dev/tty prompter). Behind a CachingPrompter, keyboard-
-// interactive uses the raw (uncached) inner so a one-time OTP/2FA code is never
-// replayed on reconnect, while password rides the cache.
+// promptersFor resolves the password-method prompter (nil → the /dev/tty prompter). Behind a
+// CachingPrompter, password rides the cache. (Keyboard-interactive is handled per-challenge
+// in kbdAnswers, which caches only a plain single password prompt.)
 func promptersFor(pr PasswordPrompter) (passwordPr, kbdPr PasswordPrompter) {
 	if pr == nil {
 		pr = ttyPrompter{}
@@ -91,20 +94,29 @@ func fileSigners(files []string) []ssh.Signer {
 	return signers
 }
 
-// keyboardInteractiveAuth answers each server challenge via the prompter (one
-// no-echo read per question — covers password and 2FA/OTP prompts).
+// keyboardInteractiveAuth answers each server challenge via the prompter (one no-echo read
+// per question — covers password and 2FA/OTP prompts). pr may be a *CachingPrompter, which
+// kbdAnswers uses to cache only a plain single password prompt.
 func keyboardInteractiveAuth(pr PasswordPrompter) ssh.AuthMethod {
-	return ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
-		return kbdAnswers(pr, questions)
+	return ssh.KeyboardInteractive(func(_, _ string, questions []string, echos []bool) ([]string, error) {
+		return kbdAnswers(pr, questions, echos)
 	})
 }
 
-// kbdAnswers maps N challenge questions to N prompter answers (extracted so the
-// challenge logic is unit-testable without a live SSH server).
-func kbdAnswers(pr PasswordPrompter, questions []string) ([]string, error) {
+// kbdAnswers maps N challenge questions to N prompter answers. A single, no-echo challenge is
+// a plain password prompt (PAM) — answered via the CACHING prompter so it's committed on
+// success and reused on reconnect (matching the SSH password method). Any multi-question or
+// echoed challenge is treated as OTP/2FA and answered via the UNCACHED raw prompter, so a
+// one-time code is never replayed. Extracted so the logic is unit-testable without a server.
+func kbdAnswers(pr PasswordPrompter, questions []string, echos []bool) ([]string, error) {
+	answerer := pr
+	cacheable := len(questions) == 1 && (len(echos) == 0 || !echos[0])
+	if cp, ok := pr.(*CachingPrompter); ok && !cacheable {
+		answerer = cp.Raw() // OTP/2FA — never replay a cached answer
+	}
 	answers := make([]string, len(questions))
 	for i, q := range questions {
-		ans, err := pr.Prompt(strings.TrimSpace(q) + " ")
+		ans, err := answerer.Prompt(strings.TrimSpace(q) + " ")
 		if err != nil {
 			return nil, err
 		}

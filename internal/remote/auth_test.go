@@ -123,7 +123,7 @@ func TestAuthMethods_Order(t *testing.T) {
 // question, and propagates a prompter error (the 2FA/OTP path).
 func TestKbdAnswers(t *testing.T) {
 	rec := &recordingPrompter{answer: "42"}
-	ans, err := kbdAnswers(rec, []string{"  Password: ", "OTP code:"})
+	ans, err := kbdAnswers(rec, []string{"  Password: ", "OTP code:"}, []bool{false, false})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,8 +135,37 @@ func TestKbdAnswers(t *testing.T) {
 	}
 
 	boom := errPrompter{}
-	if _, err := kbdAnswers(boom, []string{"q"}); err == nil {
+	if _, err := kbdAnswers(boom, []string{"q"}, []bool{false}); err == nil {
 		t.Error("a prompter error must propagate (don't send a blank answer)")
+	}
+}
+
+// TestKbdAnswers_CachesSinglePasswordNotOTP: a single no-echo challenge is answered via the
+// caching prompter (so a committed password is reused, and it can be committed), while a
+// multi-question or echoed (OTP) challenge is answered via the uncached raw inner.
+func TestKbdAnswers_CachesSinglePasswordNotOTP(t *testing.T) {
+	// Single no-echo prompt behind a caching prompter that has a committed secret → reused
+	// silently (the inner is never called).
+	inner := &recordingPrompter{answer: "typed"}
+	cp := NewCachingPrompter(inner)
+	cp.committed, cp.hasCommit = "s3cret", true
+	ans, err := kbdAnswers(cp, []string{"Password:"}, []bool{false})
+	if err != nil || len(ans) != 1 || ans[0] != "s3cret" {
+		t.Fatalf("single no-echo challenge should reuse the committed password: %q %v", ans, err)
+	}
+	if len(inner.prompts) != 0 {
+		t.Errorf("cached single-password challenge must not hit the inner prompter; got %q", inner.prompts)
+	}
+
+	// A 2-question (OTP-shaped) challenge bypasses the cache → uses the raw inner each time.
+	inner2 := &recordingPrompter{answer: "otp"}
+	cp2 := NewCachingPrompter(inner2)
+	cp2.committed, cp2.hasCommit = "s3cret", true
+	if _, err := kbdAnswers(cp2, []string{"Password:", "Verification code:"}, []bool{false, false}); err != nil {
+		t.Fatal(err)
+	}
+	if len(inner2.prompts) != 2 {
+		t.Errorf("multi-question (OTP) challenge must use the uncached inner; inner prompts = %q", inner2.prompts)
 	}
 }
 
