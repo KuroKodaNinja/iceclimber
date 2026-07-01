@@ -474,9 +474,19 @@ func (o *consoleOps) ensurePython(ver string, pr progress.Func) ([]echo, error) 
 // ensureNode locates the Node runtime at ver, installing it if absent, and returns
 // a sandbox echo of the runtime that will host the packages.
 func (o *consoleOps) ensureNode(ver string, pr progress.Func) ([]echo, error) {
-	bin, err := node.Locate(o.ctx, o.sess().fs, o.sess().tree.Root, ver, o.sess().fp.Arch, o.sess().fp.Libc.Family)
+	sess := o.sess()
+	if src := sess.runtimeSourcesNow().Of("node"); src.Mode == runtimes.ModeSystem {
+		// System mode: use the box's node directly (packages go to an iceclimber-owned npm
+		// prefix under $ICECLIMBER_HOME — see npm nodeSetup).
+		bin := sess.systemRuntimePath("node", src)
+		if bin == "" {
+			bin = "node"
+		}
+		return []echo{o.verifyRuntime(bin, "--version")}, nil
+	}
+	bin, err := node.Locate(o.ctx, sess.fs, sess.tree.Root, ver, sess.fp.Arch, sess.fp.Libc.Family)
 	if err != nil {
-		res, ierr := newNodeInstaller(o.sess(), pr).Install(o.ctx, ver)
+		res, ierr := newNodeInstaller(sess, pr).Install(o.ctx, ver)
 		if ierr != nil {
 			return nil, ierr
 		}
@@ -488,9 +498,19 @@ func (o *consoleOps) ensureNode(ver string, pr progress.Func) ([]echo, error) {
 // ensureJava locates the JDK at ver, installing it if absent, and returns a sandbox
 // echo of the runtime that will host the resolved dependencies.
 func (o *consoleOps) ensureJava(ver string, pr progress.Func) ([]echo, error) {
-	bin, err := java.Locate(o.ctx, o.sess().fs, o.sess().tree.Root, ver, o.sess().fp.Arch, o.sess().fp.Libc.Family)
+	sess := o.sess()
+	if src := sess.runtimeSourcesNow().Of("java"); src.Mode == runtimes.ModeSystem {
+		// System mode: use the box's JDK directly (maven/coursier deps still land under
+		// $ICECLIMBER_HOME; JAVA_HOME just points at the system JDK).
+		bin := sess.systemRuntimePath("java", src)
+		if bin == "" {
+			bin = "java"
+		}
+		return []echo{o.verifyRuntime(bin, "-version")}, nil
+	}
+	bin, err := java.Locate(o.ctx, sess.fs, sess.tree.Root, ver, sess.fp.Arch, sess.fp.Libc.Family)
 	if err != nil {
-		res, ierr := newJavaInstaller(o.sess(), pr).Install(o.ctx, ver)
+		res, ierr := newJavaInstaller(sess, pr).Install(o.ctx, ver)
 		if ierr != nil {
 			return nil, ierr
 		}

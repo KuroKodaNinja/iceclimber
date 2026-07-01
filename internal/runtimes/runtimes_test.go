@@ -29,8 +29,8 @@ func TestParseFlag(t *testing.T) {
 	if _, err := ParseFlag("python"); err == nil {
 		t.Error("missing = should error")
 	}
-	if _, err := ParseFlag("node=system"); err == nil {
-		t.Error("system mode for an unsupported lang (node) should error")
+	if s, err := ParseFlag("node=system"); err != nil || s["node"].Mode != ModeSystem {
+		t.Errorf("node=system should be accepted now: %+v %v", s, err)
 	}
 	if _, err := ParseFlag("node=managed"); err != nil {
 		t.Errorf("node=managed should be accepted: %v", err)
@@ -47,16 +47,18 @@ func TestParseFlag(t *testing.T) {
 		t.Error("unknown env_manager should error")
 	}
 	if _, err := ParseFlag("node=system:conda"); err == nil {
-		t.Error("env_manager on a non-python (also unsupported system) lang should error")
+		t.Error("env_manager is python-only — node=system:conda should error")
 	}
 }
 
 func TestSystemSupported(t *testing.T) {
-	if !SystemSupported("python") {
-		t.Error("python should support system mode")
+	for _, lang := range []string{"python", "node", "java"} {
+		if !SystemSupported(lang) {
+			t.Errorf("%s should support system mode (use the detected binary; packages under $ICECLIMBER_HOME)", lang)
+		}
 	}
-	if SystemSupported("node") || SystemSupported("java") {
-		t.Error("node/java system mode is not implemented yet")
+	if SystemSupported("ruby") {
+		t.Error("an unmodeled lang should not be system-supported")
 	}
 }
 

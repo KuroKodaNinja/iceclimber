@@ -68,6 +68,35 @@ func TestNpmInstallTier1Relay(t *testing.T) {
 	}
 }
 
+// TestSystemNodeInstall proves the "system" node choice end to end: with
+// runtimes.node.source=system, npm.install uses the BOX's own node/npm (no managed node
+// installed) and installs into an iceclimber-owned prefix under <root>/runtimes/node-system
+// (never the system global) — the node analogue of a system-python venv. Runs on the glibc
+// box, which ships node+npm.
+func TestSystemNodeInstall(t *testing.T) {
+	sb := requireGlibcSandbox(t)
+	root := "/tmp/iceclimber-sysnode-" + protocol.NewID()
+	scheduleRootCleanupOn(t, sb.Name, root)
+	cfg := writeYAML(t, sshConfigYAML(sb)+"remote_root: "+root+
+		"\nnpm:\n  registry_url: https://registry.npmjs.org\nruntimes:\n  node:\n    source: system\n")
+
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
+	// No `install node` — system mode uses the box's node.
+	out := string(runIceclimber(t, "install", "npm", "left-pad", "--node", "24", "--config", cfg, "--transport", "sftp"))
+	if !strings.Contains(out, "installed left-pad") {
+		t.Fatalf("system-node npm install output:\n%s", out)
+	}
+	nodePath := grepNodePath(t, out)
+	if !strings.Contains(nodePath, "node-system") {
+		t.Errorf("NODE_PATH = %q, want it under <root>/runtimes/node-system (iceclimber-owned prefix)", nodePath)
+	}
+	// Require it via the box's own node (on PATH) + the returned NODE_PATH.
+	res := limaShOn(t, sb.Name, fmt.Sprintf("NODE_PATH=%s node -e %s", remoteQuote(nodePath), remoteQuote(`console.log(require('left-pad')('x',5))`)))
+	if !strings.Contains(res, "    x") {
+		t.Errorf("require('left-pad') via system node = %q, want it to contain %q", res, "    x")
+	}
+}
+
 func writeNpmConfig(t *testing.T, sb sandboxConn, root, registry string) string {
 	t.Helper()
 	content := fmt.Sprintf(`sandbox_id: %s

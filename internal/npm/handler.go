@@ -24,6 +24,11 @@ type Deps struct {
 	ControllerNpm      string
 	ControllerRegistry string
 	Progress           progress.Func
+	// RuntimeMode "system" uses the sandbox's own node/npm (SystemNodePath) and installs into
+	// an iceclimber-owned prefix under Root (never the system global) — the node analogue of a
+	// system-python venv. Empty/"managed" uses the iceclimber-installed node.
+	RuntimeMode    string
+	SystemNodePath string
 }
 
 // Result is the npm.install response body: the neutral install outcome plus the
@@ -34,21 +39,44 @@ type Result struct {
 	NodePath  string          `json:"node_path"`
 }
 
+// nodeSetup resolves the node/npm binaries + global install prefix for the chosen runtime
+// mode. Managed: the iceclimber-installed node under <root>, prefix = its own dir. System:
+// the detected node/npm, prefix = an iceclimber-owned dir under <root> — so installs stay
+// writable and off the system global (the node analogue of a system-python venv).
+func nodeSetup(ctx context.Context, d Deps, nodeVersion string) (nodeBin, npmBin, prefix, nodePath string, err error) {
+	if d.RuntimeMode == "system" {
+		nodeBin = d.SystemNodePath
+		if nodeBin == "" {
+			nodeBin = "node" // fall back to PATH
+		}
+		prefix = path.Join(d.Root, "runtimes", "node-system")
+		if err = d.FS.Mkdir(ctx, prefix); err != nil {
+			return "", "", "", "", err
+		}
+		return nodeBin, path.Join(path.Dir(nodeBin), "npm"), prefix, path.Join(prefix, "lib", "node_modules"), nil
+	}
+	nodeBin, err = node.Locate(ctx, d.FS, d.Root, nodeVersion, d.Arch, d.Libc)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	dir := path.Dir(path.Dir(nodeBin)) // <node-dir> (strip /bin/node)
+	return nodeBin, path.Join(dir, "bin", "npm"), dir, path.Join(dir, "lib", "node_modules"), nil
+}
+
 // Run locates the Node runtime and installs the specs via the selected tier.
 func Run(ctx context.Context, d Deps, nodeVersion string, specs []pkg.Spec, tier string) (Result, error) {
 	d.Progress.Phase("resolving")
-	nodeBin, err := node.Locate(ctx, d.FS, d.Root, nodeVersion, d.Arch, d.Libc)
+	nodeBin, npmBin, prefix, nodePath, err := nodeSetup(ctx, d, nodeVersion)
 	if err != nil {
 		return Result{}, err
 	}
-	dir := path.Dir(path.Dir(nodeBin)) // <node-dir> (strip /bin/node)
 	m := New(Config{
 		Runner:             d.Runner,
 		FS:                 d.FS,
 		NodeBin:            nodeBin,
-		NpmBin:             path.Join(dir, "bin", "npm"),
-		Prefix:             dir,
-		NodePath:           path.Join(dir, "lib", "node_modules"),
+		NpmBin:             npmBin,
+		Prefix:             prefix,
+		NodePath:           nodePath,
 		RegistryURL:        d.RegistryURL,
 		Arch:               d.Arch,
 		Libc:               d.Libc,
@@ -87,14 +115,13 @@ func Run(ctx context.Context, d Deps, nodeVersion string, specs []pkg.Spec, tier
 // place. Either way the project runs with ordinary local ./node_modules resolution.
 func RunProject(ctx context.Context, d Deps, nodeVersion, projectDir, tier string) (Result, error) {
 	d.Progress.Phase("resolving")
-	nodeBin, err := node.Locate(ctx, d.FS, d.Root, nodeVersion, d.Arch, d.Libc)
+	nodeBin, npmBin, prefix, nodePath, err := nodeSetup(ctx, d, nodeVersion)
 	if err != nil {
 		return Result{}, err
 	}
-	dir := path.Dir(path.Dir(nodeBin))
 	m := New(Config{
-		Runner: d.Runner, FS: d.FS, NodeBin: nodeBin, NpmBin: path.Join(dir, "bin", "npm"),
-		Prefix: dir, NodePath: path.Join(dir, "lib", "node_modules"), RegistryURL: d.RegistryURL,
+		Runner: d.Runner, FS: d.FS, NodeBin: nodeBin, NpmBin: npmBin,
+		Prefix: prefix, NodePath: nodePath, RegistryURL: d.RegistryURL,
 		Arch: d.Arch, Libc: d.Libc, ControllerNpm: d.ControllerNpm, ControllerRegistry: d.ControllerRegistry,
 	})
 	d.Progress.Phase("installing")

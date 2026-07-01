@@ -147,10 +147,10 @@ runtimes:
 		t.Error("an invalid runtimes source should be rejected")
 	}
 
-	// system mode is python-only for now; node/java=system must be rejected, not a no-op.
+	// system mode is supported for every runtime now (node/java use the detected binary).
 	nodeSys := writeTemp(t, "sandbox_id: box-1\nssh:\n  host: prod\nruntimes:\n  node:\n    source: system\n")
-	if _, err := Load(nodeSys, ""); err == nil {
-		t.Error("node source=system should be rejected (only python supports system mode)")
+	if _, err := Load(nodeSys, ""); err != nil {
+		t.Errorf("node source=system should be accepted: %v", err)
 	}
 
 	// env_manager must be venv|conda, and only python has one.

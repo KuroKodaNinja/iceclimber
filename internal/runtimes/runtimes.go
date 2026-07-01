@@ -25,11 +25,14 @@ const (
 // Langs are the languages a source can be chosen for, in display order.
 var Langs = []string{"python", "node", "java"}
 
-// SystemSupported reports whether ModeSystem (use a pre-existing runtime) is
-// implemented for lang. Only python (venv) is wired today; node/java system mode is
-// future work, so we reject it at choose-time rather than persist a no-op that fails
-// confusingly at install.
-func SystemSupported(lang string) bool { return lang == "python" }
+// SystemSupported reports whether ModeSystem (use a pre-existing runtime) is implemented for
+// lang — true for all three. "System" means: use the detected binary, but keep
+// packages/environments under $ICECLIMBER_HOME, never the system location — python isolates
+// the interpreter in a venv/conda env, node installs into an iceclimber-owned npm prefix, and
+// java's deps land in the <root> maven repo/classpath (JAVA_HOME just points at the system JDK).
+func SystemSupported(lang string) bool {
+	return lang == "python" || lang == "node" || lang == "java"
+}
 
 // Source is the chosen origin for one language's runtime.
 type Source struct {
@@ -84,7 +87,7 @@ func ParseFlag(s string) (Sources, error) {
 			return nil, fmt.Errorf("runtime-source %s: unknown mode %q (want managed or system, optionally :venv/:conda)", lang, v)
 		}
 		if mode == ModeSystem && !SystemSupported(lang) {
-			return nil, fmt.Errorf("runtime-source %s=system is not supported yet (only python); use managed", lang)
+			return nil, fmt.Errorf("runtime-source %s=system is not supported; use managed", lang)
 		}
 		src := Source{Mode: mode}
 		if mgr = strings.TrimSpace(mgr); mgr != "" {

@@ -19,7 +19,7 @@ func TestRuntimeSourceLazyResolveRoundTrip(t *testing.T) {
 	sess := &session{
 		fp: &probe.Fingerprint{Runtimes: []probe.RuntimeInfo{
 			{Lang: "python", Version: "3.12.1", Path: "/usr/bin/python3"},
-			{Lang: "node", Version: "20.1.0", Path: "/usr/bin/node"}, // not system-supported yet
+			{Lang: "node", Version: "20.1.0", Path: "/usr/bin/node"},
 		}},
 		runtimeStore:  store,
 		runtimeConfig: runtimes.Sources{},
@@ -32,10 +32,14 @@ func TestRuntimeSourceLazyResolveRoundTrip(t *testing.T) {
 	holder.Set(sess)
 	ops := &consoleOps{ctx: context.Background(), holder: holder}
 
-	// Only python is offered (system mode is python-only).
+	// Every detected, system-supported runtime is offered (python, node, java).
 	dr := ops.DetectedRuntimes()
-	if len(dr) != 1 || dr[0].Lang != "python" || dr[0].Version != "3.12.1" {
-		t.Fatalf("DetectedRuntimes = %+v, want only python", dr)
+	langs := map[string]string{}
+	for _, r := range dr {
+		langs[r.Lang] = r.Version
+	}
+	if langs["python"] != "3.12.1" || langs["node"] != "20.1.0" {
+		t.Fatalf("DetectedRuntimes = %+v, want python + node offered", dr)
 	}
 
 	if err := ops.SetRuntimeSources(map[string]tui.RuntimeSelection{"python": {System: true, EnvManager: "conda"}}); err != nil {

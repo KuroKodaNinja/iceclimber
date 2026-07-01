@@ -173,10 +173,14 @@ refuses an unsafe/shallow `remote_root`.
 Bootstrap also **detects runtimes already on the box** (a corp VM that ships its own
 Python/Node/Java) and lets you choose, per language, whether to use them. By default
 iceclimber installs its own pinned runtime (`managed`); choose `system` to use the
-sandbox's. On a terminal it asks; for unattended/headless runs set it explicitly:
+sandbox's — for **any** detected runtime (python, node, java). "System" uses the box's
+binary but keeps packages/environments under `$ICECLIMBER_HOME` (a venv/conda env for
+python, an iceclimber-owned npm prefix for node, the `<root>` maven repo/classpath for
+java) — never the system location. On a terminal it asks per language; for
+unattended/headless runs set it explicitly:
 
 ```sh
-./iceclimber bootstrap --runtime-source python=system   # use the box's python3
+./iceclimber bootstrap --runtime-source python=system,node=system   # use the box's python3 + node
 ```
 
 …or pin it in the config (`runtimes: { python: { source: system } }`). In `system`

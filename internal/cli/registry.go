@@ -79,6 +79,7 @@ func newJavaInstaller(sess *session, pr progress.Func) *java.Installer {
 
 // mavenDeps builds the maven.install dependency bundle from an open session.
 func mavenDeps(sess *session, pr progress.Func) maven.Deps {
+	src := sess.runtimeSourcesNow().Of("java")
 	return maven.Deps{
 		FS:                   sess.fs,
 		Runner:               sess.runner,
@@ -90,12 +91,15 @@ func mavenDeps(sess *session, pr progress.Func) maven.Deps {
 		ControllerRepository: sess.maven.ControllerRepository,
 		CacheDir:             sess.cacheDir,
 		Progress:             pr,
+		RuntimeMode:          string(src.Mode),
+		SystemJavaPath:       sess.systemRuntimePath("java", src),
 	}
 }
 
 // mavenBuildDeps builds the maven.build dependency bundle from an open session (the
 // air-gapped Maven build: controller mvn/java prime an offline repo the sandbox builds).
 func mavenBuildDeps(sess *session, pr progress.Func) maven.BuildDeps {
+	src := sess.runtimeSourcesNow().Of("java")
 	return maven.BuildDeps{
 		FS:             sess.fs,
 		Runner:         sess.runner,
@@ -105,6 +109,8 @@ func mavenBuildDeps(sess *session, pr progress.Func) maven.BuildDeps {
 		ControllerMvn:  sess.controllerMvn,
 		ControllerJava: sess.controllerJava,
 		EgressProxy:    sess.egressProxy,
+		RuntimeMode:    string(src.Mode),
+		SystemJavaPath: sess.systemRuntimePath("java", src),
 		Progress:       pr,
 	}
 }
@@ -133,6 +139,7 @@ func pipDeps(sess *session, pr progress.Func) pip.Deps {
 
 // npmDeps builds the npm.install dependency bundle from an open session.
 func npmDeps(sess *session, pr progress.Func) npm.Deps {
+	src := sess.runtimeSourcesNow().Of("node")
 	return npm.Deps{
 		FS:                 sess.fs,
 		Runner:             sess.runner,
@@ -143,6 +150,8 @@ func npmDeps(sess *session, pr progress.Func) npm.Deps {
 		ControllerNpm:      sess.controllerNpm,
 		ControllerRegistry: sess.npm.ControllerRegistry,
 		Progress:           pr,
+		RuntimeMode:        string(src.Mode),
+		SystemNodePath:     sess.systemRuntimePath("node", src),
 	}
 }
 

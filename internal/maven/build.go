@@ -52,6 +52,9 @@ type BuildDeps struct {
 	ControllerMvn  string // operator's mvn on the controller (default "mvn")
 	ControllerJava string // operator's java on the controller (default "java")
 	EgressProxy    bool   // egress_mode: proxy → build ONLINE through the MITM proxy (no controller prime)
+	// RuntimeMode "system" uses the sandbox's own JDK (SystemJavaPath) for JAVA_HOME.
+	RuntimeMode    string
+	SystemJavaPath string
 	Progress       progress.Func
 }
 
@@ -98,7 +101,7 @@ func Build(ctx context.Context, d BuildDeps, projectDir, javaVersion, mavenVersi
 	}
 
 	// The sandbox JDK the offline build compiles against (JAVA_HOME).
-	javaBin, err := java.Locate(ctx, d.FS, d.Root, javaVersion, d.Arch, d.Libc)
+	javaBin, err := javaBinFor(ctx, d.FS, d.Root, javaVersion, d.Arch, d.Libc, d.RuntimeMode, d.SystemJavaPath)
 	if err != nil {
 		return BuildResult{}, err
 	}
@@ -173,7 +176,7 @@ func Build(ctx context.Context, d BuildDeps, projectDir, javaVersion, mavenVersi
 // maven-settings.xml <proxies> block (Maven honors settings, not the JVM proxy props). No
 // controller-side prime, no offline repo relay: the proxy IS the network mediation.
 func (d BuildDeps) buildOnlineProxy(ctx context.Context, projectDir, javaVersion, mavenVersion string, goals []string) (BuildResult, error) {
-	javaBin, err := java.Locate(ctx, d.FS, d.Root, javaVersion, d.Arch, d.Libc)
+	javaBin, err := javaBinFor(ctx, d.FS, d.Root, javaVersion, d.Arch, d.Libc, d.RuntimeMode, d.SystemJavaPath)
 	if err != nil {
 		return BuildResult{}, err
 	}

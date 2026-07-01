@@ -265,10 +265,11 @@ type formState struct {
 	agentMode string // "install" | "wrap"
 	agentBin  string
 	agentAuth string // "env" | "skip"
-	// bootstrap form: runtime source choice ("" = not offered, else "managed"|"system")
-	pyRuntime string
+	// bootstrap form: per-detected-runtime source choice, lang → *("managed"|"system"). One
+	// entry per runtime the box offers; huh binds each Select to its pointer.
+	rtSource map[string]*string
 	// bootstrap form: env_manager for a system python ("venv"|"conda"), offered only when
-	// the box has conda; ignored unless pyRuntime == "system".
+	// the box has conda; ignored unless python's source is "system".
 	pyEnvManager string
 }
 
@@ -646,13 +647,17 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 		if !c.st.confirm {
 			return c, nil // operator declined at the confirm
 		}
-		// Persist the runtime-source choice (if the form offered one) before provisioning.
-		if c.st.pyRuntime != "" {
-			sel := RuntimeSelection{System: c.st.pyRuntime == "system"}
-			if sel.System && c.st.pyEnvManager == "conda" {
-				sel.EnvManager = "conda"
+		// Persist each offered runtime's source before provisioning.
+		if len(c.st.rtSource) > 0 {
+			sel := map[string]RuntimeSelection{}
+			for lang, v := range c.st.rtSource {
+				s := RuntimeSelection{System: *v == "system"}
+				if lang == "python" && s.System && c.st.pyEnvManager == "conda" {
+					s.EnvManager = "conda"
+				}
+				sel[lang] = s
 			}
-			_ = c.ops.SetRuntimeSources(map[string]RuntimeSelection{"python": sel})
+			_ = c.ops.SetRuntimeSources(sel)
 		}
 		c.running = "bootstrap"
 		c.progStart = time.Now()
@@ -801,37 +806,50 @@ func (c *Console) agentForm() *huh.Form {
 }
 
 func (c *Console) bootstrapForm() *huh.Form {
-	c.st = &formState{}
+	c.st = &formState{rtSource: map[string]*string{}}
 	var fields []huh.Field
-	// When a system runtime is detected, let the operator pick it as the source
-	// (persisted on confirm; takes effect for subsequent installs + the serve loop).
+	// For EVERY runtime detected on the box, let the operator pick managed vs system (persisted
+	// on confirm; takes effect for subsequent installs + the serve loop). "system" uses the
+	// box's binary but keeps packages/envs under $ICECLIMBER_HOME.
 	for _, rt := range c.ops.DetectedRuntimes() {
-		if rt.Lang == "python" {
-			c.st.pyRuntime = "managed"
+		v := new(string)
+		*v = "managed"
+		c.st.rtSource[rt.Lang] = v
+		fields = append(fields, huh.NewSelect[string]().
+			Title(titleCase(rt.Lang)+" runtime").
+			Description(fmt.Sprintf("A system %s %s is on the sandbox (%s).", rt.Lang, rt.Version, rt.Path)).
+			Value(v).Options(
+			huh.NewOption("managed — install an iceclimber-pinned "+rt.Lang, "managed"),
+			huh.NewOption("system — use the box's "+rt.Lang+" (packages/env under $ICECLIMBER_HOME)", "system"),
+		))
+		// When the box has conda, let the operator isolate a system Python with it.
+		if rt.Lang == "python" && slices.Contains(rt.EnvManagers, "conda") {
+			c.st.pyEnvManager = "venv"
 			fields = append(fields, huh.NewSelect[string]().
-				Title("Python runtime").
-				Description(fmt.Sprintf("A system Python %s is on the sandbox (%s).", rt.Version, rt.Path)).
-				Value(&c.st.pyRuntime).Options(
-				huh.NewOption("managed — install an iceclimber-pinned Python", "managed"),
-				huh.NewOption("system — use the box's Python (venv under $ICECLIMBER_HOME)", "system"),
+				Title("System Python env_manager").
+				Description("How to isolate the system Python (only applies to the system choice).").
+				Value(&c.st.pyEnvManager).Options(
+				huh.NewOption("venv — a virtualenv under $ICECLIMBER_HOME", "venv"),
+				huh.NewOption("conda — a conda env under $ICECLIMBER_HOME", "conda"),
 			))
-			// When the box has conda, let the operator isolate a system Python with it.
-			if slices.Contains(rt.EnvManagers, "conda") {
-				c.st.pyEnvManager = "venv"
-				fields = append(fields, huh.NewSelect[string]().
-					Title("System Python env_manager").
-					Description("How to isolate the system Python (only applies to the system choice).").
-					Value(&c.st.pyEnvManager).Options(
-					huh.NewOption("venv — a virtualenv under $ICECLIMBER_HOME", "venv"),
-					huh.NewOption("conda — a conda env under $ICECLIMBER_HOME", "conda"),
-				))
-			}
 		}
 	}
 	fields = append(fields, huh.NewConfirm().Title("Re-provision this sandbox?").
 		Description("Ensure the protocol tree, pip.conf, and NANA.md, then run the ping/pong smoke test. Idempotent — existing runtimes and approvals are kept.").
 		Value(&c.st.confirm))
 	return huh.NewForm(huh.NewGroup(fields...))
+}
+
+// titleCase upper-cases the first rune of s (for a runtime label like "Node runtime").
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	if r[0] >= 'a' && r[0] <= 'z' {
+		r[0] -= 'a' - 'A'
+	}
+	return string(r)
 }
 
 func (c Console) formTitle() string {

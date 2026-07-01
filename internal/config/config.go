@@ -251,11 +251,7 @@ func (c *Config) validate(selectSandbox string) error {
 	}
 	for lang, pref := range map[string]RuntimePref{"python": c.Runtimes.Python, "node": c.Runtimes.Node, "java": c.Runtimes.Java} {
 		switch pref.Source {
-		case "", "managed":
-		case "system":
-			if lang != "python" {
-				return fmt.Errorf("runtimes.%s.source: system is not supported yet (only python); use managed", lang)
-			}
+		case "", "managed", "system":
 		default:
 			return fmt.Errorf("runtimes.%s.source %q must be \"managed\" or \"system\"", lang, pref.Source)
 		}

@@ -55,6 +55,28 @@ func TestMavenResolve(t *testing.T) {
 	}
 }
 
+// TestSystemJavaResolve proves the "system" java choice: with runtimes.java.source=system,
+// maven.install resolves coordinates using the BOX's own JDK (no managed JDK installed) — the
+// resolved classpath/cache still land under <root>. Runs on the glibc box (ships openjdk).
+func TestSystemJavaResolve(t *testing.T) {
+	sb := requireGlibcSandbox(t)
+	root := "/tmp/iceclimber-sysjava-" + protocol.NewID()
+	scheduleRootCleanupOn(t, sb.Name, root)
+	cfg := writeYAML(t, sshConfigYAML(sb)+"remote_root: "+root+
+		"\nruntimes:\n  java:\n    source: system\n")
+
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
+	// No `install java` — system mode runs Coursier on the box's JDK.
+	out := string(runIceclimber(t, "install", "maven", "com.google.code.gson:gson:2.10.1",
+		"--java", "21", "--tier", "mirror", "--config", cfg, "--transport", "sftp"))
+	if !strings.Contains(out, "resolved com.google.code.gson:gson") {
+		t.Fatalf("system-java maven resolve output:\n%s", out)
+	}
+	if cp := classpathLine(out); !strings.Contains(cp, "gson") || !strings.Contains(cp, root) {
+		t.Errorf("classpath = %q, want a gson jar cached under %s", cp, root)
+	}
+}
+
 // afterAt returns the path after " at " in an install command's output line
 // ("installed java 21.0.11+10 at /…/bin/java").
 func afterAt(s string) string {

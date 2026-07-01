@@ -27,6 +27,22 @@ type Deps struct {
 	CacheDir             string
 	HTTPClient           *http.Client
 	Progress             progress.Func
+	// RuntimeMode "system" uses the sandbox's own JDK (SystemJavaPath) for JAVA_HOME; the
+	// resolved classpath/cache still land under <root>. Empty/"managed" uses the installed JDK.
+	RuntimeMode    string
+	SystemJavaPath string
+}
+
+// javaBinFor resolves bin/java for the chosen runtime mode: the detected system JDK in system
+// mode (deps/classpath still land under <root>), else the iceclimber-installed JDK.
+func javaBinFor(ctx context.Context, fs remotefs.FS, root, version, arch, libc, mode, systemPath string) (string, error) {
+	if mode == "system" {
+		if systemPath != "" {
+			return systemPath, nil
+		}
+		return "java", nil
+	}
+	return java.Locate(ctx, fs, root, version, arch, libc)
 }
 
 // Result is the maven.install response body: the resolved coordinates plus the
@@ -40,7 +56,7 @@ type Result struct {
 // Run locates the JDK and resolves the coordinates via the selected tier.
 func Run(ctx context.Context, d Deps, javaVersion string, specs []pkg.Spec, tier string) (Result, error) {
 	d.Progress.Phase("resolving")
-	javaBin, err := java.Locate(ctx, d.FS, d.Root, javaVersion, d.Arch, d.Libc)
+	javaBin, err := javaBinFor(ctx, d.FS, d.Root, javaVersion, d.Arch, d.Libc, d.RuntimeMode, d.SystemJavaPath)
 	if err != nil {
 		return Result{}, err
 	}
