@@ -180,6 +180,16 @@ relayed wheels are matched to the discovered interpreter. iceclimber uses what's
 the box and fails clearly if the agent asks for a version that isn't there — it never
 changes the system toolchain.
 
+If the box ships **conda** (the probe detects it), you can pick it as the isolation
+tool instead of a venv — the bootstrap prompt and console modal offer it, or set it
+explicitly: `--runtime-source python=system:conda` (or `runtimes: { python: { source:
+system, env_manager: conda } }`). Then `conda.install` installs into a conda env at
+`<root>/envs/conda-python-<minor>`, either from the sandbox's channel (Tier 0) or —
+for air-gapped boxes — via the **relay**: the operator's controller conda (config
+`controller_conda`, e.g. `conda` or the drop-in `mamba`) resolves + downloads the
+sandbox-platform packages, synthesizes a self-contained local channel, and the sandbox
+installs from it **offline**. `pip.install` also works into a conda env.
+
 ### 4. Serve — the console, or headless
 
 Bare **`iceclimber`** launches the interactive **console**: it serves the sandbox,
@@ -290,6 +300,7 @@ context. To learn the protocol by hand, see [`test/PLAYGROUND.md`](test/PLAYGROU
 | `npm.install` | npm packages (Tier 0 mirror / Tier 1 relay); returns a `NODE_PATH` to `require()` them |
 | `java.install` | A portable Temurin JDK (javac bundled), run by absolute path |
 | `maven.install` | JVM deps (Maven coordinates) resolved via Coursier — Tier 0 mirror or Tier 1 relay; returns a `classpath` to run with `java -cp` |
+| `conda.install` | conda packages into a conda env (when python's env_manager is conda) — Tier 0 from the sandbox's channel, or an **air-gapped relay** where the controller's conda resolves + downloads + pushes a self-contained local channel the sandbox installs from **offline**. Channels via allowlisted `extra_args` (`-c conda-forge`) |
 | `web.fetch` | A URL — via the **sandbox's** own egress (ungated) or **Popo's** network (gated controller venue) |
 
 ---
