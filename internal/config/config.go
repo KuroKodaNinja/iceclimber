@@ -38,6 +38,10 @@ type Config struct {
 	// (relay-tier) conda: it resolves + downloads packages the sandbox installs offline.
 	// Defaults to "conda" at use; the relay tier skips/errors clearly if absent.
 	ControllerConda string `yaml:"controller_conda"`
+	// ControllerMvn is the operator's Maven on the controller, used by maven.build to
+	// prime an offline .m2 repo the sandbox builds from (air-gapped `mvn -o package`).
+	// Defaults to "mvn" at use; maven.build errors clearly if absent.
+	ControllerMvn string `yaml:"controller_mvn"`
 	// AuditLog is the controller-side web.fetch audit JSONL path. Empty means
 	// the default ~/.iceclimber/audit/<sandbox_id>.jsonl.
 	AuditLog string `yaml:"audit_log"`

@@ -1,7 +1,9 @@
-# Java application scenario
+# Java application scenarios
 
-A self-contained, full-stack scenario that builds and runs a real **Java** program
-in the sandbox, the way the agent would — the JVM counterpart of the Node scenario.
+Two self-contained JVM scenarios that build and run real **Java** programs in the
+sandbox, the way the agent would.
+
+## `TestJavaApp` — Maven-coordinate resolution → classpath
 
 What it exercises, end to end:
 
@@ -15,14 +17,31 @@ What it exercises, end to end:
    UTF-16 title length), proving the program ran, Gson loaded, and it processed the
    fetched data.
 
-Run it (needs the Lima sandbox up):
+## `TestJavaMavenBuild` — the Maven build tool, in the sandbox, air-gapped
+
+Runs `mvn` **inside the sandbox** on a real `pom.xml` project (`mvnapp/`, with a Gson
+dependency), with no sandbox network:
+
+1. **`web.fetch`** — same comic input.
+2. **`java.install`** — a portable Temurin JDK (JAVA_HOME for the build).
+3. **`maven build` (air-gapped)** — the controller's Maven+JDK prime an offline `.m2`
+   repo by actually building the project (resolving every dep + plugin), then Popo
+   relays the Maven tool + that repo in, and the sandbox runs **`mvn -o package`**
+   offline, producing `target/xkcdtool.jar`.
+4. **run** — the built jar runs with Gson from the relayed offline repo, parsing the
+   comic and printing `MAVEN_BUILD_OK` + the computed report.
+5. **assert** — output carries `MAVEN_BUILD_OK`, the comic number, title, and UTF-16
+   title length. Skips without Maven + a JDK on the controller (the prime engine),
+   mirroring the conda relay's controller-conda dependency.
+
+## Running
 
 ```sh
 make scenario            # runs every test/scenarios/<lang> scenario
-# or just this one:
-go test -tags scenario -run TestJavaApp ./test/scenarios/java/...
+# or just these:
+go test -tags scenario -run 'TestJavaApp|TestJavaMavenBuild' ./test/scenarios/java/...
 ```
 
-`app/App.java` is the application; everything else is the harness driving the real
-`iceclimber` binary against the VM. Tier 1 relay is covered by the functional suite
-(`make tui-functional`), not here, since this host may lack a controller JDK.
+`app/App.java` and `mvnapp/` are the applications; everything else is the harness
+driving the real `iceclimber` binary against the VM. (`maven.install` Tier 1 relay is
+covered by `make tui-functional`.)

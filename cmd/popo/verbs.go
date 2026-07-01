@@ -122,6 +122,21 @@ func buildParams(verb string, args []string) (any, error) {
 		}
 		return map[string]any{"java_version": ver, "packages": pkgs}, nil
 
+	case "maven.build":
+		ver, rest, err := requireFlag(args, "--java")
+		if err != nil {
+			return nil, err
+		}
+		proj, rest, err := requireFlag(rest, "--project")
+		if err != nil {
+			return nil, err
+		}
+		p := map[string]any{"java_version": ver, "project": proj}
+		if len(rest) > 0 {
+			p["goals"] = rest // optional goals, e.g. clean package
+		}
+		return p, nil
+
 	case "web.fetch":
 		method, args, _ := takeFlag(args, "--method")
 		body, args, hasBody := takeFlag(args, "--body")
@@ -266,6 +281,12 @@ func printResult(w io.Writer, verb, root string, result json.RawMessage) {
 		}
 		if cp := str(m["classpath"]); cp != "" {
 			fmt.Fprintf(w, "classpath=%s\n", cp)
+		}
+	case m["artifacts"] != nil: // maven.build
+		if items, ok := m["artifacts"].([]any); ok {
+			for _, it := range items {
+				fmt.Fprintf(w, "built %s (%s)\n", str(it), str(m["tier"]))
+			}
 		}
 	case m["status_code"] != nil: // web.fetch
 		fmt.Fprintf(w, "HTTP %s (%s)\n", num(m["status_code"]), str(m["venue"]))

@@ -134,3 +134,32 @@ func Handler(d Deps) protocol.Handler {
 		return protocol.OK(req.ID, out)
 	}
 }
+
+type buildParams struct {
+	Project      string   `json:"project"`
+	JavaVersion  string   `json:"java_version"`
+	MavenVersion string   `json:"maven_version,omitempty"`
+	Goals        []string `json:"goals,omitempty"`
+}
+
+// BuildHandler adapts maven.Build into the maven.build protocol handler: an air-gapped
+// Maven build of a sandbox project (mvn -o package), primed by the controller.
+func BuildHandler(d BuildDeps) protocol.Handler {
+	return func(ctx context.Context, req protocol.Request) protocol.Response {
+		var p buildParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return protocol.Errf(req.ID, "malformed_params", "parse params: %v", err)
+		}
+		if p.Project == "" {
+			return protocol.Errf(req.ID, "missing_project", "maven.build requires params.project (a sandbox dir with pom.xml)")
+		}
+		if p.JavaVersion == "" {
+			return protocol.Errf(req.ID, "missing_java_version", "maven.build requires params.java_version")
+		}
+		res, err := Build(ctx, d, p.Project, p.JavaVersion, p.MavenVersion, p.Goals)
+		if err != nil {
+			return protocol.Errf(req.ID, "build_failed", "%v", err)
+		}
+		return protocol.OK(req.ID, res)
+	}
+}

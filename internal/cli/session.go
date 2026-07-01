@@ -36,6 +36,7 @@ type session struct {
 	controllerNpm    string
 	controllerJava   string
 	controllerConda  string
+	controllerMvn    string
 	auditPath        string
 	policy           *egress.Policy
 	sandboxID        string
@@ -170,7 +171,7 @@ func openSessionWith(ctx context.Context, cfg *config.Config, transport string, 
 		}
 	}
 
-	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, controllerConda: cfg.ControllerConda, auditPath: auditPath(cfg), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID, runtimeStore: runtimesStore(cfg), runtimeConfig: configRuntimeSources(cfg.Runtimes)}
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, controllerConda: cfg.ControllerConda, controllerMvn: cfg.ControllerMvn, auditPath: auditPath(cfg), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID, runtimeStore: runtimesStore(cfg), runtimeConfig: configRuntimeSources(cfg.Runtimes)}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"

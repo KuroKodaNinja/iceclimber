@@ -90,6 +90,21 @@ func mavenDeps(sess *session, pr progress.Func) maven.Deps {
 	}
 }
 
+// mavenBuildDeps builds the maven.build dependency bundle from an open session (the
+// air-gapped Maven build: controller mvn/java prime an offline repo the sandbox builds).
+func mavenBuildDeps(sess *session, pr progress.Func) maven.BuildDeps {
+	return maven.BuildDeps{
+		FS:             sess.fs,
+		Runner:         sess.runner,
+		Root:           sess.tree.Root,
+		Arch:           sess.fp.Arch,
+		Libc:           sess.fp.Libc.Family,
+		ControllerMvn:  sess.controllerMvn,
+		ControllerJava: sess.controllerJava,
+		Progress:       pr,
+	}
+}
+
 // pipDeps builds the pip.install dependency bundle from an open session.
 func pipDeps(sess *session, pr progress.Func) pip.Deps {
 	src := sess.runtimeSourcesNow().Of("python")
@@ -155,6 +170,7 @@ func buildRegistry(sess *session, pr progress.Func) protocol.Registry {
 		"npm.install":    npm.Handler(npmDeps(sess, pr)),
 		"java.install":   java.Handler(newJavaInstaller(sess, pr)),
 		"maven.install":  maven.Handler(mavenDeps(sess, pr)),
+		"maven.build":    maven.BuildHandler(mavenBuildDeps(sess, pr)),
 		"conda.install":  conda.Handler(condaDeps(sess, pr)),
 		"web.fetch":      webfetch.Handler(webfetchDeps(sess)),
 	}

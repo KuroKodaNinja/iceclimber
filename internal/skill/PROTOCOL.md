@@ -101,6 +101,7 @@ install`/`wrap` — to inform the operator's `status` view. **You don't write it
 | `npm.install` | `{ node_version, packages:[{name,version?}] }` | `{ installed, failed, node_path }` |
 | `java.install` | `{ version }` (feature, e.g. "21") | `{ version, path, already_installed }` |
 | `maven.install` | `{ java_version, packages:[{name:"group:artifact",version}] }` | `{ installed, failed, classpath }` |
+| `maven.build` | `{ project, java_version, goals?:["package"] }` | `{ artifacts:[<jar path>], tier }` |
 | `conda.install` | `{ python_version, packages:[{name,version?}], extra_args?:["-c","conda-forge",…] }` | `{ installed:[{name,version,tier,sha256?}], failed }` |
 | `web.fetch` | `{ url, method?, headers?, body? }` | `{ status_code, venue, encoding, body_inline? , body_blob? }` |
 

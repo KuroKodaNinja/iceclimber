@@ -65,6 +65,7 @@ func newRootCmd() *cobra.Command {
 		newBootstrapCmd(),
 		newServeCmd(),
 		newInstallCmd(),
+		newMavenCmd(),
 		newAgentCmd(),
 		newWebCmd(),
 		newPendingCmd(),

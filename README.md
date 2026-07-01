@@ -300,6 +300,7 @@ context. To learn the protocol by hand, see [`test/PLAYGROUND.md`](test/PLAYGROU
 | `npm.install` | npm packages (Tier 0 mirror / Tier 1 relay); returns a `NODE_PATH` to `require()` them |
 | `java.install` | A portable Temurin JDK (javac bundled), run by absolute path |
 | `maven.install` | JVM deps (Maven coordinates) resolved via Coursier — Tier 0 mirror or Tier 1 relay; returns a `classpath` to run with `java -cp` |
+| `maven.build` | Runs the **Maven build tool** on a sandbox `pom.xml` project, air-gapped: the controller's Maven+JDK prime an offline `.m2` repo, Popo relays the tool + repo in, and the sandbox runs `mvn -o package`. Returns the built jar path(s). (Needs Maven + a JDK on the controller.) |
 | `conda.install` | conda packages into a conda env (when python's env_manager is conda) — Tier 0 from the sandbox's channel, or an **air-gapped relay** where the controller's conda resolves + downloads + pushes a self-contained local channel the sandbox installs from **offline**. Channels via allowlisted `extra_args` (`-c conda-forge`) |
 | `web.fetch` | A URL — via the **sandbox's** own egress (ungated) or **Popo's** network (gated controller venue) |
 
