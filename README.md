@@ -164,6 +164,12 @@ protocol tree, runs a `ping`/`pong` smoke test, drops `NANA.md` + `PROTOCOL.md`,
 relays the `popo` client to `<root>/popo`. Then wire `NANA.md` into your agent's
 instructions (see the Nana side).
 
+Re-running `bootstrap` is **safe and idempotent** — it never touches `<root>/runtimes`,
+so already-installed runtimes/packages (which take a while to transfer) are preserved
+(the summary says so). To wipe everything and start clean, `bootstrap --force` does a
+destructive reset (removes the sandbox tree incl. runtimes, then reprovisions); it
+refuses an unsafe/shallow `remote_root`.
+
 Bootstrap also **detects runtimes already on the box** (a corp VM that ships its own
 Python/Node/Java) and lets you choose, per language, whether to use them. By default
 iceclimber installs its own pinned runtime (`managed`); choose `system` to use the
@@ -217,8 +223,10 @@ There are two ways the sandbox gets packages, both keeping it off the open inter
   **online through the proxy** (resolving plugins + deps from Maven Central) instead of the
   relay's offline `.m2`. For headless serve, list your registries under
   `network.allowed_domains` (interactive serve prompts for unlisted hosts); native-tool
-  egress needs an active `serve` (that's what runs the proxy). Runtimes are still installed
-  via the relay.
+  egress needs an active `serve` (that's what runs the proxy). If the proxy can't come up
+  (e.g. its loopback port is already forwarded by another serve), serve **degrades** — it
+  logs a warning and keeps running without native-tool egress (relay verbs still work) rather
+  than failing. Runtimes are still installed via the relay.
 - **`egress_mode: relay`** — the controller resolves + downloads artifacts on its network
   and relays them in; the sandbox installs offline and **never opens a connection at all**.
   iceclimber integrates each manager (pip/npm/maven/conda) explicitly. This is the stricter
