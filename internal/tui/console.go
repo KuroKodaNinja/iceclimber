@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -84,8 +85,20 @@ type AgentInstallRequest struct {
 type AgentChoice struct{ Name, DisplayName string }
 
 // RuntimeChoice is a system runtime the console offers as a bootstrap source option
-// (the operator can use it instead of an iceclimber-managed runtime).
-type RuntimeChoice struct{ Lang, Version, Path string }
+// (the operator can use it instead of an iceclimber-managed runtime). EnvManagers lists
+// the isolation tools the box supports for it (python: "venv","conda").
+type RuntimeChoice struct {
+	Lang, Version, Path string
+	EnvManagers         []string
+}
+
+// RuntimeSelection is the operator's bootstrap choice for one runtime: use the system
+// runtime (else managed), and — for a system python — which env_manager to isolate with
+// ("" = the default venv, or "conda").
+type RuntimeSelection struct {
+	System     bool
+	EnvManager string
+}
 
 // OpResultMsg signals an operator-initiated action finished; it clears the running
 // indicator. The pane line is driven separately by the activity event the runner
@@ -105,9 +118,9 @@ type OpRunner interface {
 	Agents() []AgentChoice
 	// DetectedRuntimes lists system runtimes the operator may opt into at bootstrap. Local.
 	DetectedRuntimes() []RuntimeChoice
-	// SetRuntimeSources persists the operator's per-language system(true)/managed(false)
-	// choice from the bootstrap form. Local.
-	SetRuntimeSources(useSystem map[string]bool) error
+	// SetRuntimeSources persists the operator's per-language bootstrap choice (system vs
+	// managed, and the env_manager for a system python). Local.
+	SetRuntimeSources(sel map[string]RuntimeSelection) error
 	// PollStatus returns a cmd that reads sandbox status (SSH) and emits a StatusMsg.
 	PollStatus() tea.Cmd
 	// Egress reads the operator's persisted rules + pending held requests (local).
@@ -240,6 +253,9 @@ type formState struct {
 	agentAuth string // "env" | "skip"
 	// bootstrap form: runtime source choice ("" = not offered, else "managed"|"system")
 	pyRuntime string
+	// bootstrap form: env_manager for a system python ("venv"|"conda"), offered only when
+	// the box has conda; ignored unless pyRuntime == "system".
+	pyEnvManager string
 }
 
 // NewConsole builds a console reading events (and, optionally, the agent stream).
@@ -572,7 +588,11 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 		}
 		// Persist the runtime-source choice (if the form offered one) before provisioning.
 		if c.st.pyRuntime != "" {
-			_ = c.ops.SetRuntimeSources(map[string]bool{"python": c.st.pyRuntime == "system"})
+			sel := RuntimeSelection{System: c.st.pyRuntime == "system"}
+			if sel.System && c.st.pyEnvManager == "conda" {
+				sel.EnvManager = "conda"
+			}
+			_ = c.ops.SetRuntimeSources(map[string]RuntimeSelection{"python": sel})
 		}
 		c.running = "bootstrap"
 		c.progStart = time.Now()
@@ -735,6 +755,17 @@ func (c *Console) bootstrapForm() *huh.Form {
 				huh.NewOption("managed — install an iceclimber-pinned Python", "managed"),
 				huh.NewOption("system — use the box's Python (venv under $ICECLIMBER_HOME)", "system"),
 			))
+			// When the box has conda, let the operator isolate a system Python with it.
+			if slices.Contains(rt.EnvManagers, "conda") {
+				c.st.pyEnvManager = "venv"
+				fields = append(fields, huh.NewSelect[string]().
+					Title("System Python env_manager").
+					Description("How to isolate the system Python (only applies to the system choice).").
+					Value(&c.st.pyEnvManager).Options(
+					huh.NewOption("venv — a virtualenv under $ICECLIMBER_HOME", "venv"),
+					huh.NewOption("conda — a conda env under $ICECLIMBER_HOME", "conda"),
+				))
+			}
 		}
 	}
 	fields = append(fields, huh.NewConfirm().Title("Re-provision this sandbox?").

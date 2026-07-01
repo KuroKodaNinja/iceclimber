@@ -35,6 +35,20 @@ func TestParseFlag(t *testing.T) {
 	if _, err := ParseFlag("node=managed"); err != nil {
 		t.Errorf("node=managed should be accepted: %v", err)
 	}
+
+	// env_manager syntax: python=system:conda.
+	if s, err := ParseFlag("python=system:conda"); err != nil || s["python"].Mode != ModeSystem || s["python"].EnvManager != "conda" {
+		t.Errorf("python=system:conda = %+v, %v; want system/conda", s, err)
+	}
+	if _, err := ParseFlag("python=managed:conda"); err == nil {
+		t.Error("env_manager on managed mode should error")
+	}
+	if _, err := ParseFlag("python=system:poetry"); err == nil {
+		t.Error("unknown env_manager should error")
+	}
+	if _, err := ParseFlag("node=system:conda"); err == nil {
+		t.Error("env_manager on a non-python (also unsupported system) lang should error")
+	}
 }
 
 func TestSystemSupported(t *testing.T) {

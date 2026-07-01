@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -118,7 +119,16 @@ func promptRuntimeChoice(w io.Writer, r *bufio.Reader, lang string, fp *probe.Fi
 	line, _ := r.ReadString('\n')
 	switch strings.TrimSpace(strings.ToLower(line)) {
 	case "system", "s":
-		return runtimes.Source{Mode: runtimes.ModeSystem}
+		src := runtimes.Source{Mode: runtimes.ModeSystem}
+		// Offer conda as the isolation tool when the box has it (python only).
+		if lang == "python" && slices.Contains(rt.EnvManagers, "conda") {
+			fmt.Fprint(w, "Isolate with venv or conda? [venv/conda] (default venv): ")
+			mgr, _ := r.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(mgr)) == "conda" {
+				src.EnvManager = "conda"
+			}
+		}
+		return src
 	default:
 		return runtimes.Source{Mode: runtimes.ModeManaged}
 	}

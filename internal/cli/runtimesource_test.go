@@ -7,6 +7,7 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/probe"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
+	"github.com/KuroKodaNinja/iceclimber/internal/tui"
 )
 
 // TestRuntimeSourceLazyResolveRoundTrip proves the console's runtime-source modal
@@ -37,11 +38,15 @@ func TestRuntimeSourceLazyResolveRoundTrip(t *testing.T) {
 		t.Fatalf("DetectedRuntimes = %+v, want only python", dr)
 	}
 
-	if err := ops.SetRuntimeSources(map[string]bool{"python": true}); err != nil {
+	if err := ops.SetRuntimeSources(map[string]tui.RuntimeSelection{"python": {System: true, EnvManager: "conda"}}); err != nil {
 		t.Fatalf("SetRuntimeSources: %v", err)
 	}
 	// The lazy resolve re-reads the store, so the new choice is live immediately.
-	if got := sess.runtimeSourcesNow().Of("python").Mode; got != runtimes.ModeSystem {
-		t.Errorf("after SetRuntimeSources(system), source = %q, want system", got)
+	src := sess.runtimeSourcesNow().Of("python")
+	if src.Mode != runtimes.ModeSystem {
+		t.Errorf("after SetRuntimeSources(system), source = %q, want system", src.Mode)
+	}
+	if src.EnvManager != "conda" {
+		t.Errorf("env_manager = %q, want conda (persisted from the modal)", src.EnvManager)
 	}
 }

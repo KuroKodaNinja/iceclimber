@@ -78,14 +78,28 @@ func ParseFlag(s string) (Sources, error) {
 		if !knownLang(lang) {
 			return nil, fmt.Errorf("runtime-source: unknown language %q (want one of %s)", lang, strings.Join(Langs, ", "))
 		}
-		mode := Mode(strings.TrimSpace(v))
+		modeStr, mgr, _ := strings.Cut(strings.TrimSpace(v), ":") // "system:conda" → mode + env_manager
+		mode := Mode(strings.TrimSpace(modeStr))
 		if !validMode(mode) {
-			return nil, fmt.Errorf("runtime-source %s: unknown mode %q (want managed or system)", lang, v)
+			return nil, fmt.Errorf("runtime-source %s: unknown mode %q (want managed or system, optionally :venv/:conda)", lang, v)
 		}
 		if mode == ModeSystem && !SystemSupported(lang) {
 			return nil, fmt.Errorf("runtime-source %s=system is not supported yet (only python); use managed", lang)
 		}
-		out[lang] = Source{Mode: mode}
+		src := Source{Mode: mode}
+		if mgr = strings.TrimSpace(mgr); mgr != "" {
+			if mode != ModeSystem {
+				return nil, fmt.Errorf("runtime-source %s: env_manager (:%s) only applies to system mode", lang, mgr)
+			}
+			if lang != "python" {
+				return nil, fmt.Errorf("runtime-source %s: only python has an env_manager", lang)
+			}
+			if mgr != "venv" && mgr != "conda" {
+				return nil, fmt.Errorf("runtime-source %s: env_manager %q must be venv or conda", lang, mgr)
+			}
+			src.EnvManager = mgr
+		}
+		out[lang] = src
 	}
 	return out, nil
 }

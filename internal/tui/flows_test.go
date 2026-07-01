@@ -38,8 +38,8 @@ type recordOps struct {
 	approved  chan string
 	denied    chan string
 	agent     chan AgentInstallRequest
-	detected  []RuntimeChoice      // offered in the bootstrap form
-	rtSources chan map[string]bool // captures SetRuntimeSources
+	detected  []RuntimeChoice                  // offered in the bootstrap form
+	rtSources chan map[string]RuntimeSelection // captures SetRuntimeSources
 }
 
 func newRecordOps() *recordOps {
@@ -50,7 +50,7 @@ func newRecordOps() *recordOps {
 		approved:  make(chan string, 4),
 		denied:    make(chan string, 4),
 		agent:     make(chan AgentInstallRequest, 1),
-		rtSources: make(chan map[string]bool, 1),
+		rtSources: make(chan map[string]RuntimeSelection, 1),
 	}
 }
 
@@ -67,8 +67,8 @@ func (o *recordOps) Agents() []AgentChoice {
 	return []AgentChoice{{Name: "claude", DisplayName: "Claude Code"}}
 }
 func (o *recordOps) DetectedRuntimes() []RuntimeChoice { return o.detected }
-func (o *recordOps) SetRuntimeSources(useSystem map[string]bool) error {
-	o.rtSources <- useSystem
+func (o *recordOps) SetRuntimeSources(sel map[string]RuntimeSelection) error {
+	o.rtSources <- sel
 	return nil
 }
 func (o *recordOps) PollStatus() tea.Cmd            { return func() tea.Msg { return StatusMsg(o.status) } }
@@ -523,7 +523,7 @@ func TestFlow_BootstrapRuntimeSource(t *testing.T) {
 	press(tm, "y") // confirm
 	select {
 	case src := <-ops.rtSources:
-		if !src["python"] {
+		if !src["python"].System {
 			t.Fatalf("SetRuntimeSources = %+v, want python=system(true)", src)
 		}
 	case <-time.After(5 * time.Second):
@@ -534,6 +534,33 @@ func TestFlow_BootstrapRuntimeSource(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("bootstrap should still provision after the source choice")
 	}
+	finalConsole(t, tm)
+}
+
+// TestFlow_BootstrapCondaEnvManager: when conda is detected, the bootstrap form offers a
+// venv/conda env_manager select; choosing conda persists env_manager=conda for a system python.
+func TestFlow_BootstrapCondaEnvManager(t *testing.T) {
+	ops := newRecordOps()
+	ops.detected = []RuntimeChoice{{Lang: "python", Version: "3.12.1", Path: "/usr/bin/python3", EnvManagers: []string{"venv", "conda"}}}
+	tm := startConsole(t, ops)
+	press(tm, "b")
+	waitText(t, tm, "Python runtime")
+	send(tm, tea.KeyDown)  // managed → system
+	send(tm, tea.KeyEnter) // accept system → env_manager select
+	waitText(t, tm, "env_manager")
+	send(tm, tea.KeyDown)  // venv → conda
+	send(tm, tea.KeyEnter) // accept conda → confirm
+	waitText(t, tm, "Re-provision this sandbox?")
+	press(tm, "y")
+	select {
+	case src := <-ops.rtSources:
+		if !src["python"].System || src["python"].EnvManager != "conda" {
+			t.Fatalf("SetRuntimeSources = %+v, want python=system(conda)", src)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("choosing conda should persist env_manager=conda")
+	}
+	<-ops.bootstrap
 	finalConsole(t, tm)
 }
 
@@ -565,14 +592,14 @@ func (o *gateOps) RunBootstrap() tea.Cmd {
 func (o *gateOps) RunAgentInstall(AgentInstallRequest) tea.Cmd {
 	return func() tea.Msg { <-o.release; return OpResultMsg{} }
 }
-func (o *gateOps) Agents() []AgentChoice                   { return nil }
-func (o *gateOps) DetectedRuntimes() []RuntimeChoice       { return nil }
-func (o *gateOps) SetRuntimeSources(map[string]bool) error { return nil }
-func (o *gateOps) PollStatus() tea.Cmd                     { return nil }
-func (o *gateOps) Egress() EgressSnapshot                  { return EgressSnapshot{} }
-func (o *gateOps) ApprovePending(string) error             { return nil }
-func (o *gateOps) DenyPending(string) error                { return nil }
-func (o *gateOps) ForgetRule(_, _ string) error            { return nil }
+func (o *gateOps) Agents() []AgentChoice                               { return nil }
+func (o *gateOps) DetectedRuntimes() []RuntimeChoice                   { return nil }
+func (o *gateOps) SetRuntimeSources(map[string]RuntimeSelection) error { return nil }
+func (o *gateOps) PollStatus() tea.Cmd                                 { return nil }
+func (o *gateOps) Egress() EgressSnapshot                              { return EgressSnapshot{} }
+func (o *gateOps) ApprovePending(string) error                         { return nil }
+func (o *gateOps) DenyPending(string) error                            { return nil }
+func (o *gateOps) ForgetRule(_, _ string) error                        { return nil }
 
 // TestFlow_InstallProgressMeter: while an install is in flight, ProgressMsg samples
 // render in the footer — a byte transfer shows %/transport, a package step shows

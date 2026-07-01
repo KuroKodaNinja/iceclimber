@@ -127,7 +127,7 @@ func (o *consoleOps) DetectedRuntimes() []tui.RuntimeChoice {
 	var out []tui.RuntimeChoice
 	for _, rt := range o.sess().fp.Runtimes {
 		if runtimes.SystemSupported(rt.Lang) {
-			out = append(out, tui.RuntimeChoice{Lang: rt.Lang, Version: rt.Version, Path: rt.Path})
+			out = append(out, tui.RuntimeChoice{Lang: rt.Lang, Version: rt.Version, Path: rt.Path, EnvManagers: rt.EnvManagers})
 		}
 	}
 	return out
@@ -136,7 +136,7 @@ func (o *consoleOps) DetectedRuntimes() []tui.RuntimeChoice {
 // SetRuntimeSources persists the operator's per-language system/managed choice. The
 // install path + serve loop resolve the source fresh (runtimeSourcesNow), so the
 // choice takes effect without a reconnect.
-func (o *consoleOps) SetRuntimeSources(useSystem map[string]bool) error {
+func (o *consoleOps) SetRuntimeSources(sel map[string]tui.RuntimeSelection) error {
 	store := o.sess().runtimeStore
 	if store == nil {
 		return nil
@@ -145,12 +145,13 @@ func (o *consoleOps) SetRuntimeSources(useSystem map[string]bool) error {
 	if cur == nil {
 		cur = runtimes.Sources{}
 	}
-	for lang, sys := range useSystem {
-		mode := runtimes.ModeManaged
-		if sys {
-			mode = runtimes.ModeSystem
+	for lang, s := range sel {
+		src := runtimes.Source{Mode: runtimes.ModeManaged}
+		if s.System {
+			src.Mode = runtimes.ModeSystem
+			src.EnvManager = s.EnvManager // "" (venv default) or "conda"; only meaningful for system
 		}
-		cur[lang] = runtimes.Source{Mode: mode}
+		cur[lang] = src
 	}
 	return store.Save(cur)
 }
