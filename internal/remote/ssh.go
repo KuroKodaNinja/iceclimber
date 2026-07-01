@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"sync"
 	"time"
@@ -178,6 +179,16 @@ func (s *SSHRunner) Close() error {
 // unavailable — the signal to fall back to ExecFS (§6).
 func (s *SSHRunner) NewSFTP() (*sftp.Client, error) {
 	return sftp.NewClient(s.client)
+}
+
+// RemoteListen requests the SSH server to listen on addr (an `ssh -R` reverse forward)
+// and returns a net.Listener whose Accept yields the connections the sandbox opens to
+// that remote address, tunneled back over the existing SSH connection. This is how the
+// controller exposes a loopback service (e.g. the egress proxy) to the sandbox without
+// the sandbox having any direct network of its own — the sandbox reaches
+// 127.0.0.1:<port>, which tunnels here. The caller owns the listener and must Close it.
+func (s *SSHRunner) RemoteListen(addr string) (net.Listener, error) {
+	return s.client.Listen("tcp", addr)
 }
 
 // knownHostsCallback builds a host-key verifier from path, or from the user's
