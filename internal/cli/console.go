@@ -248,7 +248,7 @@ func (o *consoleOps) PollStatus() tea.Cmd {
 		return tui.StatusMsg{
 			Sandbox:   o.sess().sandboxID,
 			Heartbeat: hb,
-			Queue:     fmt.Sprintf("%d awaiting · %d uncollected", s.QueueOut, s.QueueIn),
+			Queue:     fmt.Sprintf("%d awaiting service · %d awaiting collection", s.QueueOut, s.QueueIn),
 			Runtimes:  s.Runtimes,
 			Caps:      s.Caps,
 		}

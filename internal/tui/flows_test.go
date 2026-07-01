@@ -648,7 +648,7 @@ func TestFlow_QuitCtrlC(t *testing.T) {
 func TestFlow_StatusPanel(t *testing.T) {
 	ops := newRecordOps()
 	ops.status = StatusSnapshot{
-		Sandbox: "sbx", Heartbeat: "seq 42 · ~3s ago", Queue: "1 awaiting · 0 uncollected",
+		Sandbox: "sbx", Heartbeat: "seq 42 · ~3s ago", Queue: "1 awaiting service · 0 awaiting collection",
 		Runtimes: []string{"python 3.12.13-aarch64-musl"}, Caps: "Claude Code 1.2.3 · auth ✓ · linux/arm64 (musl)",
 	}
 	tm := startConsole(t, ops)

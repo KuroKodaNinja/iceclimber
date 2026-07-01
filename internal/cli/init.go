@@ -35,6 +35,11 @@ ssh:
   # doesn't silently drop it; serve also auto-reconnects if a drop happens anyway.
   # keepalive_interval: 20
 
+# How long a delivered-but-uncollected response lingers before GC reaps it (with its
+# request). A Go duration; omitted = 1h; "0" disables the retention sweep (collected
+# responses are still pruned promptly).
+# maildir_retention: 1h
+
 # Where the iceclimber tree lives in the sandbox. Leave empty to let bootstrap
 # choose the first writable candidate ($HOME/.iceclimber, then /opt/iceclimber).
 remote_root: ""
