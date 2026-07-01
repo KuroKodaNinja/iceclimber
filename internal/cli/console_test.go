@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/tui"
 )
@@ -143,5 +147,100 @@ func TestConsoleProgress_NonBlockingDrop(t *testing.T) {
 	// The one buffered sample is a transport-tagged ProgressMsg.
 	if m, ok := (<-ch).(tui.ProgressMsg); !ok || m.Transport != "exec" {
 		t.Errorf("buffered msg = %#v, want a ProgressMsg tagged via exec", m)
+	}
+}
+
+// TestAwaitBootstrapped_AlreadyProvisioned: a bootstrapped sandbox returns immediately with no
+// "press b" event and never blocks — serving proceeds without a park.
+func TestAwaitBootstrapped_AlreadyProvisioned(t *testing.T) {
+	emitted := 0
+	err := awaitBootstrapped(context.Background(),
+		func(context.Context) bool { return true }, make(chan struct{}), func(tea.Msg) { emitted++ })
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if emitted != 0 {
+		t.Errorf("emitted %d events, want 0 (already bootstrapped ⇒ no park state)", emitted)
+	}
+}
+
+// TestAwaitBootstrapped_ParksThenResumesOnNudge: an unprovisioned box emits the "press b"
+// state and BLOCKS (no spin) until a bootstrapped nudge; once provisioned it returns nil so
+// serving starts in place. This is the TUI/cmdline-console analogue of the headless clean-box
+// functional test — it guards the acute fix (no reconnect loop, no password-prompt storm).
+func TestAwaitBootstrapped_ParksThenResumesOnNudge(t *testing.T) {
+	events := make(chan tea.Msg, 8)
+	bootstrapped := make(chan struct{}, 1)
+	var provisioned atomic.Bool // flips true once the operator bootstraps in place
+	done := make(chan error, 1)
+	go func() {
+		done <- awaitBootstrapped(context.Background(),
+			func(context.Context) bool { return provisioned.Load() },
+			bootstrapped, func(m tea.Msg) { events <- m })
+	}()
+
+	// It must park (emit the "press b" state) and NOT return while unprovisioned.
+	select {
+	case m := <-events:
+		ev, ok := m.(activity.Event)
+		if !ok || ev.Type != "bootstrap" || ev.Status != "needs" {
+			t.Fatalf("first emit = %+v, want a bootstrap-needs event", m)
+		}
+		if !strings.Contains(ev.Detail, "press b") {
+			t.Errorf("park detail = %q, want it to mention `press b`", ev.Detail)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("awaitBootstrapped should emit the not-bootstrapped state")
+	}
+	select {
+	case <-done:
+		t.Fatal("awaitBootstrapped must block while unprovisioned, not return")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Operator bootstraps in place → provision succeeds, then nudges → serving resumes.
+	provisioned.Store(true)
+	bootstrapped <- struct{}{}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("after bootstrap, err = %v, want nil (resume serving)", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a nudge after provisioning should unblock awaitBootstrapped")
+	}
+}
+
+// TestAwaitBootstrapped_CancelStopsPark: cancelling the context while parked returns ctx.Err()
+// so the cycle ends cleanly (caller stops without serving) — never hanging on a clean box.
+func TestAwaitBootstrapped_CancelStopsPark(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- awaitBootstrapped(ctx, func(context.Context) bool { return false },
+			make(chan struct{}), func(tea.Msg) {})
+	}()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancel should unblock a parked awaitBootstrapped")
+	}
+}
+
+// TestNudgeBootstrapped: the nudge is a non-blocking, coalescing signal — one queued at most,
+// a no-op when unwired (nil) or already queued (buffer full).
+func TestNudgeBootstrapped(t *testing.T) {
+	(&consoleOps{}).nudgeBootstrapped() // nil channel → no-op, no panic
+
+	ch := make(chan struct{}, 1)
+	o := &consoleOps{bootstrapped: ch}
+	o.nudgeBootstrapped()
+	o.nudgeBootstrapped() // second is coalesced (buffer full) — must not block
+	if len(ch) != 1 {
+		t.Fatalf("queued %d nudges, want exactly 1 (coalesced, non-blocking)", len(ch))
 	}
 }

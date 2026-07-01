@@ -54,3 +54,43 @@ func TestRuntimeSourceLazyResolveRoundTrip(t *testing.T) {
 		t.Errorf("env_manager = %q, want conda (persisted from the modal)", src.EnvManager)
 	}
 }
+
+// TestOverlayRuntimeSources is the cmdline parity for the console modal's SetRuntimeSources:
+// `install --runtime-source` overlays the SAME store, leaving unnamed languages untouched.
+// Pairs with TestRuntimeSourceLazyResolveRoundTrip (the TUI side) and the glibc functional
+// TestInstallRuntimeSourceFlag (live) so both surfaces of the source choice are covered.
+func TestOverlayRuntimeSources(t *testing.T) {
+	store := runtimes.NewStore(filepath.Join(t.TempDir(), "runtimes.json"))
+	// Seed a pre-existing choice the overlay must preserve.
+	if err := store.Save(runtimes.Sources{"java": {Mode: runtimes.ModeSystem}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty flag is a no-op (doesn't clobber the seed).
+	if err := overlayRuntimeSources(store, "  "); err != nil {
+		t.Fatalf("empty overlay should be a no-op: %v", err)
+	}
+
+	// A real flag overlays python (with env_manager) + node, keeping java.
+	if err := overlayRuntimeSources(store, "python=system:conda,node=managed"); err != nil {
+		t.Fatalf("overlayRuntimeSources: %v", err)
+	}
+	got, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["python"].Mode != runtimes.ModeSystem || got["python"].EnvManager != "conda" {
+		t.Errorf("python = %+v, want system:conda", got["python"])
+	}
+	if got["node"].Mode != runtimes.ModeManaged {
+		t.Errorf("node = %+v, want managed", got["node"])
+	}
+	if got["java"].Mode != runtimes.ModeSystem {
+		t.Errorf("java = %+v, want system preserved (overlay must not drop unnamed langs)", got["java"])
+	}
+
+	// A malformed flag errors (and the ParseFlag guard is exercised on the CLI path too).
+	if err := overlayRuntimeSources(store, "ruby=system"); err == nil {
+		t.Error("overlayRuntimeSources should reject an unsupported language")
+	}
+}

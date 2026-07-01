@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/probe"
@@ -47,26 +46,24 @@ func TestGlibcProbe(t *testing.T) {
 	}
 }
 
-// TestBootstrapRuntimeSourceFlag: `bootstrap --runtime-source` resolves the choice,
-// reports it, and persists it controller-side. Runs under a private HOME so the
-// runtimes.json is isolated. (Wiring check — install behavior is exercised later.)
-func TestBootstrapRuntimeSourceFlag(t *testing.T) {
+// TestInstallRuntimeSourceFlag: `install --runtime-source` resolves the choice, persists it
+// controller-side, and the install honors it — using the system python (fast, no managed
+// download) proves the flag reached the resolver. Runs under a private HOME so runtimes.json
+// is isolated. Runtime source is now a post-bootstrap, install-time concern (not bootstrap's).
+func TestInstallRuntimeSourceFlag(t *testing.T) {
 	sb := requireGlibcSandbox(t)
 	root := "/tmp/iceclimber-rt-" + protocol.NewID()
 	cfg := writeConfigFor(t, sb, root)
 
 	home := t.TempDir()
 	var out bytes.Buffer
-	cmd := exec.Command(iceclimberBin, "bootstrap",
+	cmd := exec.Command(iceclimberBin, "install", "python", "3.12",
 		"--runtime-source", "python=system,node=managed", "--config", cfg, "--transport", "sftp")
 	cmd.Env = append(os.Environ(), "HOME="+home)
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("bootstrap: %v\n%s", err, out.String())
-	}
-	if !strings.Contains(out.String(), "python=system") {
-		t.Errorf("bootstrap summary missing python=system:\n%s", out.String())
+		t.Fatalf("install: %v\n%s", err, out.String())
 	}
 
 	data, err := os.ReadFile(filepath.Join(home, ".iceclimber", sb.Name, "runtimes.json"))

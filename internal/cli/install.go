@@ -12,17 +12,66 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
 	"github.com/spf13/cobra"
 )
 
 func newInstallCmd() *cobra.Command {
+	var runtimeSource string
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install language runtimes or packages into the sandbox",
+		Long: "Install a language runtime or packages. Choose where a runtime comes from —\n" +
+			"iceclimber-managed (a pinned build) or the box's own (system) — with --runtime-source\n" +
+			"here, or `runtimes.<lang>.source` in config; the console's install form offers the same\n" +
+			"choice. (Runtime source is a post-bootstrap concern — bootstrap only sets up the tree.)",
+		// Persist any --runtime-source choice before the subcommand resolves the runtime.
+		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+			return persistRuntimeSources(runtimeSource)
+		},
 	}
+	cmd.PersistentFlags().StringVar(&runtimeSource, "runtime-source", "",
+		"set + persist a per-language runtime source, e.g. python=system,node=managed (or python=system:conda)")
 	cmd.AddCommand(newInstallPythonCmd(), newInstallPipCmd(), newInstallNodeCmd(), newInstallNpmCmd(),
 		newInstallJavaCmd(), newInstallMavenCmd(), newInstallCondaCmd())
 	return cmd
+}
+
+// persistRuntimeSources resolves the per-sandbox runtime-source store and merges a
+// `--runtime-source` value onto it (empty is a no-op). The store overlay is factored into
+// overlayRuntimeSources so it's unit-testable without loading config.
+func persistRuntimeSources(flagStr string) error {
+	if strings.TrimSpace(flagStr) == "" {
+		return nil
+	}
+	cfg, err := config.Load(cfgFile, sandboxID)
+	if err != nil {
+		return err
+	}
+	return overlayRuntimeSources(runtimesStore(cfg), flagStr)
+}
+
+// overlayRuntimeSources parses a `--runtime-source` value (lang=mode[:env_manager], …) and
+// merges it onto the persisted store, leaving unnamed languages untouched, so subsequent
+// installs + serve honor it. Empty is a no-op. This is the CLI parity for the console install
+// form's managed-vs-system choice — both overlay the same store (config stays the declarative
+// path), mirroring consoleOps.SetRuntimeSources.
+func overlayRuntimeSources(store *runtimes.Store, flagStr string) error {
+	if strings.TrimSpace(flagStr) == "" {
+		return nil
+	}
+	flagSrc, err := runtimes.ParseFlag(flagStr)
+	if err != nil {
+		return err
+	}
+	persisted, err := store.Load()
+	if err != nil {
+		return err
+	}
+	for lang, src := range flagSrc {
+		persisted[lang] = src
+	}
+	return store.Save(persisted)
 }
 
 func newInstallMavenCmd() *cobra.Command {

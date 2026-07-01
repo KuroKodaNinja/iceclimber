@@ -328,6 +328,17 @@ func TestConsoleOps_AgentWrap(t *testing.T) {
 	}
 }
 
+// runtimeDetected reports whether the live box offers a system runtime for lang — i.e.
+// whether the install form will insert that language's managed-vs-system source page.
+func runtimeDetected(ops *consoleOps, lang string) bool {
+	for _, rt := range ops.DetectedRuntimes() {
+		if rt.Lang == lang {
+			return true
+		}
+	}
+	return false
+}
+
 // waitOut blocks until all substrings have rendered in the program output.
 func waitOut(t *testing.T, tm *teatest.TestModel, subs ...string) {
 	t.Helper()
@@ -360,11 +371,19 @@ func TestConsoleTUI_FullInstall(t *testing.T) {
 	model := tui.NewConsole(sess.sandboxID, events, "", ops)
 	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(120, 40))
 
-	// Drive the install form: i → Python (default) → packages "six" → version blank → submit.
+	// Drive the install form: i → Python (default) → [source page, if the box offers a
+	// system python] → packages "six" → version blank → submit.
 	waitOut(t, tm, "i install")
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	waitOut(t, tm, "language")
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // accept Python, advance to packages
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // accept Python
+	// When the box has a detected system python, the form inserts a managed-vs-system
+	// source page before packages — accept the default (managed) to reach packages. Keeping
+	// managed means the system-only env_manager page never shows, so this one Enter suffices.
+	if runtimeDetected(ops, "python") {
+		waitOut(t, tm, "Python source")
+		tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // keep managed → packages
+	}
 	waitOut(t, tm, "requests / figlet")
 	tm.Type("six")
 	waitOut(t, tm, "six")

@@ -227,6 +227,19 @@ func runIceclimber(t *testing.T, args ...string) []byte {
 	return stdout.Bytes()
 }
 
+// runIceclimberErr runs the built binary and returns its combined stdout+stderr and the
+// exit error WITHOUT failing the test — for asserting an expected non-zero exit (e.g. a
+// clean box refusing to serve until bootstrapped). runIceclimber is for the happy path.
+func runIceclimberErr(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	var out bytes.Buffer
+	cmd := exec.Command(iceclimberBin, args...)
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	return out.String(), err
+}
+
 func repoRoot() string {
 	_, file, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(file), "..", "..")

@@ -1,23 +1,17 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"path"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/popobin"
-	"github.com/KuroKodaNinja/iceclimber/internal/probe"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
-	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
 	"github.com/KuroKodaNinja/iceclimber/internal/skill"
 	"github.com/spf13/cobra"
 )
@@ -25,11 +19,14 @@ import (
 func newBootstrapCmd() *cobra.Command {
 	var transport string
 	var force bool
-	var runtimeSource string
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
-		Short: "Create the sandbox protocol tree and run a smoke test",
-		Args:  cobra.NoArgs,
+		Short: "Set up basic iceclimber functionality on the sandbox (protocol tree, popo, skill)",
+		Long: "Bootstrap provisions ONLY the basic iceclimber sandbox: the protocol tree, the popo\n" +
+			"client, the skill files, and (in proxy egress mode) the trust config. Language runtimes\n" +
+			"are a separate concern — choose managed vs system and install them with `iceclimber\n" +
+			"install` (or the console's install form) after bootstrapping.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load(cfgFile, sandboxID)
 			if err != nil {
@@ -60,14 +57,6 @@ func newBootstrapCmd() *cobra.Command {
 				reset, hadRuntimes = true, false
 			}
 
-			// Detect system runtimes, resolve the per-language source (flag > config >
-			// persisted > interactive prompt > managed), and persist the choice. Install
-			// behavior is unchanged here — this only records intent for install/serve.
-			src, err := resolveAndPersistRuntimes(cmd, cfg, sess.fp, runtimeSource)
-			if err != nil {
-				return err
-			}
-
 			if err := provision(ctx, sess); err != nil {
 				return err
 			}
@@ -85,16 +74,15 @@ func newBootstrapCmd() *cobra.Command {
 				state = "existing sandbox — installed runtimes/packages preserved (use --force to reset)"
 			}
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"bootstrap ok\n  sandbox:    %s\n  root:       %s\n  transport:  %s\n  state:      %s\n  smoke test: ping/pong round-trip passed\n  skill:      wrote %s\n  runtimes:   %s\n",
-				cfg.SandboxID, sess.tree.Root, sess.transport, state, sess.tree.SkillFile(), src.Summary())
+				"bootstrap ok\n  sandbox:    %s\n  root:       %s\n  transport:  %s\n  state:      %s\n  smoke test: ping/pong round-trip passed\n  skill:      wrote %s\n",
+				cfg.SandboxID, sess.tree.Root, sess.transport, state, sess.tree.SkillFile())
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"  next:       wire NANA.md into your sandbox agent's instructions (manual — `iceclimber skill print`)\n")
+				"  next:       install runtimes with `iceclimber install …` (managed or system); wire NANA.md into your agent (`iceclimber skill print`)\n")
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().BoolVar(&force, "force", false, "destructive reset: wipe the sandbox tree (incl. installed runtimes) and reprovision fresh")
-	cmd.Flags().StringVar(&runtimeSource, "runtime-source", "", "per-language runtime source, e.g. python=system,node=managed")
 	return cmd
 }
 
@@ -117,69 +105,6 @@ func guardResettableRoot(root string) error {
 func sandboxHasRuntimes(ctx context.Context, sess *session) bool {
 	entries, err := sess.fs.List(ctx, path.Join(sess.tree.Root, "runtimes"))
 	return err == nil && len(entries) > 0
-}
-
-// resolveAndPersistRuntimes merges the runtime-source choice across layers (flag >
-// config > persisted > interactive prompt > managed default), persists it
-// controller-side, and returns it. The prompt fires only on an interactive terminal
-// for a language with a detected system runtime and no explicit choice — so a
-// headless bootstrap is unattended (defaults to managed) and never blocks.
-func resolveAndPersistRuntimes(cmd *cobra.Command, cfg *config.Config, fp *probe.Fingerprint, flagStr string) (runtimes.Sources, error) {
-	flagSrc, err := runtimes.ParseFlag(flagStr)
-	if err != nil {
-		return nil, err
-	}
-	store := runtimesStore(cfg)
-	persisted, err := store.Load()
-	if err != nil {
-		return nil, err
-	}
-	detected := map[string]bool{}
-	for _, rt := range fp.Runtimes {
-		// Only offer a choice for languages whose system mode is implemented — else
-		// we'd prompt for / persist a node/java=system that install can't honor.
-		if runtimes.SystemSupported(rt.Lang) {
-			detected[rt.Lang] = true
-		}
-	}
-
-	var prompt func(string) runtimes.Source
-	if isTerminal(os.Stdin) {
-		reader := bufio.NewReader(os.Stdin)
-		prompt = func(lang string) runtimes.Source {
-			return promptRuntimeChoice(cmd.OutOrStdout(), reader, lang, fp)
-		}
-	}
-
-	resolved := runtimes.Resolve(flagSrc, configRuntimeSources(cfg.Runtimes), persisted, detected, prompt)
-	if err := store.Save(resolved); err != nil {
-		return nil, err
-	}
-	return resolved, nil
-}
-
-// promptRuntimeChoice asks the operator whether to use a detected system runtime.
-// Anything other than "system"/"s" keeps the managed default.
-func promptRuntimeChoice(w io.Writer, r *bufio.Reader, lang string, fp *probe.Fingerprint) runtimes.Source {
-	rt, _ := fp.Runtime(lang)
-	fmt.Fprintf(w, "Found system %s %s at %s.\n", lang, rt.Version, rt.Path)
-	fmt.Fprintf(w, "Use this system %s, or install an iceclimber-managed one? [system/managed] (default managed): ", lang)
-	line, _ := r.ReadString('\n')
-	switch strings.TrimSpace(strings.ToLower(line)) {
-	case "system", "s":
-		src := runtimes.Source{Mode: runtimes.ModeSystem}
-		// Offer conda as the isolation tool when the box has it (python only).
-		if lang == "python" && slices.Contains(rt.EnvManagers, "conda") {
-			fmt.Fprint(w, "Isolate with venv or conda? [venv/conda] (default venv): ")
-			mgr, _ := r.ReadString('\n')
-			if strings.TrimSpace(strings.ToLower(mgr)) == "conda" {
-				src.EnvManager = "conda"
-			}
-		}
-		return src
-	default:
-		return runtimes.Source{Mode: runtimes.ModeManaged}
-	}
 }
 
 // provision runs the idempotent setup steps shared by `bootstrap` and the console's

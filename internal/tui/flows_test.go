@@ -39,7 +39,7 @@ type recordOps struct {
 	approved  chan string
 	denied    chan string
 	agent     chan AgentInstallRequest
-	detected  []RuntimeChoice                  // offered in the bootstrap form
+	detected  []RuntimeChoice                  // offered in the install form's source choice
 	rtSources chan map[string]RuntimeSelection // captures SetRuntimeSources
 }
 
@@ -444,6 +444,74 @@ func TestFlow_InstallAbort(t *testing.T) {
 	}
 }
 
+// TestFlow_InstallRuntimeSource: when a system runtime is detected for the chosen language,
+// the install form offers a managed-vs-system source page; selecting "system" persists it
+// (SetRuntimeSources) before the install fires. This is the post-bootstrap home for the
+// choice — bootstrap no longer asks (parity with `install --runtime-source`).
+func TestFlow_InstallRuntimeSource(t *testing.T) {
+	ops := newRecordOps()
+	ops.detected = []RuntimeChoice{{Lang: "python", Version: "3.12.1", Path: "/usr/bin/python3"}}
+	tm := startConsole(t, ops)
+	press(tm, "i")
+	waitText(t, tm, "language")
+	send(tm, tea.KeyEnter) // accept Python (default) → source page (python is detected)
+	waitText(t, tm, "Python source")
+	send(tm, tea.KeyDown)  // managed → system
+	send(tm, tea.KeyEnter) // accept system → packages
+	waitText(t, tm, "requests / figlet")
+	send(tm, tea.KeyEnter) // blank packages → version
+	waitText(t, tm, "3.12 / 24")
+	send(tm, tea.KeyEnter) // blank version → submit
+	select {
+	case src := <-ops.rtSources:
+		if !src["python"].System {
+			t.Fatalf("SetRuntimeSources = %+v, want python=system(true)", src)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("choosing a runtime source should persist it before install")
+	}
+	select {
+	case r := <-ops.install:
+		if r.Lang != "python" {
+			t.Fatalf("install Lang = %q, want python", r.Lang)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("install should still fire after the source choice")
+	}
+	finalConsole(t, tm)
+}
+
+// TestFlow_InstallCondaEnvManager: when conda is detected for a system python, the install form
+// offers a venv/conda env_manager page; choosing conda persists env_manager=conda.
+func TestFlow_InstallCondaEnvManager(t *testing.T) {
+	ops := newRecordOps()
+	ops.detected = []RuntimeChoice{{Lang: "python", Version: "3.12.1", Path: "/usr/bin/python3", EnvManagers: []string{"venv", "conda"}}}
+	tm := startConsole(t, ops)
+	press(tm, "i")
+	waitText(t, tm, "language")
+	send(tm, tea.KeyEnter) // python → source page
+	waitText(t, tm, "Python source")
+	send(tm, tea.KeyDown)  // managed → system
+	send(tm, tea.KeyEnter) // system → env_manager page (conda detected)
+	waitText(t, tm, "env_manager")
+	send(tm, tea.KeyDown)  // venv → conda
+	send(tm, tea.KeyEnter) // conda → packages
+	waitText(t, tm, "requests / figlet")
+	send(tm, tea.KeyEnter) // → version
+	waitText(t, tm, "3.12 / 24")
+	send(tm, tea.KeyEnter) // → submit
+	select {
+	case src := <-ops.rtSources:
+		if !src["python"].System || src["python"].EnvManager != "conda" {
+			t.Fatalf("SetRuntimeSources = %+v, want python=system(conda)", src)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("choosing conda should persist env_manager=conda")
+	}
+	<-ops.install
+	finalConsole(t, tm)
+}
+
 // --- Bootstrap form ---------------------------------------------------------
 
 // TestFlow_AgentInstall drives the console's agent form ('a') with defaults — install
@@ -520,64 +588,43 @@ func TestFlow_BootstrapConfirm(t *testing.T) {
 	finalConsole(t, tm)
 }
 
-// TestFlow_BootstrapRuntimeSource: when a system Python is detected, the bootstrap
-// form offers a source choice; selecting "system" persists it (SetRuntimeSources)
-// before provisioning.
-func TestFlow_BootstrapRuntimeSource(t *testing.T) {
+// TestFlow_NotBootstrappedThenBootstrap is the TUI half of the clean-box flow. When the serve
+// cycle parks on an unprovisioned box (cli-side awaitBootstrapped emits the "press b" state),
+// the console must surface it in [POPO]; the operator then presses b, confirms, and RunBootstrap
+// fires — which nudges the cycle to start serving. Pairs with the cli-side TestAwaitBootstrapped*
+// and the headless TestCleanBox functional test for full TUI/cmdline parity on this flow.
+func TestFlow_NotBootstrappedThenBootstrap(t *testing.T) {
 	ops := newRecordOps()
-	ops.detected = []RuntimeChoice{{Lang: "python", Version: "3.12.1", Path: "/usr/bin/python3"}}
 	tm := startConsole(t, ops)
+	// The parked serve cycle emits the not-bootstrapped state.
+	tm.Send(activity.Event{
+		TS: "2026-06-28T18:00:00Z", Kind: activity.KindOperated,
+		Type: "bootstrap", Status: "needs",
+		Detail: "sandbox not bootstrapped — press b to set it up (nothing is served until then)",
+	})
+	waitText(t, tm, "not bootstrapped")
+	// Operator bootstraps in place from the parked state.
 	press(tm, "b")
-	waitText(t, tm, "Python runtime") // the source select (only shown when detected)
-	send(tm, tea.KeyDown)             // move managed → system
-	send(tm, tea.KeyEnter)            // accept system → provisioning-mode select
 	waitText(t, tm, "Provisioning mode")
-	send(tm, tea.KeyEnter) // keep "re-provision" → confirm field
-	waitText(t, tm, "Re-provision this sandbox?")
-	press(tm, "y") // confirm
-	select {
-	case src := <-ops.rtSources:
-		if !src["python"].System {
-			t.Fatalf("SetRuntimeSources = %+v, want python=system(true)", src)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("choosing a runtime source should persist it")
-	}
-	select {
-	case <-ops.bootstrap:
-	case <-time.After(5 * time.Second):
-		t.Fatal("bootstrap should still provision after the source choice")
-	}
-	finalConsole(t, tm)
-}
-
-// TestFlow_BootstrapCondaEnvManager: when conda is detected, the bootstrap form offers a
-// venv/conda env_manager select; choosing conda persists env_manager=conda for a system python.
-func TestFlow_BootstrapCondaEnvManager(t *testing.T) {
-	ops := newRecordOps()
-	ops.detected = []RuntimeChoice{{Lang: "python", Version: "3.12.1", Path: "/usr/bin/python3", EnvManagers: []string{"venv", "conda"}}}
-	tm := startConsole(t, ops)
-	press(tm, "b")
-	waitText(t, tm, "Python runtime")
-	send(tm, tea.KeyDown)  // managed → system
-	send(tm, tea.KeyEnter) // accept system → env_manager select
-	waitText(t, tm, "env_manager")
-	send(tm, tea.KeyDown)  // venv → conda
-	send(tm, tea.KeyEnter) // accept conda → provisioning-mode select
-	waitText(t, tm, "Provisioning mode")
-	send(tm, tea.KeyEnter) // keep "re-provision" → confirm
+	send(tm, tea.KeyEnter) // keep the safe re-provision → confirm
 	waitText(t, tm, "Re-provision this sandbox?")
 	press(tm, "y")
 	select {
-	case src := <-ops.rtSources:
-		if !src["python"].System || src["python"].EnvManager != "conda" {
-			t.Fatalf("SetRuntimeSources = %+v, want python=system(conda)", src)
-		}
+	case <-ops.bootstrap:
 	case <-time.After(5 * time.Second):
-		t.Fatal("choosing conda should persist env_manager=conda")
+		t.Fatal("bootstrapping from the not-bootstrapped state should call RunBootstrap")
 	}
-	<-ops.bootstrap
-	finalConsole(t, tm)
+	// The guidance line is durably in [POPO] (so the operator knows why nothing served).
+	c := finalConsole(t, tm)
+	found := false
+	for _, l := range c.popoLines {
+		if strings.Contains(l.plain, "press b to set it up") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the not-bootstrapped guidance should render in [POPO]; got %+v", c.popoLines)
+	}
 }
 
 func TestFlow_BootstrapDecline(t *testing.T) {

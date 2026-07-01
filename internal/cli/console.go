@@ -114,6 +114,29 @@ type consoleOps struct {
 	bootstrapped chan<- struct{}
 }
 
+// awaitBootstrapped blocks the serve cycle until the sandbox reports bootstrapped, emitting a
+// clear "not bootstrapped — press b" state on each (re)check so the console shows why nothing
+// is served. It returns nil once bootstrapped (immediately, with no emit, if already so), or
+// ctx.Err() if the context is cancelled while waiting — the caller then ends the cycle without
+// serving. This is the acute fix for connecting to an unprovisioned box: no proxy, no
+// dispatcher, no re-dial storm, no password prompt — just a parked state until `bootstrapped`
+// nudges (an in-place `b`). Extracted so the park→nudge→resume path is unit-testable off-VM.
+func awaitBootstrapped(ctx context.Context, isBootstrapped func(context.Context) bool, bootstrapped <-chan struct{}, emit func(tea.Msg)) error {
+	for !isBootstrapped(ctx) {
+		emit(activity.Event{
+			TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindOperated,
+			Type: "bootstrap", Status: "needs",
+			Detail: "sandbox not bootstrapped — press b to set it up (nothing is served until then)",
+		})
+		select {
+		case <-bootstrapped:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
 // nudgeBootstrapped signals the serve cycle that the sandbox is now provisioned (no-op if a
 // nudge is already queued or the console has none wired).
 func (o *consoleOps) nudgeBootstrapped() {
@@ -844,18 +867,9 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 			// Don't serve/tunnel an unprovisioned sandbox — that spun the reconnect loop and
 			// stormed the password prompt. Surface a clear state and WAIT (no spin) for an
 			// in-place bootstrap (the operator presses `b`), which nudges `bootstrapped`.
-			for !s.isBootstrapped(ctx) {
-				emit(activity.Event{
-					TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindOperated,
-					Type: "bootstrap", Status: "needs",
-					Detail: "sandbox not bootstrapped — press b to set it up (nothing is served until then)",
-				})
-				select {
-				case <-bootstrapped:
-				case <-ctx.Done():
-					_ = s.Close()
-					return true, false, ctx.Err()
-				}
+			if err := awaitBootstrapped(ctx, s.isBootstrapped, bootstrapped, emit); err != nil {
+				_ = s.Close()
+				return true, false, err
 			}
 			disp := buildConsoleDispatcher(ctx, s, cfg, act, events)
 			// In proxy egress mode, bring up the reverse-tunneled MITM proxy for this

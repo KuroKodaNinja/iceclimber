@@ -625,6 +625,17 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 	case "install":
 		c.running = installLabel(c.st.lang)
 		c.progStart = time.Now()
+		// Persist the managed-vs-system choice for the selected language before installing, so
+		// ensurePython/ensureNode/ensureJava resolve the intended source (runtimeSourcesNow reads
+		// it fresh — no reconnect). Only written when the box actually offers a system runtime for
+		// this language (else rtSource is absent and the persisted/managed default stands).
+		if lang := runtimeLangFor(c.st.lang); c.st.rtSource[lang] != nil {
+			sel := RuntimeSelection{System: *c.st.rtSource[lang] == "system"}
+			if lang == "python" && sel.System && c.st.pyEnvManager == "conda" {
+				sel.EnvManager = "conda"
+			}
+			_ = c.ops.SetRuntimeSources(map[string]RuntimeSelection{lang: sel})
+		}
 		// Batch the spinner tick so the in-flight footer animates while the op runs.
 		return c, tea.Batch(c.ops.RunInstall(InstallRequest{
 			Lang: c.st.lang, Version: c.st.version, Pkgs: c.st.pkgs,
@@ -648,18 +659,6 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 	case "bootstrap":
 		if !c.st.confirm {
 			return c, nil // operator declined at the confirm
-		}
-		// Persist each offered runtime's source before provisioning.
-		if len(c.st.rtSource) > 0 {
-			sel := map[string]RuntimeSelection{}
-			for lang, v := range c.st.rtSource {
-				s := RuntimeSelection{System: *v == "system"}
-				if lang == "python" && s.System && c.st.pyEnvManager == "conda" {
-					s.EnvManager = "conda"
-				}
-				sel[lang] = s
-			}
-			_ = c.ops.SetRuntimeSources(sel)
 		}
 		c.running = "bootstrap"
 		c.progStart = time.Now()
@@ -748,17 +747,55 @@ func (c Console) renderServing() string {
 	return b.String()
 }
 
+// installForm picks a runtime to install and — capabilities-aware — how to source it. When
+// the box has a system runtime for the chosen language, the operator chooses managed (an
+// iceclimber-owned runtime) vs system (the detected binary, packages/envs still isolated
+// under $ICECLIMBER_HOME); a system python additionally picks venv vs conda when the box has
+// conda. This is the post-bootstrap home for the source choice — bootstrap no longer asks.
 func (c *Console) installForm() *huh.Form {
-	c.st = &formState{lang: "python"}
-	// Pick a runtime; packages are optional. The agent — not the operator — decides
-	// what to install while it writes code, so an operator install is usually just
-	// the bare runtime. Naming packages here is a convenience, never a requirement.
-	return huh.NewForm(huh.NewGroup(
+	c.st = &formState{lang: "python", rtSource: map[string]*string{}}
+	groups := []*huh.Group{huh.NewGroup(
 		huh.NewSelect[string]().Title("language").Value(&c.st.lang).Options(
 			huh.NewOption("Python", "python"),
 			huh.NewOption("JavaScript", "javascript"),
 			huh.NewOption("Java", "java"),
 		),
+	)}
+	// One source page per detected system runtime, shown only when the chosen language matches
+	// it (huh hides at the group level, not the field level) — so the wizard is language →
+	// source → [python env] → packages, skipping runtimes the box can't source from the system.
+	var pyHasConda bool
+	for _, rt := range c.ops.DetectedRuntimes() {
+		rt := rt
+		src := "managed"
+		c.st.rtSource[rt.Lang] = &src
+		groups = append(groups, huh.NewGroup(huh.NewSelect[string]().
+			Title(fmt.Sprintf("%s source", titleCase(rt.Lang))).
+			Description(fmt.Sprintf("Detected %s %s at %s. Managed installs an iceclimber-owned runtime; system uses the detected one (packages/envs stay under $ICECLIMBER_HOME).", rt.Lang, rt.Version, rt.Path)).
+			Value(c.st.rtSource[rt.Lang]).Options(
+			huh.NewOption("managed — iceclimber installs and owns it", "managed"),
+			huh.NewOption("system — use the detected runtime", "system"),
+		)).WithHideFunc(func() bool { return runtimeLangFor(c.st.lang) != rt.Lang }))
+		if rt.Lang == "python" && slices.Contains(rt.EnvManagers, "conda") {
+			pyHasConda = true
+		}
+	}
+	// A system python isolates with venv (default) or conda — offered only when the box has
+	// conda and the operator picked a system python.
+	if pyHasConda {
+		c.st.pyEnvManager = "venv"
+		pySrc := c.st.rtSource["python"]
+		groups = append(groups, huh.NewGroup(huh.NewSelect[string]().
+			Title("python env_manager").
+			Description("How a system python isolates packages. Ignored for a managed python.").
+			Value(&c.st.pyEnvManager).Options(
+			huh.NewOption("venv — standard virtual environment", "venv"),
+			huh.NewOption("conda — use the detected conda", "conda"),
+		)).WithHideFunc(func() bool { return c.st.lang != "python" || pySrc == nil || *pySrc != "system" }))
+	}
+	// Packages are optional. The agent — not the operator — decides what to install while it
+	// writes code, so an operator install is usually just the bare runtime.
+	groups = append(groups, huh.NewGroup(
 		huh.NewInput().Title("packages (optional)").
 			Description("Blank installs just the runtime — the agent installs packages as it needs them.").
 			Placeholder("e.g. requests / figlet cli-table3 / com.google.guava:guava:33.0.0-jre").
@@ -767,6 +804,17 @@ func (c *Console) installForm() *huh.Form {
 			Description("Blank uses the recommended default — Python 3.12 · JavaScript 24 · Java 21.").
 			Placeholder("3.12 / 24 / 21").Value(&c.st.version),
 	))
+	return huh.NewForm(groups...)
+}
+
+// runtimeLangFor maps an install-form language to the runtime-source language used by the
+// store: the JS runtime is persisted as "node", not "javascript"; every other language maps
+// to itself. Keeps the install form's labels friendly while the store stays canonical.
+func runtimeLangFor(installLang string) string {
+	if installLang == "javascript" {
+		return "node"
+	}
+	return installLang
 }
 
 // installLabel is the friendly running indicator for an install action.
@@ -810,35 +858,11 @@ func (c *Console) agentForm() *huh.Form {
 	))
 }
 
+// bootstrapForm is basic-setup only — provisioning mode + confirm. Runtime source selection
+// (managed vs system) is a separate, post-bootstrap concern that lives in the install form.
 func (c *Console) bootstrapForm() *huh.Form {
-	c.st = &formState{rtSource: map[string]*string{}}
+	c.st = &formState{}
 	var fields []huh.Field
-	// For EVERY runtime detected on the box, let the operator pick managed vs system (persisted
-	// on confirm; takes effect for subsequent installs + the serve loop). "system" uses the
-	// box's binary but keeps packages/envs under $ICECLIMBER_HOME.
-	for _, rt := range c.ops.DetectedRuntimes() {
-		v := new(string)
-		*v = "managed"
-		c.st.rtSource[rt.Lang] = v
-		fields = append(fields, huh.NewSelect[string]().
-			Title(titleCase(rt.Lang)+" runtime").
-			Description(fmt.Sprintf("A system %s %s is on the sandbox (%s).", rt.Lang, rt.Version, rt.Path)).
-			Value(v).Options(
-			huh.NewOption("managed — install an iceclimber-pinned "+rt.Lang, "managed"),
-			huh.NewOption("system — use the box's "+rt.Lang+" (packages/env under $ICECLIMBER_HOME)", "system"),
-		))
-		// When the box has conda, let the operator isolate a system Python with it.
-		if rt.Lang == "python" && slices.Contains(rt.EnvManagers, "conda") {
-			c.st.pyEnvManager = "venv"
-			fields = append(fields, huh.NewSelect[string]().
-				Title("System Python env_manager").
-				Description("How to isolate the system Python (only applies to the system choice).").
-				Value(&c.st.pyEnvManager).Options(
-				huh.NewOption("venv — a virtualenv under $ICECLIMBER_HOME", "venv"),
-				huh.NewOption("conda — a conda env under $ICECLIMBER_HOME", "conda"),
-			))
-		}
-	}
 	// Provisioning mode — the console equivalent of `bootstrap --force`. Default = the safe
 	// idempotent re-provision (keeps runtimes); "reset" wipes the sandbox first. A Select
 	// (default provision) so it navigates cleanly and never enables a destructive action by

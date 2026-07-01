@@ -159,10 +159,12 @@ The bare-`iceclimber` console also offers this as a modal on first connect.
 ./iceclimber bootstrap
 ```
 
-Fingerprints the sandbox (OS/arch/libc), picks a writable install root, creates the
-protocol tree, runs a `ping`/`pong` smoke test, drops `NANA.md` + `PROTOCOL.md`, and
-relays the `popo` client to `<root>/popo`. Then wire `NANA.md` into your agent's
-instructions (see the Nana side).
+Bootstrap sets up **only the basic iceclimber sandbox**: it fingerprints the box
+(OS/arch/libc), picks a writable install root, creates the protocol tree, runs a
+`ping`/`pong` smoke test, drops `NANA.md` + `PROTOCOL.md`, relays the `popo` client to
+`<root>/popo`, and (in proxy egress mode) installs the trust config. Language runtimes
+are a **separate** concern — bootstrap never installs or chooses them. Then wire
+`NANA.md` into your agent's instructions (see the Nana side).
 
 Re-running `bootstrap` is **safe and idempotent** — it never touches `<root>/runtimes`,
 so already-installed runtimes/packages (which take a while to transfer) are preserved
@@ -170,30 +172,47 @@ so already-installed runtimes/packages (which take a while to transfer) are pres
 destructive reset (removes the sandbox tree incl. runtimes, then reprovisions); it
 refuses an unsafe/shallow `remote_root`.
 
-Bootstrap also **detects runtimes already on the box** (a corp VM that ships its own
+The console and headless serve **detect whether a box is bootstrapped** (they look for
+`<root>/skill/NANA.md`) before doing anything: connect to an un-bootstrapped box and the
+console parks in a "not bootstrapped — press **b** to set it up" state (no background
+proxy, no reconnect loop, no password prompt), and `serve` fails fast with *"sandbox … is
+not bootstrapped — run `iceclimber bootstrap` first"* instead of a raw maildir error.
+
+### 4. Install runtimes (managed or system)
+
+Runtimes are installed **after** bootstrap, when you know the box's capabilities:
+
+```sh
+./iceclimber install python 3.12          # managed CPython (iceclimber-owned, pinned)
+./iceclimber install node 24
+./iceclimber install java 21
+```
+
+The probe **detects runtimes already on the box** (a corp VM that ships its own
 Python/Node/Java) and lets you choose, per language, whether to use them. By default
 iceclimber installs its own pinned runtime (`managed`); choose `system` to use the
 sandbox's — for **any** detected runtime (python, node, java). "System" uses the box's
 binary but keeps packages/environments under `$ICECLIMBER_HOME` (a venv/conda env for
 python, an iceclimber-owned npm prefix for node, the `<root>` maven repo/classpath for
-java) — never the system location. On a terminal it asks per language; for
-unattended/headless runs set it explicitly:
+java) — never the system location. The console's install form offers the choice per
+language (and conda when detected); the command line sets it with `--runtime-source`:
 
 ```sh
-./iceclimber bootstrap --runtime-source python=system,node=system   # use the box's python3 + node
+./iceclimber install python 3.12 --runtime-source python=system,node=system   # use the box's python3 + node
 ```
 
-…or pin it in the config (`runtimes: { python: { source: system } }`). In `system`
-mode, package installs go into an **iceclimber-owned venv under `$ICECLIMBER_HOME`**
-(never the system site-packages — sidestepping PEP 668 and write permissions), and
-relayed wheels are matched to the discovered interpreter. iceclimber uses what's on
-the box and fails clearly if the agent asks for a version that isn't there — it never
-changes the system toolchain.
+…or pin it in the config (`runtimes: { python: { source: system } }`). Both surfaces
+persist the same per-sandbox choice, so subsequent installs + serve honor it. In
+`system` mode, package installs go into an **iceclimber-owned venv under
+`$ICECLIMBER_HOME`** (never the system site-packages — sidestepping PEP 668 and write
+permissions), and relayed wheels are matched to the discovered interpreter. iceclimber
+uses what's on the box and fails clearly if the agent asks for a version that isn't
+there — it never changes the system toolchain.
 
 If the box ships **conda** (the probe detects it), you can pick it as the isolation
-tool instead of a venv — the bootstrap prompt and console modal offer it, or set it
-explicitly: `--runtime-source python=system:conda` (or `runtimes: { python: { source:
-system, env_manager: conda } }`). Then `conda.install` installs into a conda env at
+tool instead of a venv — the console install form offers it, or set it explicitly:
+`--runtime-source python=system:conda` (or `runtimes: { python: { source: system,
+env_manager: conda } }`). Then `conda.install` installs into a conda env at
 `<root>/envs/conda-python-<minor>`, either from the sandbox's channel (Tier 0) or —
 for air-gapped boxes — via the **relay**: the operator's controller conda (config
 `controller_conda`, e.g. `conda` or the drop-in `mamba`) resolves + downloads the
@@ -236,7 +255,7 @@ There are two ways the sandbox gets packages, both keeping it off the open inter
   iceclimber integrates each manager (pip/npm/maven/conda) explicitly. This is the stricter
   air-gap — only relayed files, no live egress — for compliance regimes that require it.
 
-### 4. Serve — the console, or headless
+### 5. Serve — the console, or headless
 
 Bare **`iceclimber`** launches the interactive **console**: it serves the sandbox,
 streams live activity, and surfaces every approval as a modal you answer in-place —
