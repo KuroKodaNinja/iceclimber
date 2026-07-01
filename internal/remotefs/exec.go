@@ -73,7 +73,10 @@ func (e *ExecFS) Chmod(ctx context.Context, path string, mode os.FileMode) error
 }
 
 func (e *ExecFS) Symlink(ctx context.Context, target, link string) error {
-	res, err := e.r.Run(ctx, "ln -s "+remote.ShellQuote(target)+" "+remote.ShellQuote(link), nil)
+	// -f (force) makes this idempotent — a re-relay or two packages contributing the same
+	// bin link must not abort; -n avoids dereferencing an existing symlink-to-directory (so
+	// we replace the link itself rather than creating one inside the pointed-at dir).
+	res, err := e.r.Run(ctx, "ln -sfn "+remote.ShellQuote(target)+" "+remote.ShellQuote(link), nil)
 	return e.check("symlink", link, res, err)
 }
 

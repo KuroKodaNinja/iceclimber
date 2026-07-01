@@ -127,6 +127,25 @@ func RunConformance(t *testing.T, newFS NewFS) {
 		}
 	})
 
+	t.Run("symlink_is_idempotent", func(t *testing.T) {
+		// Re-creating an existing link must not fail (plain SFTP SSH_FXP_SYMLINK returns
+		// SSH_FX_FAILURE on an existing name) — a re-relay or two packages contributing the
+		// same bin link would otherwise abort. The second Symlink also repoints the link.
+		rfs, base := newFS(t)
+		a, b, link := base+"/a", base+"/b", base+"/link"
+		mustOK(t, rfs.WriteFile(ctx, a, []byte("A")))
+		mustOK(t, rfs.WriteFile(ctx, b, []byte("B")))
+		mustOK(t, rfs.Symlink(ctx, a, link))
+		mustOK(t, rfs.Symlink(ctx, b, link)) // was SSH_FX_FAILURE before the idempotency fix
+		got, err := rfs.ReadFile(ctx, link)
+		if err != nil {
+			t.Fatalf("ReadFile through re-pointed symlink: %v", err)
+		}
+		if string(got) != "B" {
+			t.Errorf("re-created link content = %q, want B (repointed)", got)
+		}
+	})
+
 	t.Run("removeall_file_dir_and_missing", func(t *testing.T) {
 		rfs, base := newFS(t)
 		// A file.

@@ -108,6 +108,15 @@ func (s *SFTPFS) Symlink(ctx context.Context, target, link string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// SFTP's SSH_FXP_SYMLINK fails (SSH_FX_FAILURE) when link already exists, so a re-relay
+	// or two packages contributing the same bin link would abort mid-tree. Clear any
+	// existing entry first (Lstat so a symlink/dir is removed as-is, not followed) to make
+	// this idempotent — matching ExecFS's `ln -sfn`.
+	if _, err := s.c.Lstat(link); err == nil {
+		if err := s.removeAll(link); err != nil {
+			return fmt.Errorf("sftpfs symlink %s: clear existing: %w", link, err)
+		}
+	}
 	if err := s.c.Symlink(target, link); err != nil {
 		return fmt.Errorf("sftpfs symlink %s: %w", link, err)
 	}
