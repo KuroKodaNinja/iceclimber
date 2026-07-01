@@ -102,3 +102,38 @@ func TestServeDispatcher_PickupLine(t *testing.T) {
 		t.Errorf("serve should print a pickup line; got %q", s)
 	}
 }
+
+// TestBuildServeDispatcher_AppliesRetention guards the disp.SetRetention(cfg.Retention())
+// wiring: an old uncollected response is reaped only if the builder actually applied the
+// configured retention (delete the SetRetention line and this fails).
+func TestBuildServeDispatcher_AppliesRetention(t *testing.T) {
+	ctx := context.Background()
+	fs := remotefs.NewExecFS(remotefstest.LocalRunner{})
+	tree := protocol.Tree{Root: t.TempDir()}
+	if err := protocol.EnsureTree(ctx, fs, tree); err != nil {
+		t.Fatal(err)
+	}
+	sess := &session{fs: fs, tree: tree, transport: "exec", sandboxID: "s", fp: &probe.Fingerprint{}}
+	cfg := &config.Config{SandboxID: "s", ActivityLog: filepath.Join(t.TempDir(), "a.jsonl"), MaildirRetention: "1h"}
+	var out bytes.Buffer
+	disp := buildServeDispatcher(ctx, sess, cfg, nil, &out, false)
+
+	// An old (2h) uncollected response + its request — reaped iff retention is wired.
+	name := protocol.RequestName(protocol.NewID())
+	resp, _ := json.Marshal(protocol.Response{
+		SchemaVersion: protocol.SchemaVersion, ID: strings.TrimSuffix(name, ".json"),
+		Status: protocol.StatusOK, CompletedAt: time.Now().Add(-2 * time.Hour).UTC(),
+	})
+	if err := fs.WriteFile(ctx, filepath.Join(tree.Inbox().New(), name), resp); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.WriteFile(ctx, filepath.Join(tree.Outbox().Cur(), name), []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if err := disp.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := fs.List(ctx, tree.Inbox().New()); len(n) != 0 {
+		t.Error("buildServeDispatcher did not wire retention — old uncollected response not reaped")
+	}
+}

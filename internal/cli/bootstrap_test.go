@@ -3,12 +3,37 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/probe"
+	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
+	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
+	"github.com/KuroKodaNinja/iceclimber/internal/remotefs/remotefstest"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
 )
+
+// TestSmokeTest_LeavesMaildirClean: a bootstrap's smoke test collects its own pong and
+// GC-prunes the pair, so it leaves no permanent "1 uncollected" behind.
+func TestSmokeTest_LeavesMaildirClean(t *testing.T) {
+	ctx := context.Background()
+	fs := remotefs.NewExecFS(remotefstest.LocalRunner{})
+	tree := protocol.Tree{Root: t.TempDir()}
+	if err := protocol.EnsureTree(ctx, fs, tree); err != nil {
+		t.Fatal(err)
+	}
+	sess := &session{fs: fs, tree: tree, fp: &probe.Fingerprint{}}
+	disp := protocol.NewDispatcher(fs, tree, buildRegistry(sess, nil))
+	if err := smokeTest(ctx, fs, tree, disp); err != nil {
+		t.Fatalf("smokeTest: %v", err)
+	}
+	for _, dir := range []string{tree.Inbox().New(), tree.Inbox().Cur(), tree.Outbox().Cur()} {
+		if n, _ := fs.List(ctx, dir); len(n) != 0 {
+			t.Errorf("%s not empty after smokeTest (collect+prune failed): %v", dir, n)
+		}
+	}
+}
 
 // TestPromptRuntimeChoice pins the cmdline prompt's input mapping: "system"/"s"
 // chooses the system runtime; anything else (incl. empty/Enter) keeps managed.
