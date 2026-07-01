@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoggerAppendRoundTrip(t *testing.T) {
@@ -94,6 +95,29 @@ func TestCounts_IgnoresStarted(t *testing.T) {
 	}
 	if s, a, d := Counts(evs); s != 1 || a != 0 || d != 0 {
 		t.Errorf("Counts = served %d, approved %d, denied %d; want 1/0/0 (started ignored)", s, a, d)
+	}
+}
+
+func TestLastAction(t *testing.T) {
+	// Empty / no-action logs → the zero time (header shows "—").
+	if got := LastAction(nil); !got.IsZero() {
+		t.Errorf("LastAction(nil) = %v, want zero", got)
+	}
+	if got := LastAction([]Event{{Kind: KindOperated, TS: "2026-06-20T10:00:00Z"}}); !got.IsZero() {
+		t.Errorf("LastAction(operated-only) = %v, want zero (plumbing is not an action)", got)
+	}
+
+	// The most recent serviced/approved/denied wins; later plumbing events don't reset it.
+	evs := []Event{
+		{Kind: KindServiced, TS: "2026-06-20T10:00:00Z"},
+		{Kind: KindApproved, TS: "2026-06-20T11:00:00Z"},
+		{Kind: KindDenied, TS: "2026-06-20T12:00:00Z"}, // the last real action
+		{Kind: KindOperated, TS: "2026-06-20T13:00:00Z"},
+		{Kind: KindStarted, TS: "2026-06-20T14:00:00Z"},
+	}
+	want, _ := time.Parse(time.RFC3339, "2026-06-20T12:00:00Z")
+	if got := LastAction(evs); !got.Equal(want) {
+		t.Errorf("LastAction = %v, want %v (last serviced/approved/denied, ignoring later plumbing)", got, want)
 	}
 }
 

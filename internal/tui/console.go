@@ -286,12 +286,22 @@ func NewConsole(sandboxID string, events <-chan tea.Msg, agentLog string, ops Op
 	return c
 }
 
-// WithSeedCounts seeds the header counters from the durable activity log so they
-// reflect the sandbox's real history (and survive a console restart) rather than only
-// what this UI process has seen. Live events increment from here.
-func (c Console) WithSeedCounts(served, approved, denied int) Console {
-	c.served, c.approved, c.denied = served, approved, denied
+// WithSeedCounts seeds the header counters AND the "last action" time from the durable
+// activity log so they reflect the sandbox's real history (and survive a console restart)
+// rather than only what this UI process has seen. Passing the zero time for last leaves it
+// as "—" until the first live action. Live events increment/advance from here.
+func (c Console) WithSeedCounts(served, approved, denied int, last time.Time) Console {
+	c.served, c.approved, c.denied, c.lastTS = served, approved, denied, last
 	return c
+}
+
+// markLastAction advances the header's "last action" time from an event's RFC3339 timestamp.
+// Called only for serviced/approved/denied — the operator-facing actions the counters track —
+// so the field means "last real activity," not "last event of any kind."
+func (c *Console) markLastAction(ts string) {
+	if t, err := time.Parse(time.RFC3339, ts); err == nil {
+		c.lastTS = t
+	}
 }
 
 func (c Console) Init() tea.Cmd { return tea.Batch(c.waitEvent(), tick()) }
@@ -905,9 +915,6 @@ func (c Console) formTitle() string {
 }
 
 func (c *Console) applyEvent(e activity.Event) {
-	if t, err := time.Parse(time.RFC3339, e.TS); err == nil {
-		c.lastTS = t
-	}
 	// Sandbox echoes are the sandbox's own voice — show them in the [NANA] pane
 	// alongside the agent's stream, not in Popo's activity.
 	if e.Side == activity.SideNana {
@@ -922,13 +929,20 @@ func (c *Console) applyEvent(e activity.Event) {
 		return
 	case activity.KindServiced:
 		c.served++
+		c.markLastAction(e.TS)
 		c.serving, c.servingID, c.servingProg = "", "", nil // completed → clear in-progress
 	case activity.KindApproved:
 		c.approved++
+		c.markLastAction(e.TS)
 	case activity.KindDenied:
 		c.denied++
+		c.markLastAction(e.TS)
 		c.serving, c.servingID, c.servingProg = "", "", nil // denied → clear in-progress
 	}
+	// Plumbing events (KindOperated reconnect/egress/bootstrap notices, KindVerified) still
+	// render in the [POPO] pane below, but they do NOT advance "last action" — that field
+	// tracks real serviced/approved/denied activity, not connection churn (else it reads as a
+	// meaningless countdown from startup).
 	c.popoLines = append(c.popoLines, eventToLine(e))
 	if len(c.popoLines) > maxLines {
 		c.popoLines = c.popoLines[len(c.popoLines)-maxLines:]

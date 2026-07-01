@@ -72,8 +72,14 @@ func (m *Model) addPopo(raw string) {
 	case activity.KindDenied:
 		m.denied++
 	}
-	if t, err := time.Parse(time.RFC3339, e.TS); err == nil {
-		m.lastTS = t
+	// "last action" tracks only the three operator-facing actions above — not plumbing
+	// events (operated/verified) — so it reflects real activity, not connection churn. The
+	// log replays chronologically, so the last such event wins.
+	switch e.Kind {
+	case activity.KindServiced, activity.KindApproved, activity.KindDenied:
+		if t, err := time.Parse(time.RFC3339, e.TS); err == nil {
+			m.lastTS = t
+		}
 	}
 	m.popoLines = append(m.popoLines, eventToLine(e))
 	if len(m.popoLines) > maxLines {

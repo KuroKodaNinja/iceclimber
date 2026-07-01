@@ -126,3 +126,21 @@ func Counts(events []Event) (serviced, approved, denied int) {
 	}
 	return
 }
+
+// LastAction returns the timestamp of the most recent operator-facing action —
+// serviced/approved/denied, the same three the header counters track — or the zero time
+// if the log holds none. Plumbing events (started, operated, verified) are deliberately
+// excluded so the header's "last action" reflects real activity, not connection churn.
+// Events are chronological (append-only), so the last match wins.
+func LastAction(events []Event) time.Time {
+	var last time.Time
+	for _, e := range events {
+		switch e.Kind {
+		case KindServiced, KindApproved, KindDenied:
+			if t, err := time.Parse(time.RFC3339, e.TS); err == nil {
+				last = t
+			}
+		}
+	}
+	return last
+}

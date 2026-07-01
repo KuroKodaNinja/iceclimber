@@ -834,12 +834,16 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 		go bridgeAgentLog(ctx, holder, logPath)
 	}
 
-	// Seed the header counters from the durable activity log (authoritative, cumulative
-	// per sandbox) — read NOW, before the serve goroutine appends anything, so a
-	// just-serviced event isn't counted twice (seed + the live event on the channel).
+	// Seed the header counters + the "last action" time from the durable activity log
+	// (authoritative, cumulative per sandbox) — read NOW, before the serve goroutine appends
+	// anything, so a just-serviced event isn't counted twice (seed + the live event on the
+	// channel). The seed makes "last action" coherent with the cumulative counters on restart
+	// (e.g. "serviced 47 · … · last action 2d ago") instead of "—" or a startup countdown.
 	seedServed, seedApproved, seedDenied := 0, 0, 0
+	var seedLast time.Time
 	if evs, rerr := activity.Read(activityPath(cfg)); rerr == nil {
 		seedServed, seedApproved, seedDenied = activity.Counts(evs)
+		seedLast = activity.LastAction(evs)
 	}
 
 	// Serve in the background with auto-reconnect. The first cycle serves the already
@@ -904,7 +908,7 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 
 	ops := &consoleOps{ctx: ctx, holder: holder, act: act, events: events, bootstrapped: bootstrapped}
 	model := tui.NewConsole(cfg.SandboxID, events, logPath, ops).
-		WithSeedCounts(seedServed, seedApproved, seedDenied)
+		WithSeedCounts(seedServed, seedApproved, seedDenied, seedLast)
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 	cancel() // stop serving; any pending approval fails safe via done
 	return err

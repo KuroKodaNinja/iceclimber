@@ -68,10 +68,28 @@ func TestView_ContainsHeaderAndPanes(t *testing.T) {
 	os.WriteFile(ap, []byte(`{"ts":"2026-06-28T18:00:01Z","kind":"serviced","type":"python.install","status":"ok","detail":"python 3.12.13"}`+"\n"), 0o644)
 	m := New("my-sbx", ap, filepath.Join(dir, "agent.log"))
 	v := m.View()
-	for _, want := range []string{"my-sbx", "[POPO]", "[NANA]", "python.install", "serviced 1"} {
+	for _, want := range []string{"my-sbx", "[POPO]", "[NANA]", "python.install", "serviced 1", "last action"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("View missing %q:\n%s", want, v)
 		}
+	}
+	// A real serviced event populates "last action" — it must not read "—".
+	if strings.Contains(v, "last action —") {
+		t.Errorf("last action should reflect the serviced event, not —:\n%s", v)
+	}
+}
+
+// TestView_LastActionIgnoresPlumbing: the passive viewer's "last action" tracks only real
+// serviced/approved/denied activity — a log of nothing but plumbing (operated) events leaves
+// it "—", not a startup countdown. Mirrors the interactive console's guarantee.
+func TestView_LastActionIgnoresPlumbing(t *testing.T) {
+	dir := t.TempDir()
+	ap := filepath.Join(dir, "activity.jsonl")
+	os.WriteFile(ap, []byte(`{"ts":"2026-06-28T18:00:01Z","kind":"operated","type":"serve","status":"ok","detail":"reconnected to sandbox"}`+"\n"), 0o644)
+	m := New("my-sbx", ap, filepath.Join(dir, "agent.log"))
+	v := m.View()
+	if !strings.Contains(v, "last action —") {
+		t.Errorf("a plumbing-only log should leave last action as —:\n%s", v)
 	}
 }
 

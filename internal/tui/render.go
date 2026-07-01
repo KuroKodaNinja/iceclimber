@@ -159,7 +159,7 @@ func header(w int, sandboxID string, served, approved, denied int, lastTS time.T
 		}
 	}
 	left := titleStyle.Render(" iceclimber ▸ "+sandboxID+" ") + " " + state
-	right := dimStyle.Render(fmt.Sprintf("serviced %d · approved %d · denied %d · last %s ",
+	right := dimStyle.Render(fmt.Sprintf("serviced %d · approved %d · denied %d · last action %s ",
 		served, approved, denied, ago(lastTS)))
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {

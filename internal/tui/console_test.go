@@ -98,9 +98,13 @@ func TestConsole_ActivityEvent(t *testing.T) {
 }
 
 func TestConsole_CounterSeedAndIncrements(t *testing.T) {
-	c := NewConsole("sbx", make(chan tea.Msg, 8), "", nil).WithSeedCounts(5, 2, 1)
+	seedLast := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	c := NewConsole("sbx", make(chan tea.Msg, 8), "", nil).WithSeedCounts(5, 2, 1, seedLast)
 	if c.served != 5 || c.approved != 2 || c.denied != 1 {
 		t.Fatalf("seed: served=%d approved=%d denied=%d, want 5/2/1", c.served, c.approved, c.denied)
+	}
+	if !c.lastTS.Equal(seedLast) {
+		t.Errorf("seed last action = %v, want %v (coherent with the seeded counters)", c.lastTS, seedLast)
 	}
 	step := func(m tea.Model, kind string) Console {
 		u, _ := m.Update(activity.Event{TS: "2026-06-28T18:00:00Z", Kind: kind})
@@ -111,6 +115,39 @@ func TestConsole_CounterSeedAndIncrements(t *testing.T) {
 	c = step(c, activity.KindDenied)   // "
 	if c.served != 6 || c.approved != 3 || c.denied != 2 {
 		t.Errorf("after one each: served=%d approved=%d denied=%d, want 6/3/2", c.served, c.approved, c.denied)
+	}
+	if want, _ := time.Parse(time.RFC3339, "2026-06-28T18:00:00Z"); !c.lastTS.Equal(want) {
+		t.Errorf("last action = %v, want %v (advanced by the real actions)", c.lastTS, want)
+	}
+}
+
+// TestConsole_LastActionOnlyRealActivity guards the header's "last action" field: it advances
+// ONLY on serviced/approved/denied (the operator-facing actions the counters track), never on
+// plumbing events (reconnect/egress/bootstrap notices). Those used to bump it, making it read
+// as a meaningless countdown from startup even when nothing was serviced.
+func TestConsole_LastActionOnlyRealActivity(t *testing.T) {
+	seed := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	c := NewConsole("sbx", make(chan tea.Msg, 8), "", nil).WithSeedCounts(0, 0, 0, seed)
+
+	// A plumbing event (the not-bootstrapped notice is a KindOperated) renders in [POPO] but
+	// must NOT touch last action.
+	u, _ := c.Update(activity.Event{
+		TS: "2026-06-28T18:00:00Z", Kind: activity.KindOperated,
+		Type: "bootstrap", Status: "needs", Detail: "sandbox not bootstrapped — press b",
+	})
+	c = u.(Console)
+	if !c.lastTS.Equal(seed) {
+		t.Errorf("a plumbing (operated) event must not advance last action; got %v, want %v (unchanged)", c.lastTS, seed)
+	}
+	if len(c.popoLines) != 1 {
+		t.Errorf("the operated event should still render in [POPO]; lines=%d", len(c.popoLines))
+	}
+
+	// A real serviced event DOES advance it.
+	u, _ = c.Update(activity.Event{TS: "2026-06-28T18:05:00Z", Kind: activity.KindServiced, Type: "ping", Status: "ok"})
+	c = u.(Console)
+	if want, _ := time.Parse(time.RFC3339, "2026-06-28T18:05:00Z"); !c.lastTS.Equal(want) {
+		t.Errorf("a serviced event should advance last action to %v; got %v", want, c.lastTS)
 	}
 }
 
