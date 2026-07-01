@@ -31,7 +31,6 @@ func newBootstrapCmd() *cobra.Command {
 		Short: "Create the sandbox protocol tree and run a smoke test",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_ = force // tree creation is idempotent; --force is reserved for a future destructive reset
 			cfg, err := config.Load(cfgFile, sandboxID)
 			if err != nil {
 				return err
@@ -44,6 +43,22 @@ func newBootstrapCmd() *cobra.Command {
 				return err
 			}
 			defer sess.Close()
+
+			// Re-bootstrap is safe by default — the tree is created with mkdir -p and only
+			// generated files are overwritten, so installed runtimes under <root>/runtimes
+			// survive. `--force` is the opposite: a destructive reset that wipes the whole
+			// sandbox tree (runtimes + state) for a clean slate, guarded against an unsafe root.
+			hadRuntimes := sandboxHasRuntimes(ctx, sess)
+			reset := false
+			if force {
+				if gErr := guardResettableRoot(sess.tree.Root); gErr != nil {
+					return gErr
+				}
+				if rErr := sess.fs.RemoveAll(ctx, sess.tree.Root); rErr != nil {
+					return fmt.Errorf("reset sandbox %s: %w", sess.tree.Root, rErr)
+				}
+				reset, hadRuntimes = true, false
+			}
 
 			// Detect system runtimes, resolve the per-language source (flag > config >
 			// persisted > interactive prompt > managed), and persist the choice. Install
@@ -62,18 +77,46 @@ func newBootstrapCmd() *cobra.Command {
 				return err
 			}
 
+			state := "new sandbox"
+			switch {
+			case reset:
+				state = "reset — removed the existing tree (runtimes + state) and reprovisioned"
+			case hadRuntimes:
+				state = "existing sandbox — installed runtimes/packages preserved (use --force to reset)"
+			}
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"bootstrap ok\n  sandbox:    %s\n  root:       %s\n  transport:  %s\n  smoke test: ping/pong round-trip passed\n  skill:      wrote %s\n  runtimes:   %s\n",
-				cfg.SandboxID, sess.tree.Root, sess.transport, sess.tree.SkillFile(), src.Summary())
+				"bootstrap ok\n  sandbox:    %s\n  root:       %s\n  transport:  %s\n  state:      %s\n  smoke test: ping/pong round-trip passed\n  skill:      wrote %s\n  runtimes:   %s\n",
+				cfg.SandboxID, sess.tree.Root, sess.transport, state, sess.tree.SkillFile(), src.Summary())
 			fmt.Fprintf(cmd.OutOrStdout(),
 				"  next:       wire NANA.md into your sandbox agent's instructions (manual — `iceclimber skill print`)\n")
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
-	cmd.Flags().BoolVar(&force, "force", false, "re-run bootstrap (tree creation is idempotent)")
+	cmd.Flags().BoolVar(&force, "force", false, "destructive reset: wipe the sandbox tree (incl. installed runtimes) and reprovision fresh")
 	cmd.Flags().StringVar(&runtimeSource, "runtime-source", "", "per-language runtime source, e.g. python=system,node=managed")
 	return cmd
+}
+
+// guardResettableRoot refuses to destructively remove a root that isn't a dedicated sandbox
+// directory — empty, "/", or a shallow path (< 2 segments, e.g. "/tmp" or "/home") — so a
+// misconfigured remote_root can't turn `bootstrap --force` into a catastrophic rm -rf.
+func guardResettableRoot(root string) error {
+	r := path.Clean(root)
+	if r == "" || r == "/" || r == "." {
+		return fmt.Errorf("refusing to reset an unsafe remote_root %q", root)
+	}
+	if segs := strings.Split(strings.Trim(r, "/"), "/"); len(segs) < 2 {
+		return fmt.Errorf("refusing to reset a shallow remote_root %q — point it at a dedicated sandbox dir (e.g. /tmp/iceclimber-x) to use --force", root)
+	}
+	return nil
+}
+
+// sandboxHasRuntimes reports whether <root>/runtimes holds any installed runtime — used to
+// tell the operator a re-bootstrap preserved expensive installs (best-effort; false on error).
+func sandboxHasRuntimes(ctx context.Context, sess *session) bool {
+	entries, err := sess.fs.List(ctx, path.Join(sess.tree.Root, "runtimes"))
+	return err == nil && len(entries) > 0
 }
 
 // resolveAndPersistRuntimes merges the runtime-source choice across layers (flag >

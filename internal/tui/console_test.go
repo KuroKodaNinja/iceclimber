@@ -17,6 +17,7 @@ import (
 type fakeOps struct {
 	install   *InstallRequest
 	bootstrap bool
+	reset     bool
 	agent     *AgentInstallRequest
 }
 
@@ -27,6 +28,10 @@ func (f *fakeOps) RunInstall(r InstallRequest) tea.Cmd {
 
 func (f *fakeOps) RunBootstrap() tea.Cmd {
 	return func() tea.Msg { f.bootstrap = true; return OpResultMsg{} }
+}
+
+func (f *fakeOps) RunBootstrapReset() tea.Cmd {
+	return func() tea.Msg { f.reset = true; return OpResultMsg{} }
 }
 func (f *fakeOps) RunAgentInstall(r AgentInstallRequest) tea.Cmd {
 	f.agent = &r

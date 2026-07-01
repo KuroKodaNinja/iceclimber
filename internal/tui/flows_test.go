@@ -32,6 +32,7 @@ import (
 type recordOps struct {
 	install   chan InstallRequest
 	bootstrap chan struct{}
+	reset     chan struct{}
 	status    StatusSnapshot
 	egress    EgressSnapshot
 	forgot    chan EgressRule
@@ -46,6 +47,7 @@ func newRecordOps() *recordOps {
 	return &recordOps{
 		install:   make(chan InstallRequest, 1),
 		bootstrap: make(chan struct{}, 1),
+		reset:     make(chan struct{}, 1),
 		forgot:    make(chan EgressRule, 4),
 		approved:  make(chan string, 4),
 		denied:    make(chan string, 4),
@@ -56,6 +58,9 @@ func newRecordOps() *recordOps {
 
 func (o *recordOps) RunInstall(r InstallRequest) tea.Cmd {
 	return func() tea.Msg { o.install <- r; return OpResultMsg{} }
+}
+func (o *recordOps) RunBootstrapReset() tea.Cmd {
+	return func() tea.Msg { o.reset <- struct{}{}; return OpResultMsg{} }
 }
 func (o *recordOps) RunBootstrap() tea.Cmd {
 	return func() tea.Msg { o.bootstrap <- struct{}{}; return OpResultMsg{} }
@@ -587,6 +592,9 @@ func (o *gateOps) RunInstall(InstallRequest) tea.Cmd {
 	return func() tea.Msg { <-o.release; return OpResultMsg{} }
 }
 func (o *gateOps) RunBootstrap() tea.Cmd {
+	return func() tea.Msg { <-o.release; return OpResultMsg{} }
+}
+func (o *gateOps) RunBootstrapReset() tea.Cmd {
 	return func() tea.Msg { <-o.release; return OpResultMsg{} }
 }
 func (o *gateOps) RunAgentInstall(AgentInstallRequest) tea.Cmd {

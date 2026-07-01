@@ -260,6 +260,26 @@ func (o *consoleOps) RunBootstrap() tea.Cmd {
 	}
 }
 
+// RunBootstrapReset destructively wipes the sandbox tree (runtimes + state) — guarded against
+// an unsafe root — then reprovisions fresh. The console form gates this behind an explicit
+// opt-in confirm.
+func (o *consoleOps) RunBootstrapReset() tea.Cmd {
+	return func() tea.Msg {
+		sess := o.sess()
+		err := guardResettableRoot(sess.tree.Root)
+		if err == nil {
+			if err = sess.fs.RemoveAll(o.ctx, sess.tree.Root); err == nil {
+				err = provision(o.ctx, sess)
+			}
+		}
+		o.record("bootstrap", "RESET — wiped runtimes + state, then reprovisioned", err)
+		if err == nil {
+			o.echo(echo{"sandbox reset + reprovisioned (ping/pong smoke test)", true})
+		}
+		return tui.OpResultMsg{}
+	}
+}
+
 // PollStatus reads sandbox status over SSH and emits a StatusMsg. A failed probe
 // of the install root means the sandbox is unreachable (SSH dropped) — report it so
 // the panel shows an error rather than empty/stale fields.

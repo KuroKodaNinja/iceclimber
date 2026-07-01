@@ -14,6 +14,23 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
 )
 
+// TestGuardResettableRoot: `bootstrap --force` may only wipe a dedicated sandbox dir — a
+// shallow or empty root must be refused so a misconfig can't rm -rf something important.
+func TestGuardResettableRoot(t *testing.T) {
+	ok := []string{"/tmp/iceclimber-x", "/home/bwitt.guest/iceclimber-demo", "/opt/ice/sbx"}
+	for _, r := range ok {
+		if err := guardResettableRoot(r); err != nil {
+			t.Errorf("guardResettableRoot(%q) = %v, want nil (a dedicated sandbox dir)", r, err)
+		}
+	}
+	bad := []string{"", "/", ".", "/tmp", "/home", "///"}
+	for _, r := range bad {
+		if err := guardResettableRoot(r); err == nil {
+			t.Errorf("guardResettableRoot(%q) = nil, want refusal (unsafe/shallow root)", r)
+		}
+	}
+}
+
 // TestSmokeTest_LeavesMaildirClean: a bootstrap's smoke test collects its own pong and
 // GC-prunes the pair, so it leaves no permanent "1 uncollected" behind.
 func TestSmokeTest_LeavesMaildirClean(t *testing.T) {

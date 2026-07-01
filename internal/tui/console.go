@@ -121,6 +121,8 @@ type OpResultMsg struct{}
 type OpRunner interface {
 	RunInstall(InstallRequest) tea.Cmd
 	RunBootstrap() tea.Cmd
+	// RunBootstrapReset destructively wipes the sandbox (runtimes + state) then reprovisions.
+	RunBootstrapReset() tea.Cmd
 	// RunAgentInstall installs/wraps a coding agent (the nana wrapper).
 	RunAgentInstall(AgentInstallRequest) tea.Cmd
 	// Agents lists the installable agents (for the agent form's picker). Local.
