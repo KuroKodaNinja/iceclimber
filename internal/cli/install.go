@@ -331,8 +331,8 @@ func newInstallCondaCmd() *cobra.Command {
 			if file == "" && (pyVersion == "" || len(args) == 0) {
 				return fmt.Errorf("give --python and package names, or --file <dir>/environment.yml (a sandbox environment.yml)")
 			}
-			if file != "" && (len(args) > 0 || pyVersion != "") {
-				return fmt.Errorf("--file builds a whole environment.yml; don't also pass --python or package names")
+			if file != "" && (len(args) > 0 || pyVersion != "" || len(condaArgs) > 0) {
+				return fmt.Errorf("--file builds a whole environment.yml (its own channels); don't also pass --python, --conda-arg, or package names")
 			}
 			cfg, err := config.Load(cfgFile, sandboxID)
 			if err != nil {

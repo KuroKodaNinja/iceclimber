@@ -127,11 +127,15 @@ func (m *Manager) quotedExtraArgs() []string {
 	return out
 }
 
-// condaSpec renders a spec as conda expects it: "name" or "name=version" (single '=',
-// conda's match-spec form — unlike pip's "==").
+// condaSpec renders a spec as conda expects it: "name", "name=version" (an exact pin uses
+// a single '=', conda's match-spec form — unlike pip's "=="), or "name<op>version" when
+// the version already carries a comparison operator (>=, <=, >, <, !=, ~=).
 func condaSpec(s pkg.Spec) string {
 	if s.Version == "" {
 		return s.Name
+	}
+	if strings.ContainsAny(s.Version[:1], "<>=!~") {
+		return s.Name + s.Version // constraint already has its operator
 	}
 	return s.Name + "=" + s.Version
 }

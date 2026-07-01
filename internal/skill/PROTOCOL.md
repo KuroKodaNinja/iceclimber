@@ -98,17 +98,21 @@ install`/`wrap` — to inform the operator's `status` view. **You don't write it
 | `python.install` | `{ version }` (minor, e.g. "3.12") | `{ version, path, already_installed }` |
 | `pip.install` | `{ python_version, packages:[{name,version?}] }` | `{ installed:[{name,version,tier,sha256}], failed:[{name,version,error}] }` |
 | `node.install` | `{ version }` (line, e.g. "24") | `{ version, path, already_installed }` |
-| `npm.install` | `{ node_version, packages:[{name,version?}] }` | `{ installed, failed, node_path }` |
+| `npm.install` | `{ node_version, packages:[{name,version?}] }` or `{ node_version, project:"<dir>" }` | `{ installed, failed, node_path }` |
 | `java.install` | `{ version }` (feature, e.g. "21") | `{ version, path, already_installed }` |
 | `maven.install` | `{ java_version, packages:[{name:"group:artifact",version}] }` | `{ installed, failed, classpath }` |
-| `maven.build` | `{ project, java_version, goals?:["package"] }` | `{ artifacts:[<jar path>], tier }` |
-| `conda.install` | `{ python_version, packages:[{name,version?}], extra_args?:["-c","conda-forge",…] }` | `{ installed:[{name,version,tier,sha256?}], failed }` |
+| `maven.build` | `{ project, java_version, goals?:["package"], maven_version? }` | `{ artifacts:[<jar path>], tier:"relay" }` |
+| `conda.install` | `{ python_version, packages:[{name,version?}], extra_args?:["-c","conda-forge",…] }` or `{ file:"<environment.yml>" }` | `{ installed:[{name,version,tier,sha256?}], failed }` |
 | `web.fetch` | `{ url, method?, headers?, body? }` | `{ status_code, venue, encoding, body_inline? , body_blob? }` |
 
 Notes: run installed runtimes by the absolute `path`/`node_path`/`classpath`
 returned. `body_blob` is a `$ICECLIMBER_HOME`-relative path — read the body at `$ICECLIMBER_HOME/<body_blob>`.
-For Node, export `NODE_PATH=<node_path>`. Java 11+ runs a single source file directly
-(`<java> Program.java`). `conda.install` needs the operator to have selected the conda
+For Node, export `NODE_PATH=<node_path>` — or, with `npm.install project:"<dir>"`, the
+whole `package.json` is installed and its `node_modules` lands in the project dir (local
+resolution, no `NODE_PATH`). `maven.build` builds a sandbox `pom.xml` project with `mvn`
+air-gapped (the operator's controller Maven+JDK prime an offline repo; needs both present)
+and returns the built jar path(s) under `<project>/target/`. Java 11+ also runs a single
+source file directly (`<java> Program.java`). `conda.install` needs the operator to have selected the conda
 env_manager for python; it installs into a conda env at `<root>/envs/conda-python-<minor>`
 (run its interpreter by that path) and uses conda match-specs (`name=version`, single `=`).
 Its `extra_args` allowlist is `-c`/`--channel` (repeatable), `--override-channels`,

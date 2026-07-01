@@ -2,7 +2,10 @@ package maven
 
 import (
 	"context"
+	"crypto/sha512"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -71,10 +74,9 @@ func Build(ctx context.Context, d BuildDeps, projectDir, javaVersion, mavenVersi
 		goals = []string{"package"}
 	}
 	cmvn := firstNonEmptyStr(d.ControllerMvn, "mvn")
-	cjava := firstNonEmptyStr(d.ControllerJava, "java")
 	vout, err := exec.CommandContext(ctx, cmvn, "-v").CombinedOutput()
 	if err != nil {
-		return BuildResult{}, fmt.Errorf("maven.build needs Maven on the controller (set controller_mvn): %v: %s", err, lastLines(vout, 3))
+		return BuildResult{}, fmt.Errorf("maven.build needs Maven + a JDK on the controller (set controller_mvn): %v: %s", err, lastLines(vout, 3))
 	}
 	// Relay the controller's EXACT Maven version so the sandbox build sees the same
 	// super-pom plugin defaults the controller primed — no version drift, no missing
@@ -94,30 +96,34 @@ func Build(ctx context.Context, d BuildDeps, projectDir, javaVersion, mavenVersi
 	}
 	javaHome := path.Dir(path.Dir(javaBin)) // <jdk>/bin/java → <jdk>
 
-	// 1. Pull the project (pom.xml + sources) from the sandbox to a controller stage.
-	d.Progress.Phase("staging project")
+	// 1. Read ONLY the project's pom.xml from the sandbox (go-offline resolves from the
+	//    POM alone — no sources needed). Reading a single known path avoids walking
+	//    sandbox-controlled directory entries (a path-traversal vector) entirely.
+	d.Progress.Phase("staging pom")
 	stage, err := os.MkdirTemp("", "iceclimber-mvnbuild-")
 	if err != nil {
 		return BuildResult{}, err
 	}
 	defer os.RemoveAll(stage)
-	stageProj := filepath.Join(stage, "project")
-	if err := pullTree(ctx, d.FS, projectDir, stageProj); err != nil {
-		return BuildResult{}, fmt.Errorf("stage project from sandbox: %w", err)
+	pomBytes, err := d.FS.ReadFile(ctx, path.Join(projectDir, "pom.xml"))
+	if err != nil {
+		return BuildResult{}, fmt.Errorf("read %s/pom.xml (create the Maven project first): %w", projectDir, err)
 	}
-	if _, err := os.Stat(filepath.Join(stageProj, "pom.xml")); err != nil {
-		return BuildResult{}, fmt.Errorf("no pom.xml in %s (create the Maven project first)", projectDir)
+	stagePom := filepath.Join(stage, "pom.xml")
+	if err := os.WriteFile(stagePom, pomBytes, 0o644); err != nil {
+		return BuildResult{}, err
 	}
 
-	// 2. Controller build primes the offline repo (downloads every dep + plugin the
-	//    build needs, and confirms it builds). JAVA_HOME left to the controller's own.
+	// 2. Prime the offline repo by RESOLVING (not building) — `dependency:go-offline`
+	//    downloads every dependency + plugin the build needs without executing the
+	//    project's lifecycle plugins, so an untrusted pom.xml cannot run code on the
+	//    controller (the pip-download / conda-dry-run philosophy, applied to Maven).
 	d.Progress.Phase("priming repo (controller)")
 	stageRepo := filepath.Join(stage, "m2repo")
-	primeArgs := append([]string{"-B", "-ntp", "-Dmaven.repo.local=" + stageRepo, "-f", filepath.Join(stageProj, "pom.xml")}, goals...)
+	primeArgs := []string{"-B", "-ntp", "-Dmaven.repo.local=" + stageRepo, "-f", stagePom, "dependency:go-offline"}
 	if out, err := exec.CommandContext(ctx, cmvn, primeArgs...).CombinedOutput(); err != nil {
-		return BuildResult{}, fmt.Errorf("controller prime build failed: %s", lastLines(out, 8))
+		return BuildResult{}, fmt.Errorf("controller repo prime (dependency:go-offline) failed — a pinned plugin/dep may be unresolvable: %s", lastLines(out, 8))
 	}
-	_ = cjava // controller mvn finds java itself; cjava documents the dependency
 
 	// 3. Relay the Maven tool (once) and the primed repo into the sandbox.
 	mvnBin, err := d.ensureMavenTool(ctx, mavenVersion)
@@ -186,6 +192,12 @@ func (d BuildDeps) ensureMavenTool(ctx context.Context, version string) (string,
 		_ = tmp.Close()
 		return "", fmt.Errorf("download Maven %s: %w", version, err)
 	}
+	// Verify the tarball against Apache's published SHA-512 before extracting it into the
+	// sandbox (defense-in-depth over TLS; the tool is executed in the sandbox).
+	if err := verifyFileSHA512(ctx, tmp, url); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("verify Maven %s: %w", version, err)
+	}
 	if _, err := tmp.Seek(0, 0); err != nil {
 		return "", err
 	}
@@ -199,4 +211,25 @@ func (d BuildDeps) ensureMavenTool(ctx context.Context, version string) (string,
 	}
 	_ = tmp.Close()
 	return mvnBin, nil
+}
+
+// verifyFileSHA512 rewinds f, computes its SHA-512, and compares it to Apache's published
+// <url>.sha512. f is left rewound for the caller.
+func verifyFileSHA512(ctx context.Context, f *os.File, url string) error {
+	want, err := expectedSHA512(ctx, url)
+	if err != nil {
+		return fmt.Errorf("fetch published sha512: %w", err)
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return err
+	}
+	h := sha512.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return err
+	}
+	got := hex.EncodeToString(h.Sum(nil))
+	if got != want {
+		return fmt.Errorf("sha512 mismatch: published %s, downloaded %s", want, got)
+	}
+	return nil
 }

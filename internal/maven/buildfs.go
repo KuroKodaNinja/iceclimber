@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/progress"
@@ -22,38 +23,30 @@ func firstNonEmptyStr(a, b string) string {
 	return b
 }
 
-// pullTree copies a sandbox directory tree to a local directory, skipping build output
-// (`target`) and VCS metadata. Directory vs file is distinguished by whether List
-// succeeds (a file's List errors), since remotefs.FS has no Stat.
-func pullTree(ctx context.Context, rfs remotefs.FS, remoteRoot, localRoot string) error {
-	if err := os.MkdirAll(localRoot, 0o755); err != nil {
-		return err
-	}
-	entries, err := rfs.List(ctx, remoteRoot)
+// expectedSHA512 fetches the Apache-published `<url>.sha512` sidecar and returns the
+// hex digest (the file is the digest, optionally followed by whitespace/filename).
+func expectedSHA512(ctx context.Context, url string) (string, error) {
+	client := &http.Client{Timeout: 2 * time.Minute}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+".sha512", nil)
 	if err != nil {
-		return fmt.Errorf("list %s: %w", remoteRoot, err)
+		return "", err
 	}
-	for _, name := range entries {
-		if name == "target" || name == ".git" || name == "node_modules" {
-			continue
-		}
-		rpath := path.Join(remoteRoot, name)
-		lpath := filepath.Join(localRoot, name)
-		if _, lerr := rfs.List(ctx, rpath); lerr == nil {
-			if err := pullTree(ctx, rfs, rpath, lpath); err != nil {
-				return err
-			}
-			continue
-		}
-		data, rerr := rfs.ReadFile(ctx, rpath)
-		if rerr != nil {
-			return fmt.Errorf("read %s: %w", rpath, rerr)
-		}
-		if err := os.WriteFile(lpath, data, 0o644); err != nil {
-			return err
-		}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
 	}
-	return nil
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GET %s.sha512: %s", url, resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return "", err
+	}
+	if f := strings.Fields(string(body)); len(f) > 0 {
+		return strings.ToLower(f[0]), nil
+	}
+	return "", fmt.Errorf("empty sha512 sidecar for %s", url)
 }
 
 // pushTree mirrors a local directory tree into the sandbox over the FS (dirs + regular

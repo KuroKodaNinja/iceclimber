@@ -42,6 +42,11 @@ func RunManifest(ctx context.Context, d Deps, manifestPath, tier string) (pkg.Ou
 		return pkg.Outcome{}, fmt.Errorf("environment.yml lists no packages beyond python")
 	}
 
+	// Defense-in-depth: the channel args are derived from the (agent-authored) manifest,
+	// so validate them against the same allowlist the explicit path uses.
+	if err := pkg.ValidateExtraArgs(channelArgs, extraArgAllow); err != nil {
+		return pkg.Outcome{}, err
+	}
 	prefix := python.CondaEnvPrefix(d.Root, pythonVersion)
 	if name != "" {
 		prefix = path.Join(d.Root, "envs", name)
@@ -120,15 +125,26 @@ func parseEnvironment(data []byte) (name string, channelArgs []string, pythonVer
 	return name, channelArgs, pythonVersion, specs, nil
 }
 
-// parseCondaDep splits a conda match-spec string ("pytorch", "python=3.12", "numpy 1.26")
-// into a Spec. conda accepts '==', '=', or a space between name and version; try the
-// longest separator first so "pytorch==2.1" isn't split at the first '='.
+// parseCondaDep splits a conda dependency string into a Spec. The name is the leading run
+// of package-name characters; the remainder is the version/constraint. It handles the
+// plain forms ("pytorch", "python=3.12", "pandas==2.2", "numpy 1.26") and operator
+// constraints ("numpy>=1.20", "numpy >=1.20", "pkg!=1.5") — the leading "="/"==" of an
+// exact pin is stripped, while comparison operators (< > ! ~) are preserved for condaSpec.
 func parseCondaDep(s string) pkg.Spec {
 	s = strings.TrimSpace(s)
-	for _, sep := range []string{"==", "=", " "} {
-		if i := strings.Index(s, sep); i > 0 {
-			return pkg.Spec{Name: strings.TrimSpace(s[:i]), Version: strings.TrimSpace(s[i+len(sep):])}
-		}
+	i := strings.IndexFunc(s, func(r rune) bool {
+		return !(r == '-' || r == '_' || r == '.' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9')
+	})
+	if i <= 0 {
+		return pkg.Spec{Name: s}
 	}
-	return pkg.Spec{Name: s}
+	name := s[:i]
+	ver := strings.TrimSpace(s[i:])
+	switch {
+	case strings.HasPrefix(ver, "=="):
+		ver = strings.TrimSpace(ver[2:])
+	case strings.HasPrefix(ver, "="):
+		ver = strings.TrimSpace(ver[1:])
+	}
+	return pkg.Spec{Name: name, Version: ver}
 }

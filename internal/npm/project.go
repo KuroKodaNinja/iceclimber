@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
@@ -158,6 +159,12 @@ func manifestDeps(manifest []byte) ([]string, error) {
 	var names []string
 	for _, set := range []map[string]string{p.Dependencies, p.DevDependencies} {
 		for name := range set {
+			// A dependency key is used to read <node_modules>/<name>/package.json for
+			// attribution; skip anything with a parent-dir segment so a crafted manifest
+			// can't read outside node_modules (a scoped "@scope/pkg" single slash is fine).
+			if name == "" || strings.Contains(name, "..") {
+				continue
+			}
 			if !seen[name] {
 				seen[name] = true
 				names = append(names, name)

@@ -35,6 +35,10 @@ func TestBuildParams(t *testing.T) {
 			`{"goals":["clean","package"],"java_version":"21","project":"/tmp/app"}`},
 		{"conda.install", []string{"--python", "3.12", "-c", "conda-forge", "numpy=1.26", "six"},
 			`{"extra_args":["-c","conda-forge"],"packages":[{"name":"numpy","version":"1.26"},{"name":"six"}],"python_version":"3.12"}`},
+		{"conda.install", []string{"--python", "3.12", "--offline", "-c", "conda-forge", "six"},
+			`{"extra_args":["-c","conda-forge","--offline"],"packages":[{"name":"six"}],"python_version":"3.12"}`},
+		{"conda.install", []string{"--file", "/p/environment.yml"},
+			`{"file":"/p/environment.yml"}`},
 		{"web.fetch", []string{"https://x.test", "--method", "POST", "--header", "A: 1"},
 			`{"headers":{"A":"1"},"method":"POST","url":"https://x.test"}`},
 	}
@@ -57,11 +61,13 @@ func TestBuildParams_Errors(t *testing.T) {
 		verb string
 		args []string
 	}{
-		{"python.install", nil},                                  // missing version
-		{"pip.install", []string{"requests"}},                    // missing --python
-		{"conda.install", []string{"numpy"}},                     // missing --python
-		{"maven.install", []string{"--java", "21", "notacoord"}}, // bad coordinate
-		{"web.fetch", nil},                                       // missing url
+		{"python.install", nil},                                                 // missing version
+		{"pip.install", []string{"requests"}},                                   // missing --python
+		{"conda.install", []string{"numpy"}},                                    // missing --python
+		{"conda.install", []string{"--file", "/p/env.yml", "--python", "3.12"}}, // --file + --python
+		{"npm.install", []string{"--node", "24", "--project", "/p", "extra"}},   // --project + packages
+		{"maven.install", []string{"--java", "21", "notacoord"}},                // bad coordinate
+		{"web.fetch", nil}, // missing url
 	} {
 		if _, err := buildParams(tc.verb, tc.args); err == nil {
 			bad = append(bad, tc.args)

@@ -19,7 +19,8 @@ A **real conda project** (`app/environment.yml` pinning `python` + `pytorch` + `
 + `numpy`) built by the **air-gapped conda relay**:
 
 1. **`web.fetch`** — same comic input.
-2. **`conda.install --file environment.yml --tier relay`** — the controller's
+2. **`install conda --file environment.yml --tier relay`** (the CLI the scenario
+   drives; agents use the `conda.install` verb with `--offline`) — the controller's
    conda/mamba solves the env for the sandbox platform, downloads it, synthesizes a
    local channel, and the sandbox **creates the env offline** at `<root>/envs/mlkit`.
 3. **run** — `app/ml.py` does a small PyTorch tensor computation, tabulates it with
