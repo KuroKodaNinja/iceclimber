@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
@@ -33,7 +34,8 @@ type Config struct {
 	// Relay-tier only (relay.go):
 	Arch            string // sandbox subdir selection
 	Libc            string
-	ControllerConda string // operator's conda on the controller (default "conda")
+	ControllerConda string       // operator's conda on the controller (default "conda")
+	HTTPClient      *http.Client // optional; nil → a default client for relay package downloads
 }
 
 // Manager installs conda packages into one conda env.

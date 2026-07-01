@@ -55,6 +55,12 @@ func buildParams(verb string, args []string) (any, error) {
 			}
 			rest, extra = r2, append(extra, "-c", ch)
 		}
+		// --offline selects the air-gapped relay tier (the controller resolves + downloads
+		// + pushes an offline channel). Bare flag, forwarded via extra_args — the handler's
+		// resolveTier keys on it. Without it, conda.install uses the sandbox's own channel.
+		if r2, ok := takeBoolFlag(rest, "--offline"); ok {
+			rest, extra = r2, append(extra, "--offline")
+		}
 		pkgs, err := parsePkgs(rest, "=") // conda match-spec uses a single '='
 		if err != nil {
 			return nil, err
@@ -162,6 +168,16 @@ func takeFlag(args []string, flag string) (val string, rest []string, found bool
 		}
 	}
 	return "", args, false
+}
+
+// takeBoolFlag removes a bare (valueless) flag if present, returning the remaining args.
+func takeBoolFlag(args []string, flag string) (rest []string, found bool) {
+	for i, a := range args {
+		if a == flag {
+			return append(append([]string{}, args[:i]...), args[i+1:]...), true
+		}
+	}
+	return args, false
 }
 
 func requireFlag(args []string, flag string) (string, []string, error) {

@@ -72,12 +72,16 @@ func (m *Manager) RelayInstall(ctx context.Context, specs []pkg.Spec, minor stri
 		return pkg.Outcome{}, err
 	}
 
-	// 4. Create the env OFFLINE in the sandbox from the pushed file:// channel.
+	// 4. Build the env OFFLINE in the sandbox from the pushed file:// channel. If the env
+	//    already exists (a prior relay/Tier-0 install), add the specs with an offline
+	//    `conda install` instead of `conda create` (which refuses a populated prefix) — so
+	//    relay is idempotent and additive, matching the Tier-0 path.
 	m.cfg.Progress.Phase("installing (offline)")
 	chanURL := "file://" + sandboxChan
-	res, err := m.cfg.Runner.Run(ctx, m.offlineCreateCmd(m.cfg.EnvPrefix, chanURL, minor, specs), nil)
+	exists := m.envPythonExists(ctx, m.cfg.EnvPrefix)
+	res, err := m.cfg.Runner.Run(ctx, m.offlineEnvCmd(m.cfg.EnvPrefix, chanURL, minor, specs, exists), nil)
 	if err != nil {
-		return pkg.Outcome{}, fmt.Errorf("run offline conda create: %w", err)
+		return pkg.Outcome{}, fmt.Errorf("run offline conda env build: %w", err)
 	}
 	out, err := m.resultOutcome(res, specs, pkg.TierRelay)
 	if err != nil {
@@ -128,16 +132,27 @@ func (m *Manager) controllerSolve(ctx context.Context, conda, subdir, minor stri
 	return mergeRecords(sv.Actions.Link, sv.Actions.Fetch), nil
 }
 
-// downloadChannel fetches every record's package file into localChan/<subdir>/<fn>,
-// verifying sha256/md5 when the solve provided one, and returns name -> sha256 of the
-// downloaded file so installed packages can be reported with a content hash.
+// downloadChannel fetches every record's package file into localChan/<subdir>/<fn> over
+// https, verifying sha256 when the solve provided one, and returns name -> sha256 of the
+// downloaded file so installed packages can be reported with a content hash. (Records from
+// modern conda carry sha256; the md5-only legacy case is left unverified — the payload is
+// installed offline into the already-untrusted sandbox, never executed on the controller.)
 func (m *Manager) downloadChannel(ctx context.Context, localChan string, recs []condaRecord) (map[string]string, error) {
-	client := &http.Client{Timeout: 10 * time.Minute}
+	client := m.httpClient()
 	shas := map[string]string{}
 	for i, r := range recs {
 		url, fn, sub := r.url(), r.fn(), r.subdir()
 		if url == "" {
 			return nil, fmt.Errorf("solve record %s-%s has no download URL", r.Name, r.Version)
+		}
+		if !strings.HasPrefix(url, "https://") {
+			return nil, fmt.Errorf("refusing non-https package URL for %s: %s", fn, firstNonEmpty(schemeOf(url), "(none)"))
+		}
+		if err := safePathComponent(fn); err != nil {
+			return nil, err
+		}
+		if err := safePathComponent(sub); err != nil {
+			return nil, err
 		}
 		m.cfg.Progress.Emit(progress.Event{Phase: "downloading " + fn, Cur: int64(i + 1), Total: int64(len(recs)), Unit: progress.Items})
 		dir := filepath.Join(localChan, sub)
@@ -190,11 +205,18 @@ func (m *Manager) pushChannel(ctx context.Context, localChan, sandboxChan string
 	return nil
 }
 
-// offlineCreateCmd builds the sandbox-side offline env create: it draws exclusively from
-// the pushed file:// channel (--offline --override-channels), so no network is used.
-func (m *Manager) offlineCreateCmd(prefix, chanURL, minor string, specs []pkg.Spec) string {
+// offlineEnvCmd builds the sandbox-side offline env command, drawing exclusively from the
+// pushed file:// channel (--offline --override-channels), so no network is used. A fresh
+// env is `conda create … python=<minor> <specs>`; an existing env (idempotent/additive
+// re-install) is `conda install … <specs>` (python is already present) — `conda create`
+// refuses a populated prefix.
+func (m *Manager) offlineEnvCmd(prefix, chanURL, minor string, specs []pkg.Spec, envExists bool) string {
+	verb := "create"
+	if envExists {
+		verb = "install"
+	}
 	args := []string{
-		remote.ShellQuote(m.cfg.CondaBin), "create", "-y", "--json",
+		remote.ShellQuote(m.cfg.CondaBin), verb, "-y", "--json",
 		"-p", remote.ShellQuote(prefix),
 		"--offline", "--override-channels",
 		// The default libmamba solver cannot load a synthesized local repodata.json for a
@@ -203,12 +225,22 @@ func (m *Manager) offlineCreateCmd(prefix, chanURL, minor string, specs []pkg.Sp
 		// zstd-compressed repodata.json.zst (which libmamba would otherwise require).
 		"--solver", "classic",
 		"-c", remote.ShellQuote(chanURL),
-		remote.ShellQuote("python=" + minor),
+	}
+	if !envExists {
+		args = append(args, remote.ShellQuote("python="+minor))
 	}
 	for _, s := range specs {
 		args = append(args, remote.ShellQuote(condaSpec(s)))
 	}
 	return strings.Join(args, " ")
+}
+
+// envPythonExists reports whether the conda env's interpreter already exists (so the relay
+// installs into it rather than trying to create over a populated prefix). Mirrors the
+// Tier-0 reuse check in python.ensureCondaEnv.
+func (m *Manager) envPythonExists(ctx context.Context, prefix string) bool {
+	res, err := m.cfg.Runner.Run(ctx, "[ -x "+remote.ShellQuote(path.Join(prefix, "bin", "python"))+" ] && echo ok", nil)
+	return err == nil && strings.TrimSpace(string(res.Stdout)) == "ok"
 }
 
 // controllerChannelArgs keeps only the channel-selection flags from the agent's
@@ -218,17 +250,37 @@ func (m *Manager) offlineCreateCmd(prefix, chanURL, minor string, specs []pkg.Sp
 func controllerChannelArgs(extraArgs []string) []string {
 	var out []string
 	for i := 0; i < len(extraArgs); i++ {
-		switch extraArgs[i] {
-		case "-c", "--channel":
+		a := extraArgs[i]
+		switch {
+		case a == "-c" || a == "--channel": // two-token form: flag then value
 			if i+1 < len(extraArgs) {
-				out = append(out, extraArgs[i], extraArgs[i+1])
+				out = append(out, a, extraArgs[i+1])
 				i++
 			}
-		case "--override-channels":
-			out = append(out, extraArgs[i])
+		case strings.HasPrefix(a, "-c=") || strings.HasPrefix(a, "--channel="): // inline form
+			out = append(out, a)
+		case a == "--override-channels":
+			out = append(out, a)
 		}
 	}
 	return out
+}
+
+// httpClient returns the configured relay download client, or a default with a generous
+// timeout for large packages.
+func (m *Manager) httpClient() *http.Client {
+	if m.cfg.HTTPClient != nil {
+		return m.cfg.HTTPClient
+	}
+	return &http.Client{Timeout: 10 * time.Minute}
+}
+
+// schemeOf returns the URL scheme ("https", "http", …) or "" when there is none.
+func schemeOf(u string) string {
+	if i := strings.Index(u, "://"); i > 0 {
+		return u[:i]
+	}
+	return ""
 }
 
 // condaSubdir maps the sandbox's arch/libc to a conda platform subdir. conda has no musl
@@ -266,9 +318,13 @@ type condaRecord struct {
 }
 
 // fn returns the package filename, deriving it from the URL when the record omits it.
+// path.Base is applied unconditionally: the record comes from a solve against a possibly
+// agent-chosen channel, so a hostile repodata could otherwise smuggle a path (e.g.
+// "../../.bashrc") that path.Join would resolve into a parent-dir escape when the file is
+// written on the controller or sandbox.
 func (r condaRecord) fn() string {
 	if r.Fn != "" {
-		return r.Fn
+		return path.Base(r.Fn)
 	}
 	if r.URL != "" {
 		return path.Base(r.URL)
@@ -280,15 +336,27 @@ func (r condaRecord) fn() string {
 func (r condaRecord) url() string { return r.URL }
 
 // subdir returns the record's platform subdir, deriving it from the URL path when absent
-// (conda channel URLs end in <subdir>/<fn>).
+// (conda channel URLs end in <subdir>/<fn>). path.Base guards against a hostile subdir
+// value (see fn); the caller additionally validates it against the safe set.
 func (r condaRecord) subdir() string {
 	if r.Subdir != "" {
-		return r.Subdir
+		return path.Base(r.Subdir)
 	}
 	if r.URL != "" {
 		return path.Base(path.Dir(r.URL))
 	}
 	return "noarch"
+}
+
+// safePathComponent rejects a channel path component that could escape the channel dir. A
+// solve resolved against an agent-selected channel is attacker-influenced JSON; without
+// this a crafted fn/subdir ("..", "a/b") would steer a write out of the transient channel
+// tree (path.Join cleans ".." into a parent escape).
+func safePathComponent(s string) error {
+	if s == "" || s == "." || s == ".." || strings.ContainsAny(s, `/\`) {
+		return fmt.Errorf("unsafe channel path component %q", s)
+	}
+	return nil
 }
 
 type solveJSON struct {

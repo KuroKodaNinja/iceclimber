@@ -1,11 +1,17 @@
 package conda
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
+	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 )
 
 // A trimmed but realistic `conda create --dry-run --json` solve: two LINK records (a
@@ -132,10 +138,98 @@ func TestSynthesizeRepodata_NilDependsBecomesArray(t *testing.T) {
 }
 
 func TestControllerChannelArgs_DropsOffline(t *testing.T) {
-	got := controllerChannelArgs([]string{"-c", "conda-forge", "--override-channels", "--offline", "--use-local", "--channel", "bioconda"})
-	want := []string{"-c", "conda-forge", "--override-channels", "--channel", "bioconda"}
+	// Two-token, inline (-c=/--channel=), and --override-channels all forwarded; the
+	// sandbox-only --offline/--use-local dropped from the controller solve.
+	got := controllerChannelArgs([]string{"-c", "conda-forge", "--override-channels", "--offline",
+		"--use-local", "--channel", "bioconda", "-c=defaults", "--channel=my-chan"})
+	want := []string{"-c", "conda-forge", "--override-channels", "--channel", "bioconda", "-c=defaults", "--channel=my-chan"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Errorf("controllerChannelArgs = %v, want %v (offline/use-local dropped)", got, want)
+		t.Errorf("controllerChannelArgs = %v, want %v (offline/use-local dropped, inline kept)", got, want)
+	}
+}
+
+func TestResolveTier(t *testing.T) {
+	cases := []struct {
+		tier  string
+		extra []string
+		want  string
+	}{
+		{"relay", nil, pkg.TierRelay},
+		{"mirror", []string{"--offline"}, pkg.TierMirror}, // explicit mirror wins over --offline
+		{"auto", []string{"--offline"}, pkg.TierRelay},    // auto escalates on --offline
+		{"auto", []string{"-c", "conda-forge"}, pkg.TierMirror},
+		{"", nil, pkg.TierMirror},
+	}
+	for _, c := range cases {
+		if got := resolveTier(c.tier, c.extra); got != c.want {
+			t.Errorf("resolveTier(%q, %v) = %q, want %q", c.tier, c.extra, got, c.want)
+		}
+	}
+}
+
+func TestResultOutcome_StampsTier(t *testing.T) {
+	m := New(Config{})
+	res := remote.Result{Stdout: []byte(`{"success":true,"actions":{"LINK":[{"name":"six","version":"1.17.0"}]}}`)}
+	for _, tier := range []string{pkg.TierMirror, pkg.TierRelay} {
+		out, err := m.resultOutcome(res, []pkg.Spec{{Name: "six"}}, tier)
+		if err != nil {
+			t.Fatalf("resultOutcome: %v", err)
+		}
+		if len(out.Installed) != 1 || out.Installed[0].Tier != tier || out.Installed[0].Version != "1.17.0" {
+			t.Errorf("tier %q → %+v, want six 1.17.0 tagged %q", tier, out.Installed, tier)
+		}
+	}
+}
+
+func TestSafePathComponent(t *testing.T) {
+	for _, bad := range []string{"", ".", "..", "a/b", `a\b`, "../etc"} {
+		if err := safePathComponent(bad); err == nil {
+			t.Errorf("safePathComponent(%q) = nil, want rejected", bad)
+		}
+	}
+	for _, ok := range []string{"linux-64", "noarch", "six-1.17.0-pyhe01879c_1.conda"} {
+		if err := safePathComponent(ok); err != nil {
+			t.Errorf("safePathComponent(%q) = %v, want ok", ok, err)
+		}
+	}
+}
+
+func TestDownloadChannel(t *testing.T) {
+	body := []byte("fake-conda-package-bytes")
+	sum := sha256.Sum256(body)
+	good := hex.EncodeToString(sum[:])
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
+	defer srv.Close()
+	m := New(Config{HTTPClient: srv.Client()}) // trusts the test server's self-signed cert
+	dir := t.TempDir()
+
+	// Happy path: downloads, verifies the matching sha256, returns name→sha.
+	shas, err := m.downloadChannel(context.Background(), dir,
+		[]condaRecord{{Name: "six", Version: "1", Subdir: "noarch", Fn: "six-1-b.conda", URL: srv.URL + "/six-1-b.conda", SHA256: good}})
+	if err != nil {
+		t.Fatalf("downloadChannel: %v", err)
+	}
+	if shas["six"] != good {
+		t.Errorf("sha map = %v, want six→%s", shas, good)
+	}
+
+	// sha256 mismatch is rejected.
+	if _, err := m.downloadChannel(context.Background(), t.TempDir(),
+		[]condaRecord{{Name: "six", Fn: "six-1-b.conda", URL: srv.URL + "/x.conda", SHA256: "deadbeef"}}); err == nil {
+		t.Error("sha256 mismatch should error")
+	}
+
+	// A traversal-laden fn is rejected before any write (path.Base already strips it, but
+	// the guard is belt-and-suspenders).
+	if _, err := m.downloadChannel(context.Background(), t.TempDir(),
+		[]condaRecord{{Name: "x", Subdir: "..", URL: srv.URL + "/x", SHA256: good}}); err == nil {
+		t.Error("unsafe subdir should error")
+	}
+
+	// Non-https URL is refused.
+	if _, err := m.downloadChannel(context.Background(), t.TempDir(),
+		[]condaRecord{{Name: "x", Fn: "x.conda", URL: "http://insecure/x.conda"}}); err == nil {
+		t.Error("non-https URL should be refused")
 	}
 }
 
@@ -150,14 +244,24 @@ func TestCondaSubdir(t *testing.T) {
 	}
 }
 
-func TestOfflineCreateCmd(t *testing.T) {
+func TestOfflineEnvCmd(t *testing.T) {
 	m := New(Config{CondaBin: "/opt/conda/bin/conda", EnvPrefix: "/root/envs/conda-python-3.12"})
-	cmd := m.offlineCreateCmd("/root/envs/conda-python-3.12", "file:///root/blobs/conda-chan-x", "3.12",
-		[]pkg.Spec{{Name: "six"}})
+	// Fresh env → `conda create ... python=<minor>`.
+	create := m.offlineEnvCmd("/root/envs/conda-python-3.12", "file:///root/blobs/conda-chan-x", "3.12",
+		[]pkg.Spec{{Name: "six"}}, false)
 	for _, want := range []string{"create", "-y", "--json", "--offline", "--override-channels",
 		"--solver classic", "file:///root/blobs/conda-chan-x", "python=3.12", "six"} {
-		if !strings.Contains(cmd, want) {
-			t.Errorf("offlineCreateCmd missing %q:\n%s", want, cmd)
+		if !strings.Contains(create, want) {
+			t.Errorf("offlineEnvCmd(create) missing %q:\n%s", want, create)
 		}
+	}
+	// Existing env → `conda install ... <specs>` and NO create / NO python= pin (python is
+	// already present; create would refuse the populated prefix).
+	install := m.offlineEnvCmd("/root/envs/conda-python-3.12", "file:///c", "3.12", []pkg.Spec{{Name: "six"}}, true)
+	if !strings.Contains(install, " install ") {
+		t.Errorf("offlineEnvCmd(exists) should use `install`:\n%s", install)
+	}
+	if strings.Contains(install, " create ") || strings.Contains(install, "python=3.12") {
+		t.Errorf("offlineEnvCmd(exists) must not create or re-pin python:\n%s", install)
 	}
 }
