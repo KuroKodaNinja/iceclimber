@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/conda"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/maven"
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
@@ -20,7 +21,7 @@ func newInstallCmd() *cobra.Command {
 		Short: "Install language runtimes or packages into the sandbox",
 	}
 	cmd.AddCommand(newInstallPythonCmd(), newInstallPipCmd(), newInstallNodeCmd(), newInstallNpmCmd(),
-		newInstallJavaCmd(), newInstallMavenCmd())
+		newInstallJavaCmd(), newInstallMavenCmd(), newInstallCondaCmd())
 	return cmd
 }
 
@@ -303,6 +304,43 @@ func newInstallPipCmd() *cobra.Command {
 	cmd.Flags().StringVar(&pyVersion, "python", "", "target python minor version, e.g. 3.12 (required)")
 	cmd.Flags().StringVar(&tier, "tier", "auto", "resolution tier: auto|mirror|relay")
 	cmd.Flags().StringArrayVar(&pipArgs, "pip-arg", nil, "extra pip flag passed through (allowlisted), e.g. --pip-arg=--index-url --pip-arg=https://download.pytorch.org/whl/cpu (repeatable)")
+	_ = cmd.MarkFlagRequired("python")
+	return cmd
+}
+
+func newInstallCondaCmd() *cobra.Command {
+	var transport, pyVersion, tier string
+	var condaArgs []string
+	cmd := &cobra.Command{
+		Use:   "conda <pkg>[==version]...",
+		Short: "Install conda packages into a conda env (Tier-0 channel / relay air-gapped)",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(cfgFile, sandboxID)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
+			defer cancel()
+			sess, err := openSession(ctx, cfg, transport)
+			if err != nil {
+				return err
+			}
+			defer sess.Close()
+			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
+			out, err := conda.Run(ctx, condaDeps(sess, pr), pyVersion, parseSpecs(args), tier, condaArgs)
+			finish()
+			if err != nil {
+				return err
+			}
+			printOutcome(cmd, out)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
+	cmd.Flags().StringVar(&pyVersion, "python", "", "target python minor version, e.g. 3.12 (required)")
+	cmd.Flags().StringVar(&tier, "tier", "auto", "resolution tier: auto|mirror|relay")
+	cmd.Flags().StringArrayVar(&condaArgs, "conda-arg", nil, "extra conda flag passed through (allowlisted), e.g. --conda-arg=-c --conda-arg=conda-forge (repeatable)")
 	_ = cmd.MarkFlagRequired("python")
 	return cmd
 }

@@ -27,6 +27,8 @@ func TestBuildParams(t *testing.T) {
 			`{"node_version":"24","packages":[{"name":"left-pad","version":"1.3.0"},{"name":"@scope/x"}]}`},
 		{"maven.install", []string{"--java", "21", "com.google.code.gson:gson:2.10.1"},
 			`{"java_version":"21","packages":[{"name":"com.google.code.gson:gson","version":"2.10.1"}]}`},
+		{"conda.install", []string{"--python", "3.12", "-c", "conda-forge", "numpy=1.26", "six"},
+			`{"extra_args":["-c","conda-forge"],"packages":[{"name":"numpy","version":"1.26"},{"name":"six"}],"python_version":"3.12"}`},
 		{"web.fetch", []string{"https://x.test", "--method", "POST", "--header", "A: 1"},
 			`{"headers":{"A":"1"},"method":"POST","url":"https://x.test"}`},
 	}
@@ -51,6 +53,7 @@ func TestBuildParams_Errors(t *testing.T) {
 	}{
 		{"python.install", nil},                                  // missing version
 		{"pip.install", []string{"requests"}},                    // missing --python
+		{"conda.install", []string{"numpy"}},                     // missing --python
 		{"maven.install", []string{"--java", "21", "notacoord"}}, // bad coordinate
 		{"web.fetch", nil},                                       // missing url
 	} {

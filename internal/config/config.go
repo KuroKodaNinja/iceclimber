@@ -34,6 +34,10 @@ type Config struct {
 	// ControllerJava is the operator's java on the controller, used for Tier-1
 	// JVM dependency relay. Defaults to "java" at use.
 	ControllerJava string `yaml:"controller_java"`
+	// ControllerConda is the operator's conda on the controller, used for air-gapped
+	// (relay-tier) conda: it resolves + downloads packages the sandbox installs offline.
+	// Defaults to "conda" at use; the relay tier skips/errors clearly if absent.
+	ControllerConda string `yaml:"controller_conda"`
 	// AuditLog is the controller-side web.fetch audit JSONL path. Empty means
 	// the default ~/.iceclimber/audit/<sandbox_id>.jsonl.
 	AuditLog string `yaml:"audit_log"`

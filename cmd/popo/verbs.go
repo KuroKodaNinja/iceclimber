@@ -35,6 +35,36 @@ func buildParams(verb string, args []string) (any, error) {
 		}
 		return map[string]any{"python_version": ver, "packages": pkgs}, nil
 
+	case "conda.install":
+		ver, rest, err := requireFlag(args, "--python")
+		if err != nil {
+			return nil, err
+		}
+		// Collect repeatable channel flags into extra_args (-c conda-forge …).
+		var extra []string
+		for {
+			ch, r2, ok := takeFlag(rest, "-c")
+			if !ok {
+				ch, r2, ok = takeFlag(rest, "--channel")
+			}
+			if !ok {
+				break
+			}
+			if ch == "" {
+				return nil, fmt.Errorf("-c/--channel needs a value")
+			}
+			rest, extra = r2, append(extra, "-c", ch)
+		}
+		pkgs, err := parsePkgs(rest, "=") // conda match-spec uses a single '='
+		if err != nil {
+			return nil, err
+		}
+		p := map[string]any{"python_version": ver, "packages": pkgs}
+		if len(extra) > 0 {
+			p["extra_args"] = extra
+		}
+		return p, nil
+
 	case "npm.install":
 		ver, rest, err := requireFlag(args, "--node")
 		if err != nil {

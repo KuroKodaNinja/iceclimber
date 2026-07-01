@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/KuroKodaNinja/iceclimber/internal/agent"
 	"github.com/KuroKodaNinja/iceclimber/internal/audit"
+	"github.com/KuroKodaNinja/iceclimber/internal/conda"
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/maven"
 	"github.com/KuroKodaNinja/iceclimber/internal/node"
@@ -154,6 +155,22 @@ func buildRegistry(sess *session, pr progress.Func) protocol.Registry {
 		"npm.install":    npm.Handler(npmDeps(sess, pr)),
 		"java.install":   java.Handler(newJavaInstaller(sess, pr)),
 		"maven.install":  maven.Handler(mavenDeps(sess, pr)),
+		"conda.install":  conda.Handler(condaDeps(sess, pr)),
 		"web.fetch":      webfetch.Handler(webfetchDeps(sess)),
+	}
+}
+
+// condaDeps builds the conda.install deps from the session: the sandbox conda (from the
+// probe) + the controller's conda (for the relay tier).
+func condaDeps(sess *session, pr progress.Func) conda.Deps {
+	return conda.Deps{
+		FS:              sess.fs,
+		Runner:          sess.runner,
+		Root:            sess.tree.Root,
+		Arch:            sess.fp.Arch,
+		Libc:            sess.fp.Libc.Family,
+		CondaBin:        sess.condaPath(),
+		ControllerConda: sess.controllerConda,
+		Progress:        pr,
 	}
 }
