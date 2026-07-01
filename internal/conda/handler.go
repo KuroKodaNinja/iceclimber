@@ -106,6 +106,9 @@ type installParams struct {
 	} `json:"packages"`
 	// ExtraArgs are allowlisted conda flags passed straight through (e.g. -c conda-forge).
 	ExtraArgs []string `json:"extra_args,omitempty"`
+	// File, when set, is a sandbox path to an environment.yml — build the whole env from
+	// it (manifest-driven) instead of an explicit package list.
+	File string `json:"file,omitempty"`
 }
 
 // Handler adapts conda.Run into the conda.install protocol handler.
@@ -115,8 +118,16 @@ func Handler(d Deps) protocol.Handler {
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return protocol.Errf(req.ID, "malformed_params", "parse params: %v", err)
 		}
+		// Manifest-driven: build the whole env from a sandbox environment.yml.
+		if p.File != "" {
+			out, err := RunManifest(ctx, d, p.File, "auto")
+			if err != nil {
+				return protocol.Errf(req.ID, "install_failed", "%v", err)
+			}
+			return protocol.OK(req.ID, out)
+		}
 		if p.PythonVersion == "" {
-			return protocol.Errf(req.ID, "missing_python_version", "conda.install requires params.python_version")
+			return protocol.Errf(req.ID, "missing_python_version", "conda.install requires params.python_version (or params.file)")
 		}
 		if len(p.Packages) == 0 {
 			return protocol.Errf(req.ID, "no_packages", "conda.install requires at least one package")

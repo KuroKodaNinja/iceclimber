@@ -25,10 +25,14 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 )
 
-const sandboxName = "iceclimber-sandbox"
+const (
+	sandboxName      = "iceclimber-sandbox"       // musl (Alpine)
+	glibcSandboxName = "iceclimber-sandbox-glibc" // glibc (Ubuntu) — for conda/manylinux scenarios
+)
 
 // Sandbox is a discovered, ready-to-drive functional sandbox plus the built binary.
 type Sandbox struct {
+	name string // the Lima instance name (musl or glibc)
 	conn conn
 	Bin  string // path to the freshly built iceclimber binary
 }
@@ -41,39 +45,58 @@ type conn struct {
 	KnownHosts   string
 }
 
-// The sandbox is discovered and the binary built exactly once per scenario test
-// binary (the host key is stable for the VM's lifetime).
+// Each sandbox is discovered and the binary built exactly once per scenario test
+// binary (the host key is stable for the VM's lifetime). The binary build is shared
+// across both boxes.
 var (
-	once   sync.Once
-	shared *Sandbox
-	skip   string
-	setErr error
+	musl      sandboxOnce
+	glibc     sandboxOnce
+	binOnce   sync.Once
+	sharedBin string
+	binErr    error
 )
 
-// Require returns a ready Sandbox, or skips the test with an actionable message
-// when the Lima sandbox isn't running. Build the sandbox with `make sandbox-up`.
-func Require(t *testing.T) *Sandbox {
-	t.Helper()
-	once.Do(func() { shared, skip, setErr = setup() })
-	if setErr != nil {
-		t.Fatalf("scenario setup: %v", setErr)
-	}
-	if skip != "" {
-		t.Skip(skip)
-	}
-	return shared
+type sandboxOnce struct {
+	once   sync.Once
+	sb     *Sandbox
+	skip   string
+	setErr error
 }
 
-func setup() (*Sandbox, string, error) {
-	c, sk, err := discover()
+// Require returns a ready musl (Alpine) Sandbox, or skips with an actionable message
+// when the Lima sandbox isn't running. Build it with `make sandbox-up`.
+func Require(t *testing.T) *Sandbox {
+	return requireNamed(t, &musl, sandboxName, "make sandbox-up")
+}
+
+// RequireGlibc returns a ready glibc (Ubuntu) Sandbox — used by conda/manylinux
+// scenarios. Skips when the box isn't running (`make sandbox-glibc-up`).
+func RequireGlibc(t *testing.T) *Sandbox {
+	return requireNamed(t, &glibc, glibcSandboxName, "make sandbox-glibc-up")
+}
+
+func requireNamed(t *testing.T, s *sandboxOnce, name, upHint string) *Sandbox {
+	t.Helper()
+	s.once.Do(func() { s.sb, s.skip, s.setErr = setup(name, upHint) })
+	if s.setErr != nil {
+		t.Fatalf("scenario setup: %v", s.setErr)
+	}
+	if s.skip != "" {
+		t.Skip(s.skip)
+	}
+	return s.sb
+}
+
+func setup(name, upHint string) (*Sandbox, string, error) {
+	c, sk, err := discoverNamed(name, upHint)
 	if err != nil || sk != "" {
 		return nil, sk, err
 	}
-	bin, err := buildBinary()
-	if err != nil {
-		return nil, "", err
+	binOnce.Do(func() { sharedBin, binErr = buildBinary() })
+	if binErr != nil {
+		return nil, "", binErr
 	}
-	return &Sandbox{conn: c, Bin: bin}, "", nil
+	return &Sandbox{name: name, conn: c, Bin: sharedBin}, "", nil
 }
 
 // NewRoot returns a fresh, isolated sandbox install root, removed at test end.
@@ -81,7 +104,7 @@ func (s *Sandbox) NewRoot(t *testing.T) string {
 	t.Helper()
 	root := "/tmp/iceclimber-scn-" + protocol.NewID()
 	t.Cleanup(func() {
-		_ = exec.Command("limactl", "shell", sandboxName, "--", "rm", "-rf", root).Run()
+		_ = exec.Command("limactl", "shell", s.name, "--", "rm", "-rf", root).Run()
 	})
 	return root
 }
@@ -98,7 +121,7 @@ ssh:
   identity_file: %s
   known_hosts: %s
 remote_root: %s
-`, sandboxName, s.conn.Host, s.conn.Port, s.conn.User, s.conn.IdentityFile, s.conn.KnownHosts, root)
+`, s.name, s.conn.Host, s.conn.Port, s.conn.User, s.conn.IdentityFile, s.conn.KnownHosts, root)
 	if extraYAML != "" {
 		content += strings.TrimRight(extraYAML, "\n") + "\n"
 	}
@@ -124,7 +147,7 @@ func (s *Sandbox) Run(t *testing.T, args ...string) []byte {
 // Sh runs a /bin/sh script inside the sandbox VM.
 func (s *Sandbox) Sh(t *testing.T, script string) string {
 	t.Helper()
-	out, err := exec.Command("limactl", "shell", sandboxName, "--", "sh", "-c", script).CombinedOutput()
+	out, err := exec.Command("limactl", "shell", s.name, "--", "sh", "-c", script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("sandbox sh %q: %v\n%s", script, err, out)
 	}
@@ -217,19 +240,19 @@ type limaJSON struct {
 	SSHLocalPort int    `json:"sshLocalPort"`
 }
 
-func discover() (conn, string, error) {
+func discoverNamed(name, upHint string) (conn, string, error) {
 	if _, err := exec.LookPath("limactl"); err != nil {
-		return conn{}, "limactl not found; install Lima and run `make sandbox-up`", nil
+		return conn{}, "limactl not found; install Lima and run `" + upHint + "`", nil
 	}
-	inst, err := limaInstance(sandboxName)
+	inst, err := limaInstance(name)
 	if err != nil {
-		return conn{}, fmt.Sprintf("sandbox %q not found (%v); run `make sandbox-up`", sandboxName, err), nil
+		return conn{}, fmt.Sprintf("sandbox %q not found (%v); run `%s`", name, err, upHint), nil
 	}
 	if inst.Status != "Running" {
-		return conn{}, fmt.Sprintf("sandbox %q is %q, not Running; run `make sandbox-up`", sandboxName, inst.Status), nil
+		return conn{}, fmt.Sprintf("sandbox %q is %q, not Running; run `%s`", name, inst.Status, upHint), nil
 	}
 	if inst.SSHLocalPort == 0 {
-		return conn{}, fmt.Sprintf("sandbox %q has no ssh port yet; is it still booting?", sandboxName), nil
+		return conn{}, fmt.Sprintf("sandbox %q has no ssh port yet; is it still booting?", name), nil
 	}
 	host := sshConfigField(inst.Dir, "Hostname")
 	if host == "" {

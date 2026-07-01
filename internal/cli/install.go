@@ -321,13 +321,19 @@ func newInstallPipCmd() *cobra.Command {
 }
 
 func newInstallCondaCmd() *cobra.Command {
-	var transport, pyVersion, tier string
+	var transport, pyVersion, tier, file string
 	var condaArgs []string
 	cmd := &cobra.Command{
-		Use:   "conda <pkg>[==version]...",
-		Short: "Install conda packages into a conda env (Tier-0 channel / relay air-gapped)",
-		Args:  cobra.MinimumNArgs(1),
+		Use:   "conda [<pkg>[==version]...]",
+		Short: "Install conda packages, or a whole environment.yml (--file), into a conda env (Tier-0 channel / relay air-gapped)",
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if file == "" && (pyVersion == "" || len(args) == 0) {
+				return fmt.Errorf("give --python and package names, or --file <dir>/environment.yml (a sandbox environment.yml)")
+			}
+			if file != "" && (len(args) > 0 || pyVersion != "") {
+				return fmt.Errorf("--file builds a whole environment.yml; don't also pass --python or package names")
+			}
 			cfg, err := config.Load(cfgFile, sandboxID)
 			if err != nil {
 				return err
@@ -340,7 +346,12 @@ func newInstallCondaCmd() *cobra.Command {
 			}
 			defer sess.Close()
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			out, err := conda.Run(ctx, condaDeps(sess, pr), pyVersion, parseSpecs(args), tier, condaArgs)
+			var out pkg.Outcome
+			if file != "" {
+				out, err = conda.RunManifest(ctx, condaDeps(sess, pr), file, tier)
+			} else {
+				out, err = conda.Run(ctx, condaDeps(sess, pr), pyVersion, parseSpecs(args), tier, condaArgs)
+			}
 			finish()
 			if err != nil {
 				return err
@@ -350,10 +361,10 @@ func newInstallCondaCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
-	cmd.Flags().StringVar(&pyVersion, "python", "", "target python minor version, e.g. 3.12 (required)")
+	cmd.Flags().StringVar(&pyVersion, "python", "", "target python minor version, e.g. 3.12 (required unless --file)")
 	cmd.Flags().StringVar(&tier, "tier", "auto", "resolution tier: auto|mirror|relay")
+	cmd.Flags().StringVar(&file, "file", "", "sandbox path to an environment.yml — build the whole env from it instead of named packages")
 	cmd.Flags().StringArrayVar(&condaArgs, "conda-arg", nil, "extra conda flag passed through (allowlisted), e.g. --conda-arg=-c --conda-arg=conda-forge (repeatable)")
-	_ = cmd.MarkFlagRequired("python")
 	return cmd
 }
 

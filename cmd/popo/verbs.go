@@ -36,6 +36,17 @@ func buildParams(verb string, args []string) (any, error) {
 		return map[string]any{"python_version": ver, "packages": pkgs}, nil
 
 	case "conda.install":
+		// --file <path>: build a whole environment.yml in the sandbox instead of named
+		// packages (python + channels + specs all come from the manifest).
+		if f, r2, ok := takeFlag(args, "--file"); ok {
+			if f == "" {
+				return nil, fmt.Errorf("--file needs a path to an environment.yml")
+			}
+			if len(r2) > 0 {
+				return nil, fmt.Errorf("--file builds an environment.yml; don't also pass --python or packages")
+			}
+			return map[string]any{"file": f}, nil
+		}
 		ver, rest, err := requireFlag(args, "--python")
 		if err != nil {
 			return nil, err

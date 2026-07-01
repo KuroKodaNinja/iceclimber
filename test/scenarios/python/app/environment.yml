@@ -1,0 +1,8 @@
+name: mlkit
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pytorch
+  - pandas
+  - numpy
