@@ -197,6 +197,11 @@ func (m *Manager) offlineCreateCmd(prefix, chanURL, minor string, specs []pkg.Sp
 		remote.ShellQuote(m.cfg.CondaBin), "create", "-y", "--json",
 		"-p", remote.ShellQuote(prefix),
 		"--offline", "--override-channels",
+		// The default libmamba solver cannot load a synthesized local repodata.json for a
+		// file:// channel ("Could not load repodata"); the classic solver reads it fine and
+		// is always built into conda. Forcing it keeps the relay working without shipping a
+		// zstd-compressed repodata.json.zst (which libmamba would otherwise require).
+		"--solver", "classic",
 		"-c", remote.ShellQuote(chanURL),
 		remote.ShellQuote("python=" + minor),
 	}

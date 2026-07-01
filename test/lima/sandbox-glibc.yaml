@@ -49,9 +49,27 @@ provision:
 - mode: system
   script: |
     #!/bin/bash
+    # Miniforge (conda) — the BINARY ONLY, with NO channel/package-cache seeding.
+    # The conda relay tier pushes a self-contained file:// channel into the sandbox,
+    # so conda packages install fully OFFLINE; the base install just needs the conda
+    # executable reachable. This is exactly the air-gapped fixture: no `.condarc`
+    # offline hack, no pre-seeded pkgs — the relay proves it end to end.
+    set -eux
+    arch=$(uname -m)   # aarch64 on Apple Silicon, x86_64 on Intel
+    curl -fsSL -o /tmp/miniforge.sh \
+      "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${arch}.sh"
+    bash /tmp/miniforge.sh -b -p /opt/conda
+    rm -f /tmp/miniforge.sh
+    # Surface conda on the default (non-login) PATH the SSH runner + probe use
+    # (`command -v conda`), without activating a base env for interactive shells.
+    ln -sf /opt/conda/bin/conda /usr/local/bin/conda
+- mode: system
+  script: |
+    #!/bin/bash
     # Smoke-check the toolchain so a broken provision fails `make sandbox-glibc-up`.
     set -eux
     python3 --version
     python3 -m venv --help >/dev/null
     node --version
     java -version
+    conda --version

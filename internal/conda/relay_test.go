@@ -155,7 +155,7 @@ func TestOfflineCreateCmd(t *testing.T) {
 	cmd := m.offlineCreateCmd("/root/envs/conda-python-3.12", "file:///root/blobs/conda-chan-x", "3.12",
 		[]pkg.Spec{{Name: "six"}})
 	for _, want := range []string{"create", "-y", "--json", "--offline", "--override-channels",
-		"file:///root/blobs/conda-chan-x", "python=3.12", "six"} {
+		"--solver classic", "file:///root/blobs/conda-chan-x", "python=3.12", "six"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("offlineCreateCmd missing %q:\n%s", want, cmd)
 		}
