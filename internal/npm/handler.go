@@ -81,6 +81,36 @@ func Run(ctx context.Context, d Deps, nodeVersion string, specs []pkg.Spec, tier
 	return result(out), nil
 }
 
+// RunProject installs a full npm project's dependencies from its package.json in the
+// sandbox (manifest-driven). Relay: the controller's npm resolves + installs and the tree
+// is relayed into <projectDir>/node_modules; mirror: the sandbox's own npm installs in
+// place. Either way the project runs with ordinary local ./node_modules resolution.
+func RunProject(ctx context.Context, d Deps, nodeVersion, projectDir, tier string) (Result, error) {
+	d.Progress.Phase("resolving")
+	nodeBin, err := node.Locate(ctx, d.FS, d.Root, nodeVersion, d.Arch, d.Libc)
+	if err != nil {
+		return Result{}, err
+	}
+	dir := path.Dir(path.Dir(nodeBin))
+	m := New(Config{
+		Runner: d.Runner, FS: d.FS, NodeBin: nodeBin, NpmBin: path.Join(dir, "bin", "npm"),
+		Prefix: dir, NodePath: path.Join(dir, "lib", "node_modules"), RegistryURL: d.RegistryURL,
+		Arch: d.Arch, Libc: d.Libc, ControllerNpm: d.ControllerNpm, ControllerRegistry: d.ControllerRegistry,
+	})
+	d.Progress.Phase("installing")
+	var out pkg.Outcome
+	if resolveTier(tier, d.RegistryURL) == pkg.TierRelay {
+		out, err = m.RelayInstallProject(ctx, projectDir)
+	} else {
+		out, err = m.InstallProject(ctx, projectDir)
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	// A project resolves ./node_modules locally — no global NODE_PATH needed.
+	return Result{Installed: out.Installed, Failed: out.Failed, NodePath: path.Join(projectDir, "node_modules")}, nil
+}
+
 // resolveTier maps the requested tier to a concrete one. "auto" picks relay when
 // no sandbox-reachable registry is configured (the air-gapped default), else
 // mirror. "mirror"/"relay" force the choice.
@@ -104,6 +134,9 @@ type installParams struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
 	} `json:"packages"`
+	// Project, when set, is a sandbox directory holding a package.json — manifest-driven
+	// install (npm install/ci) instead of an explicit package list.
+	Project string `json:"project,omitempty"`
 }
 
 // Handler adapts npm.Run into the npm.install protocol handler.
@@ -116,8 +149,16 @@ func Handler(d Deps) protocol.Handler {
 		if p.NodeVersion == "" {
 			return protocol.Errf(req.ID, "missing_node_version", "npm.install requires params.node_version")
 		}
+		// Manifest-driven install from a sandbox project's package.json.
+		if p.Project != "" {
+			out, err := RunProject(ctx, d, p.NodeVersion, p.Project, "auto")
+			if err != nil {
+				return protocol.Errf(req.ID, "install_failed", "%v", err)
+			}
+			return protocol.OK(req.ID, out)
+		}
 		if len(p.Packages) == 0 {
-			return protocol.Errf(req.ID, "no_packages", "npm.install requires at least one package")
+			return protocol.Errf(req.ID, "no_packages", "npm.install requires at least one package (or params.project)")
 		}
 		specs := make([]pkg.Spec, len(p.Packages))
 		for i, pp := range p.Packages {

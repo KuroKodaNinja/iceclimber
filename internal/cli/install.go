@@ -133,12 +133,18 @@ func newInstallJavaCmd() *cobra.Command {
 }
 
 func newInstallNpmCmd() *cobra.Command {
-	var transport, nodeVersion, tier string
+	var transport, nodeVersion, tier, project string
 	cmd := &cobra.Command{
-		Use:   "npm <pkg>[@version]...",
-		Short: "Install npm packages into an installed Node runtime (Tier 0 mirror / Tier 1 relay)",
-		Args:  cobra.MinimumNArgs(1),
+		Use:   "npm [<pkg>[@version]...]",
+		Short: "Install npm packages, or a whole project's package.json (--project), into a Node runtime (Tier 0 mirror / Tier 1 relay)",
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if project == "" && len(args) == 0 {
+				return fmt.Errorf("give package names or --project <dir> (a sandbox dir with package.json)")
+			}
+			if project != "" && len(args) > 0 {
+				return fmt.Errorf("--project installs a package.json; don't also pass package names")
+			}
 			cfg, err := config.Load(cfgFile, sandboxID)
 			if err != nil {
 				return err
@@ -153,7 +159,12 @@ func newInstallNpmCmd() *cobra.Command {
 			defer sess.Close()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			out, err := npm.Run(ctx, npmDeps(sess, pr), nodeVersion, parseNpmSpecs(args), tier)
+			var out npm.Result
+			if project != "" {
+				out, err = npm.RunProject(ctx, npmDeps(sess, pr), nodeVersion, project, tier)
+			} else {
+				out, err = npm.Run(ctx, npmDeps(sess, pr), nodeVersion, parseNpmSpecs(args), tier)
+			}
 			finish()
 			if err != nil {
 				return err
@@ -173,6 +184,7 @@ func newInstallNpmCmd() *cobra.Command {
 	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVar(&nodeVersion, "node", "", "target node version line, e.g. 20 (required)")
 	cmd.Flags().StringVar(&tier, "tier", "auto", "resolution tier: auto|mirror|relay")
+	cmd.Flags().StringVar(&project, "project", "", "sandbox project dir with a package.json — install its deps (npm install/ci) instead of named packages")
 	_ = cmd.MarkFlagRequired("node")
 	return cmd
 }

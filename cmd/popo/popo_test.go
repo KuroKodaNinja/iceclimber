@@ -25,6 +25,8 @@ func TestBuildParams(t *testing.T) {
 			`{"packages":[{"name":"requests"},{"name":"rich","version":"13.7"}],"python_version":"3.12"}`},
 		{"npm.install", []string{"--node", "24", "left-pad@1.3.0", "@scope/x"},
 			`{"node_version":"24","packages":[{"name":"left-pad","version":"1.3.0"},{"name":"@scope/x"}]}`},
+		{"npm.install", []string{"--node", "24", "--project", "/tmp/app"},
+			`{"node_version":"24","project":"/tmp/app"}`},
 		{"maven.install", []string{"--java", "21", "com.google.code.gson:gson:2.10.1"},
 			`{"java_version":"21","packages":[{"name":"com.google.code.gson:gson","version":"2.10.1"}]}`},
 		{"conda.install", []string{"--python", "3.12", "-c", "conda-forge", "numpy=1.26", "six"},

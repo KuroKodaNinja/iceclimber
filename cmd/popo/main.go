@@ -90,7 +90,7 @@ var verbs = map[string]string{
 	"python.install": "popo python.install <minor>            e.g. 3.12",
 	"pip.install":    "popo pip.install --python <minor> <pkg[==version]>...",
 	"node.install":   "popo node.install <version-line>        e.g. 24",
-	"npm.install":    "popo npm.install --node <line> <pkg[@version]>...",
+	"npm.install":    "popo npm.install --node <line> <pkg[@version]>... | --project <dir>",
 	"java.install":   "popo java.install <feature>             e.g. 21",
 	"maven.install":  "popo maven.install --java <feature> <group:artifact:version>...",
 	"conda.install":  "popo conda.install --python <minor> [-c <channel>]... [--offline] <pkg[=version]>...",

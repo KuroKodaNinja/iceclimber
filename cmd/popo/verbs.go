@@ -76,6 +76,17 @@ func buildParams(verb string, args []string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		// --project <dir>: install a whole package.json in the sandbox (npm install/ci)
+		// instead of named packages.
+		if proj, r2, ok := takeFlag(rest, "--project"); ok {
+			if proj == "" {
+				return nil, fmt.Errorf("--project needs a directory")
+			}
+			if len(r2) > 0 {
+				return nil, fmt.Errorf("--project installs a package.json; don't also pass package names")
+			}
+			return map[string]any{"node_version": ver, "project": proj}, nil
+		}
 		pkgs, err := parsePkgs(rest, "@")
 		if err != nil {
 			return nil, err

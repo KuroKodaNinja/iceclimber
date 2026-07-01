@@ -1,0 +1,11 @@
+{
+  "name": "xkcd-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A real npm project: renders a blessed-contrib terminal dashboard from fetched xkcd data.",
+  "main": "index.js",
+  "dependencies": {
+    "blessed": "0.1.81",
+    "blessed-contrib": "4.11.0"
+  }
+}

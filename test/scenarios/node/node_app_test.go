@@ -27,9 +27,14 @@ import (
 //go:embed app/index.js
 var appJS []byte
 
-// TestNodeApp exercises the whole Node stack end to end: web.fetch (through Popo)
-// → node.install → npm.install (figlet + cli-table3, relay) → build + run a real
-// program → assert it rendered the computed report.
+//go:embed app/package.json
+var appPkgJSON []byte
+
+// TestNodeApp exercises the whole Node stack end to end as a real npm project:
+// web.fetch (through Popo) → node.install → a package.json project installed via the
+// manifest-driven relay (`install npm --project`, resolving blessed + blessed-contrib —
+// whose node_modules carries .bin symlinks) → build + run the blessed-contrib dashboard
+// with ordinary local ./node_modules resolution → assert the computed report.
 func TestNodeApp(t *testing.T) {
 	sb := harness.Require(t)
 	root := sb.NewRoot(t)
@@ -45,45 +50,62 @@ func TestNodeApp(t *testing.T) {
 	fs := sb.DialFS(t, "sftp")
 	ctx := context.Background()
 	tree := protocol.Tree{Root: root}
-	work := path.Join(root, "work")
-	if err := fs.Mkdir(ctx, work); err != nil {
-		t.Fatalf("mkdir work: %v", err)
+	// A real project directory: package.json + index.js live together, and the relayed
+	// node_modules lands beside them (local resolution, no NODE_PATH).
+	proj := path.Join(root, "dashboard")
+	if err := fs.Mkdir(ctx, proj); err != nil {
+		t.Fatalf("mkdir project: %v", err)
 	}
 
 	// 1. Fetch the comic through Popo and stage it as the app's input.
 	comic := fetchComic(t, sb, fs, tree, root, cfg)
 	rawComic, _ := json.Marshal(comic)
-	if err := fs.WriteFile(ctx, path.Join(work, "comic.json"), rawComic); err != nil {
+	if err := fs.WriteFile(ctx, path.Join(proj, "comic.json"), rawComic); err != nil {
 		t.Fatalf("write comic.json: %v", err)
 	}
 
-	// 2. Provision Node + the two npm packages (via relay).
+	// 2. Provision Node, deploy the project manifest + source, and install the whole
+	//    project's dependencies from its package.json via the manifest-driven relay.
 	sb.Run(t, "install", "node", "24", "--config", cfg, "--transport", "sftp")
-	npmOut := string(sb.Run(t, "install", "npm", "figlet", "cli-table3",
-		"--node", "24", "--tier", "relay", "--config", cfg, "--transport", "sftp"))
-	if !strings.Contains(npmOut, "installed figlet") || !strings.Contains(npmOut, "installed cli-table3") {
-		t.Fatalf("npm install output:\n%s", npmOut)
+	if err := fs.WriteFile(ctx, path.Join(proj, "package.json"), appPkgJSON); err != nil {
+		t.Fatalf("write package.json: %v", err)
 	}
-	nodePath := nodePathFrom(t, npmOut)
-
-	// 3. Deploy + run the application.
-	if err := fs.WriteFile(ctx, path.Join(work, "index.js"), appJS); err != nil {
+	if err := fs.WriteFile(ctx, path.Join(proj, "index.js"), appJS); err != nil {
 		t.Fatalf("write index.js: %v", err)
 	}
-	nodeBin := strings.TrimSuffix(nodePath, "/lib/node_modules") + "/bin/node"
-	out := sb.Sh(t, fmt.Sprintf("NODE_PATH=%s %s %s %s",
-		shq(nodePath), shq(nodeBin), shq(path.Join(work, "index.js")), shq(path.Join(work, "comic.json"))))
+	npmOut := string(sb.Run(t, "install", "npm", "--project", proj,
+		"--node", "24", "--tier", "relay", "--config", cfg, "--transport", "sftp"))
+	if !strings.Contains(npmOut, "installed blessed-contrib") || !strings.Contains(npmOut, "installed blessed ") {
+		t.Fatalf("npm --project install output (want blessed + blessed-contrib):\n%s", npmOut)
+	}
 
-	// 4. Assert the rendered report carries the computed values (the program ran,
-	//    both libraries loaded, and it processed the fetched data).
+	// 3. Run the application from the project dir — node resolves ./node_modules with no
+	//    NODE_PATH, exactly as a normal project would.
+	nodeBin := nodeBinFrom(t, sb, root)
+	out := sb.Sh(t, fmt.Sprintf("cd %s && %s %s %s",
+		shq(proj), shq(nodeBin), shq("index.js"), shq("comic.json")))
+
+	// 4. Assert the app ran headless, both libraries loaded and drove widgets, and it
+	//    processed the fetched data.
 	num := strconv.Itoa(int(comic["num"].(float64)))
 	title, _ := comic["title"].(string)
 	titleLen := strconv.Itoa(len(utf16.Encode([]rune(title)))) // JS string.length = UTF-16 units
-	for _, want := range []string{num, title, titleLen} {
+	for _, want := range []string{"DASHBOARD_OK", num, title, titleLen} {
 		if !strings.Contains(out, want) {
 			t.Errorf("app output is missing %q:\n%s", want, out)
 		}
 	}
+}
+
+// nodeBinFrom finds the installed node interpreter's absolute path in the sandbox
+// (runtimes/node/<ver>/bin/node), independent of the project's local node_modules.
+func nodeBinFrom(t *testing.T, sb *harness.Sandbox, root string) string {
+	t.Helper()
+	out := strings.TrimSpace(sb.Sh(t, "ls -d "+shq(path.Join(root, "runtimes", "node"))+"/*/bin/node"))
+	if out == "" || strings.Contains(out, "\n") {
+		t.Fatalf("expected exactly one node bin under %s/runtimes/node, got %q", root, out)
+	}
+	return out
 }
 
 // fetchComic delivers a web.fetch for the xkcd JSON, services it with one serve
@@ -140,17 +162,6 @@ func fetchComic(t *testing.T, sb *harness.Sandbox, fs remotefs.FS, tree protocol
 		t.Fatalf("fetched JSON missing numeric num: %v", comic)
 	}
 	return comic
-}
-
-func nodePathFrom(t *testing.T, out string) string {
-	t.Helper()
-	for _, line := range strings.Split(out, "\n") {
-		if i := strings.Index(line, "NODE_PATH="); i >= 0 {
-			return strings.TrimSpace(line[i+len("NODE_PATH="):])
-		}
-	}
-	t.Fatalf("no NODE_PATH in npm output:\n%s", out)
-	return ""
 }
 
 func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
