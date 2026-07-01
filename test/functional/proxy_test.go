@@ -53,6 +53,70 @@ func TestProxyPipEgress(t *testing.T) {
 	}
 }
 
+// TestProxyNpmEgress is the npm parity anchor: in egress_mode: proxy the sandbox's OWN npm
+// (bundled with the node runtime iceclimber installs) reaches the real npm registry through
+// Popo's reverse-tunneled MITM proxy, trusting the bootstrap-installed CA and routed via
+// npm_config_proxy/NODE_EXTRA_CA_CERTS — all from `popo shellenv`, no relay, no per-tool Go.
+func TestProxyNpmEgress(t *testing.T) {
+	sb := requireSandbox(t)
+	root := "/tmp/iceclimber-proxynpm-" + protocol.NewID()
+	scheduleRootCleanup(t, root)
+	cfg := writeProxyConfig(t, sb, root, `network:
+  allowed_domains:
+    - { pattern: "registry.npmjs.org", reachable_from: controller }`)
+
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
+	runIceclimber(t, "install", "node", "24", "--config", cfg, "--transport", "sftp")
+
+	stop := startProxyServe(t, cfg)
+	defer stop()
+
+	// The sandbox's own npm, through the proxy, installing a pure-JS package into a prefix.
+	// npm is a `#!/usr/bin/env node` script, so node must be on PATH to run it.
+	node := root + "/runtimes/node/*/bin/node"
+	nodeDir := `$(dirname $(ls ` + node + `))`
+	out := limaSh(t, `eval "$(`+root+`/popo shellenv)"; export PATH="`+nodeDir+`:$PATH"; `+
+		`npm install --prefix `+root+`/npmapp --no-audit --no-fund left-pad >/dev/null 2>&1 && echo INSTALL_OK || echo INSTALL_FAIL`)
+	if !strings.Contains(out, "INSTALL_OK") {
+		t.Fatalf("npm through the proxy failed:\n%s", out)
+	}
+	imp := limaSh(t, `NODE_PATH=`+root+`/npmapp/node_modules `+node+` -e 'console.log("IMPORT_"+require("left-pad")("x",3))'`)
+	if !strings.Contains(imp, "IMPORT_") {
+		t.Errorf("require left-pad from proxy-installed pkg: %s", imp)
+	}
+}
+
+// TestProxyCondaEgress is the conda parity anchor: in egress_mode: proxy the glibc sandbox's
+// OWN native conda reaches conda-forge (conda.anaconda.org) through the proxy — a real solve
+// + download, no relay/repodata synthesis — trusting the CA via conda's OpenSSL knobs
+// (SSL_CERT_FILE/REQUESTS_CA_BUNDLE), all from `popo shellenv`.
+func TestProxyCondaEgress(t *testing.T) {
+	sb := requireGlibcSandbox(t) // native conda ships on the glibc box
+	requireSandboxConda(t, sb)
+	root := "/tmp/iceclimber-proxyconda-" + protocol.NewID()
+	scheduleRootCleanupOn(t, sb.Name, root)
+	cfg := writeProxyConfigFor(t, sb, root, `network:
+  allowed_domains:
+    - { pattern: "conda.anaconda.org", reachable_from: controller }`)
+
+	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
+	stop := startProxyServe(t, cfg)
+	defer stop()
+
+	// A tiny noarch package (no python dependency) — proves the native solve+download reaches
+	// conda-forge through the proxy without a multi-minute python env build.
+	env := root + "/condaenv"
+	out := limaShOn(t, sb.Name, `eval "$(`+root+`/popo shellenv)"; `+
+		`conda create -y -p `+env+` -c conda-forge --override-channels tzdata >/dev/null 2>&1 && echo CREATE_OK || echo CREATE_FAIL`)
+	if !strings.Contains(out, "CREATE_OK") {
+		t.Fatalf("conda create through the proxy failed:\n%s", out)
+	}
+	meta := limaShOn(t, sb.Name, `ls `+env+`/conda-meta/tzdata-*.json 2>/dev/null && echo META_OK || echo META_MISSING`)
+	if !strings.Contains(meta, "META_OK") {
+		t.Errorf("conda env missing the proxy-installed package: %s", meta)
+	}
+}
+
 // TestProxyPackagePathDeny proves package/path-level egress policy: on an ALLOWED registry
 // host, a deny rule that includes a path ("https://pypi.org/simple/six/*") blocks just that
 // one package (the proxy's per-request path veto returns 403) while every other package on
