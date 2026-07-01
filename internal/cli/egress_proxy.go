@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"sync"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/egress"
 	"github.com/KuroKodaNinja/iceclimber/internal/proxy"
+	"github.com/KuroKodaNinja/iceclimber/internal/webfetch"
 )
 
 // egressCAPaths are the controller-side CA cert/key for the proxy egress mode, persisted
@@ -47,9 +51,18 @@ func startEgressProxy(sess *session, cfg *config.Config, out io.Writer) (func(),
 		return nil, fmt.Errorf("egress reverse tunnel on sandbox %s (does the sandbox sshd allow TCP forwarding?): %w", addr, err)
 	}
 	audit := func(r proxy.Request, v proxy.Verdict, code int) {
-		fmt.Fprintf(out, "  egress %d %s %s%s\n", code, r.Method, r.Host, r.Path)
+		tag := ""
+		if !v.Allow {
+			tag = " DENIED (" + v.Reason + ")"
+		} else if v.RewriteHost != "" {
+			tag = " → " + v.RewriteHost
+		}
+		fmt.Fprintf(out, "  egress %d %s %s%s%s\n", code, r.Method, r.Host, r.Path, tag)
 	}
-	p := proxy.New(ca, nil /* allow-all until PX4 */, audit, nil)
+	// Gate every request through the egress policy (allow/hold/deny + persistent approval
+	// + rewrite table), reusing the interactive approver when serve is supervised.
+	pp := newProxyPolicy(sess.policy, sess.approver, cfg.SandboxID)
+	p := proxy.New(ca, pp.decide, audit, nil)
 	go func() { _ = p.Serve(ln) }()
 	fmt.Fprintf(out, "  egress proxy up: sandbox 127.0.0.1:%d → controller MITM\n", cfg.EgressPort())
 	return func() { _ = ln.Close() }, nil
@@ -105,6 +118,83 @@ func egressEnvScript(port int) string {
 		"export NODE_EXTRA_CA_CERTS=\"$CA\"\n" +
 		"export npm_config_https_proxy=$HTTPS_PROXY\n" +
 		"export npm_config_proxy=$HTTPS_PROXY\n"
+}
+
+// proxyPolicy gates proxied requests against the egress policy — the same allow/hold/deny
+// + persistent-approval + rewrite-table logic web.fetch uses, adapted to a live
+// connection. Per-host decisions are memoized (an install fires many requests per host;
+// the operator is prompted at most once), and a Hold with no interactive approver denies
+// (a live proxy request can't defer to the async pending queue like a maildir fetch can).
+type proxyPolicy struct {
+	policy    *egress.Policy
+	ap        webfetch.Approver // nil in headless serve
+	sandboxID string
+	mu        sync.Mutex
+	cache     map[string]proxy.Verdict
+}
+
+func newProxyPolicy(policy *egress.Policy, ap webfetch.Approver, sandboxID string) *proxyPolicy {
+	return &proxyPolicy{policy: policy, ap: ap, sandboxID: sandboxID, cache: map[string]proxy.Verdict{}}
+}
+
+func (pp *proxyPolicy) decide(r proxy.Request) proxy.Verdict {
+	pp.mu.Lock()
+	defer pp.mu.Unlock() // serialize decisions (and any prompt); the cache makes this cheap after the first hit per host
+	if v, ok := pp.cache[r.Host]; ok {
+		return v
+	}
+	resolved, _, _, err := pp.policy.Resolve(r.URL)
+	if err != nil || resolved == "" {
+		resolved = r.URL
+	}
+	rewriteHost := ""
+	if h := urlHost(resolved); h != "" && h != r.Host {
+		rewriteHost = h
+	}
+	v := pp.evaluate(r, resolved, rewriteHost)
+	pp.cache[r.Host] = v
+	return v
+}
+
+func (pp *proxyPolicy) evaluate(r proxy.Request, resolved, rewriteHost string) proxy.Verdict {
+	switch pp.policy.Decide(resolved) {
+	case egress.Allow:
+		return proxy.Verdict{Allow: true, RewriteHost: rewriteHost}
+	case egress.Deny:
+		return proxy.Verdict{Allow: false, Reason: "denied by egress policy"}
+	default: // Hold
+		// Operator-listed allowed_domains pre-allow proxy egress without a prompt (a store
+		// Deny already took precedence above).
+		if pp.policy.ConfigAllowed(resolved) {
+			return proxy.Verdict{Allow: true, RewriteHost: rewriteHost}
+		}
+		if pp.ap == nil {
+			return proxy.Verdict{Allow: false, Reason: "host not on the allow-list (approve it in an interactive `serve`, or add it to network.allowed_domains)"}
+		}
+		switch pp.ap.ApproveFetch(context.Background(), webfetch.ApprovalPrompt{
+			SandboxID: pp.sandboxID, Method: r.Method, URL: resolved, Host: r.Host,
+			Reason: "sandbox egress via the proxy (host not in the allow-list)",
+		}) {
+		case webfetch.ApproveRemember:
+			_ = pp.policy.Store().AddAllow(egress.HostGlob(resolved))
+			return proxy.Verdict{Allow: true, RewriteHost: rewriteHost}
+		case webfetch.ApproveOnce:
+			return proxy.Verdict{Allow: true, RewriteHost: rewriteHost}
+		case webfetch.DenyRemember:
+			_ = pp.policy.Store().AddDeny(egress.HostGlob(resolved))
+			return proxy.Verdict{Allow: false, Reason: "denied by operator"}
+		default:
+			return proxy.Verdict{Allow: false, Reason: "denied by operator"}
+		}
+	}
+}
+
+// urlHost extracts the hostname from a URL (no port), for rewrite detection.
+func urlHost(raw string) string {
+	if u, err := url.Parse(raw); err == nil {
+		return u.Hostname()
+	}
+	return ""
 }
 
 // mavenProxySettings is a Maven settings.xml <proxies> block (Maven routes via settings,

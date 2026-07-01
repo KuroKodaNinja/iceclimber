@@ -80,6 +80,23 @@ func (p *Policy) Resolve(raw string) (url, venue string, rewritten bool, err err
 }
 
 // Decide gates a controller-venue URL: deny rules win, then allow rules, then the
+// ConfigAllowed reports whether raw's host matches an operator-configured
+// allowed_domains pattern. The proxy egress mode uses this as a pre-allow list — the
+// operator declared these hosts reachable, so listed registries need no per-request
+// approval (an explicit store Deny still overrides, since callers check Decide first).
+func (p *Policy) ConfigAllowed(raw string) bool {
+	host, err := hostOf(normalizeURL(raw))
+	if err != nil {
+		return false
+	}
+	for _, ad := range p.allowed {
+		if globMatch(ad.Pattern, host) {
+			return true
+		}
+	}
+	return false
+}
+
 // unlisted policy (gate → hold for approval, deny → refuse).
 func (p *Policy) Decide(url string) Decision {
 	for _, r := range p.store.Deny() {

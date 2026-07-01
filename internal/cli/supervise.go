@@ -59,14 +59,16 @@ func superviseServe(ctx context.Context, cfg *config.Config, transport string, d
 		if hooks.onConnected != nil {
 			hooks.onConnected(sess, attempt)
 		}
-		// In proxy egress mode, bring up the reverse-tunneled MITM proxy for this
-		// connection (torn down at cycle end; the next reconnect re-establishes it).
+		// Build the dispatcher first (it installs the interactive approver on the
+		// session), then — in proxy egress mode — bring up the reverse-tunneled MITM
+		// proxy for this connection so it gates through that same approver. Torn down at
+		// cycle end; the next reconnect re-establishes it.
+		disp := buildServeDispatcher(ctx, sess, cfg, deny, out, supervised)
 		stopProxy, perr := startEgressProxy(sess, cfg, out)
 		if perr != nil {
 			_ = sess.Close()
 			return true, perr
 		}
-		disp := buildServeDispatcher(ctx, sess, cfg, deny, out, supervised)
 		err = disp.Serve(ctx, interval)
 		stopProxy()
 		_ = sess.Close()
