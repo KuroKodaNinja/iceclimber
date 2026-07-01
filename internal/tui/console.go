@@ -271,6 +271,8 @@ type formState struct {
 	// bootstrap form: env_manager for a system python ("venv"|"conda"), offered only when
 	// the box has conda; ignored unless python's source is "system".
 	pyEnvManager string
+	// bootstrap form: "provision" (safe, default) | "reset" (destructive — wipe runtimes + state).
+	bootstrapAction string
 }
 
 // NewConsole builds a console reading events (and, optionally, the agent stream).
@@ -661,6 +663,9 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 		}
 		c.running = "bootstrap"
 		c.progStart = time.Now()
+		if c.st.bootstrapAction == "reset" {
+			return c, tea.Batch(c.ops.RunBootstrapReset(), c.tickSpinner())
+		}
 		return c, tea.Batch(c.ops.RunBootstrap(), c.tickSpinner())
 	}
 	return c, nil
@@ -834,8 +839,20 @@ func (c *Console) bootstrapForm() *huh.Form {
 			))
 		}
 	}
+	// Provisioning mode — the console equivalent of `bootstrap --force`. Default = the safe
+	// idempotent re-provision (keeps runtimes); "reset" wipes the sandbox first. A Select
+	// (default provision) so it navigates cleanly and never enables a destructive action by
+	// accident.
+	c.st.bootstrapAction = "provision"
+	fields = append(fields, huh.NewSelect[string]().
+		Title("Provisioning mode").
+		Description("Re-provision is idempotent (installed runtimes are kept). Reset is destructive.").
+		Value(&c.st.bootstrapAction).Options(
+		huh.NewOption("re-provision — keep installed runtimes/packages", "provision"),
+		huh.NewOption("DESTRUCTIVE reset — delete runtimes + state, then reprovision", "reset"),
+	))
 	fields = append(fields, huh.NewConfirm().Title("Re-provision this sandbox?").
-		Description("Ensure the protocol tree, pip.conf, and NANA.md, then run the ping/pong smoke test. Idempotent — existing runtimes and approvals are kept.").
+		Description("Ensure the protocol tree, pip.conf, and NANA.md, then run the ping/pong smoke test. (Reset mode wipes runtimes first.)").
 		Value(&c.st.confirm))
 	return huh.NewForm(huh.NewGroup(fields...))
 }

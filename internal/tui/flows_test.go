@@ -503,12 +503,19 @@ func TestFlow_BootstrapConfirm(t *testing.T) {
 	ops := newRecordOps()
 	tm := startConsole(t, ops)
 	press(tm, "b")
+	waitText(t, tm, "Provisioning mode")
+	send(tm, tea.KeyEnter) // keep the default "re-provision" (safe) → advance to the confirm
 	waitText(t, tm, "Re-provision this sandbox?")
 	press(tm, "y") // accept
 	select {
 	case <-ops.bootstrap:
 	case <-time.After(5 * time.Second):
 		t.Fatal("confirming bootstrap should call RunBootstrap")
+	}
+	select {
+	case <-ops.reset:
+		t.Fatal("the safe path must not call RunBootstrapReset")
+	default:
 	}
 	finalConsole(t, tm)
 }
@@ -523,7 +530,9 @@ func TestFlow_BootstrapRuntimeSource(t *testing.T) {
 	press(tm, "b")
 	waitText(t, tm, "Python runtime") // the source select (only shown when detected)
 	send(tm, tea.KeyDown)             // move managed → system
-	send(tm, tea.KeyEnter)            // accept system → confirm field
+	send(tm, tea.KeyEnter)            // accept system → provisioning-mode select
+	waitText(t, tm, "Provisioning mode")
+	send(tm, tea.KeyEnter) // keep "re-provision" → confirm field
 	waitText(t, tm, "Re-provision this sandbox?")
 	press(tm, "y") // confirm
 	select {
@@ -554,7 +563,9 @@ func TestFlow_BootstrapCondaEnvManager(t *testing.T) {
 	send(tm, tea.KeyEnter) // accept system → env_manager select
 	waitText(t, tm, "env_manager")
 	send(tm, tea.KeyDown)  // venv → conda
-	send(tm, tea.KeyEnter) // accept conda → confirm
+	send(tm, tea.KeyEnter) // accept conda → provisioning-mode select
+	waitText(t, tm, "Provisioning mode")
+	send(tm, tea.KeyEnter) // keep "re-provision" → confirm
 	waitText(t, tm, "Re-provision this sandbox?")
 	press(tm, "y")
 	select {
@@ -573,12 +584,40 @@ func TestFlow_BootstrapDecline(t *testing.T) {
 	ops := newRecordOps()
 	tm := startConsole(t, ops)
 	press(tm, "b")
+	waitText(t, tm, "Provisioning mode")
+	send(tm, tea.KeyEnter) // keep default → advance to the confirm
 	waitText(t, tm, "Re-provision this sandbox?")
 	press(tm, "n") // decline
 	select {
 	case <-ops.bootstrap:
 		t.Fatal("declining must not bootstrap")
+	case <-ops.reset:
+		t.Fatal("declining must not reset")
 	case <-time.After(300 * time.Millisecond):
+	}
+	finalConsole(t, tm)
+}
+
+// TestFlow_BootstrapReset: choosing the destructive "reset" provisioning mode routes to
+// RunBootstrapReset (the console equivalent of `bootstrap --force`), not the plain bootstrap.
+func TestFlow_BootstrapReset(t *testing.T) {
+	ops := newRecordOps()
+	tm := startConsole(t, ops)
+	press(tm, "b")
+	waitText(t, tm, "Provisioning mode")
+	send(tm, tea.KeyDown)  // re-provision → DESTRUCTIVE reset
+	send(tm, tea.KeyEnter) // accept reset → confirm
+	waitText(t, tm, "Re-provision this sandbox?")
+	press(tm, "y") // proceed
+	select {
+	case <-ops.reset:
+	case <-time.After(5 * time.Second):
+		t.Fatal("choosing reset should call RunBootstrapReset")
+	}
+	select {
+	case <-ops.bootstrap:
+		t.Fatal("reset must not also call the plain RunBootstrap")
+	default:
 	}
 	finalConsole(t, tm)
 }
