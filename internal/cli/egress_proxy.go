@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/egress"
@@ -49,8 +52,14 @@ func startEgressProxy(sess *session, cfg *config.Config, out io.Writer) (func(),
 		return nil, fmt.Errorf("egress CA: %w", err)
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.EgressPort())
-	ln, err := sess.runner.RemoteListen(addr)
+	ln, err := listenWithRetry(func() (net.Listener, error) { return sess.runner.RemoteListen(addr) }, listenRetryAttempts, time.Sleep)
 	if err != nil {
+		if isForwardDenied(err) {
+			// The port is already forwarded on the sandbox and didn't free up within the retry
+			// window — almost always another serve holding it, not a transient restart race.
+			return nil, fmt.Errorf("egress reverse tunnel: sandbox port %d is still forwarded after %d tries — another `iceclimber serve` may be holding it for sandbox %q (stop it: pkill -f 'iceclimber.*serve'), or set egress_proxy_port to a free port: %w",
+				cfg.EgressPort(), listenRetryAttempts, cfg.SandboxID, err)
+		}
 		return nil, fmt.Errorf("egress reverse tunnel on sandbox %s (does the sandbox sshd allow TCP forwarding?): %w", addr, err)
 	}
 	audit := func(r proxy.Request, v proxy.Verdict, code int) {
@@ -65,19 +74,109 @@ func startEgressProxy(sess *session, cfg *config.Config, out io.Writer) (func(),
 	// Gate every request through the egress policy (allow/hold/deny + persistent approval
 	// + rewrite table), reusing the interactive approver when serve is supervised.
 	pp := newProxyPolicy(sess.policy, sess.approver, cfg.SandboxID)
+	// Seed the artifact-deny set from packages already denied at startup (their index is
+	// 403'd, so learn-on-serve never sees them) — resolve each denied pip index to its exact
+	// artifact URLs, wherever they're hosted. Best-effort; runs off the serve path.
+	pp.seedDeniedArtifacts(controllerIndexFetch)
 	p := proxy.New(ca, pp.decide, audit, nil)
-	// Package/path-level enforcement on an already-admitted host: a deny rule whose glob
-	// includes a path (e.g. "https://pypi.org/simple/leftpad/*") blocks just that URL. The
-	// host-level gate (pp.decide at CONNECT) can't see the path; this per-request veto can.
+	// Package/path-level enforcement on an already-admitted host: (1) a deny rule whose glob
+	// includes a path blocks just that URL; (2) a denied package's artifact (on a name-less
+	// CDN, possibly a different host) is blocked via the resolved/learned artifact set — the
+	// host-level CONNECT gate can't see either.
 	p.SetPathDenier(func(r proxy.Request) (bool, string) {
-		if sess.policy != nil && sess.policy.StoreDenied(pathDenyURL(r)) {
+		norm := pathDenyURL(r)
+		if sess.policy != nil && sess.policy.StoreDenied(norm) {
 			return true, "blocked by rule"
+		}
+		if pp.artifactDenied(norm) {
+			return true, "blocked package artifact"
 		}
 		return false, ""
 	})
+	// Learn-on-serve: record the artifact URLs of pip indexes served while allowed, so a
+	// mid-session deny of that package immediately blocks its already-seen artifacts.
+	p.SetResponseObserver(
+		func(r proxy.Request) bool { return isPipIndexPath(r.Path) },
+		func(r proxy.Request, body []byte) {
+			pp.recordIndex(r.URL, egress.ParsePackageIndex(body, indexContentType(r), r.URL))
+		},
+	)
 	go func() { _ = p.Serve(ln) }()
 	fmt.Fprintf(out, "  egress proxy up: sandbox 127.0.0.1:%d → controller MITM\n", cfg.EgressPort())
 	return func() { _ = ln.Close() }, nil
+}
+
+// isPipIndexPath reports whether a request path is a pip "simple" per-package index
+// (`…/simple/<pkg>/`) — the responses worth observing to learn a package's artifact URLs.
+func isPipIndexPath(p string) bool {
+	segs := strings.Split(strings.Trim(p, "/"), "/")
+	for i, s := range segs {
+		if s == "simple" {
+			return i == len(segs)-2 && segs[i+1] != ""
+		}
+	}
+	return false
+}
+
+// indexContentType hints ParsePackageIndex toward JSON when the request asked for the PEP 691
+// media type (we don't see the response headers here); ParsePackageIndex falls back to HTML.
+func indexContentType(proxy.Request) string { return "application/vnd.pypi.simple.v1+json" }
+
+// controllerIndexFetch fetches a package index from the controller's network (used to resolve
+// a denied package's artifacts). Short timeout; asks for PEP 691 JSON; TLS validated against
+// the controller's real roots. Returns (body, contentType, err).
+func controllerIndexFetch(indexURL string) ([]byte, string, error) {
+	req, err := http.NewRequest(http.MethodGet, indexURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("Accept", "application/vnd.pypi.simple.v1+json, text/html;q=0.5")
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("index %s: HTTP %d", indexURL, resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, "", err
+	}
+	return body, resp.Header.Get("Content-Type"), nil
+}
+
+// listenRetryAttempts bounds how many times startEgressProxy re-tries the reverse forward
+// when the sandbox reports the port already forwarded — enough (with the backoff below) to
+// outlast a just-stopped serve's forward being released (~1-2s), without hanging on a truly
+// held port.
+const listenRetryAttempts = 5
+
+// listenWithRetry opens the reverse-forward listener, retrying ONLY the "port already
+// forwarded" race (a just-stopped serve whose forward the sandbox sshd hasn't released yet)
+// with a short linear backoff. Any other error fails fast. sleep is injected for tests.
+func listenWithRetry(listen func() (net.Listener, error), attempts int, sleep func(time.Duration)) (net.Listener, error) {
+	var err error
+	for i := 0; i < attempts; i++ {
+		var ln net.Listener
+		if ln, err = listen(); err == nil {
+			return ln, nil
+		}
+		if !isForwardDenied(err) {
+			return nil, err // not the transient race — don't spin
+		}
+		if i < attempts-1 {
+			sleep(time.Duration(300*(i+1)) * time.Millisecond) // 300ms, 600ms, 900ms, 1.2s
+		}
+	}
+	return nil, err
+}
+
+// isForwardDenied reports whether err is the sandbox sshd refusing the reverse forward
+// because the port is already forwarded (golang.org/x/crypto/ssh returns a plain error).
+func isForwardDenied(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "tcpip-forward request denied")
 }
 
 // ensureEgressJavaTrust builds the JVM truststore (egress CA) after a JDK install in proxy
@@ -163,10 +262,72 @@ type proxyPolicy struct {
 	sandboxID string
 	mu        sync.Mutex
 	cache     map[string]proxy.Verdict
+	// H1 close (package artifacts on a name-less CDN): deniedArtifacts is seeded at startup
+	// by resolving each denied pip index to its exact artifact URLs; learned records
+	// artifactURL→indexURL from indexes served while allowed, so denying that package
+	// mid-session blocks its already-seen artifacts. Both keyed by normalizeEgressURL.
+	deniedArtifacts map[string]struct{}
+	learned         map[string]string
 }
 
 func newProxyPolicy(policy *egress.Policy, ap webfetch.Approver, sandboxID string) *proxyPolicy {
-	return &proxyPolicy{policy: policy, ap: ap, sandboxID: sandboxID, cache: map[string]proxy.Verdict{}}
+	return &proxyPolicy{
+		policy: policy, ap: ap, sandboxID: sandboxID,
+		cache:           map[string]proxy.Verdict{},
+		deniedArtifacts: map[string]struct{}{},
+		learned:         map[string]string{},
+	}
+}
+
+// artifactDenied reports whether a normalized URL is a denied package's artifact — either
+// pre-seeded (startup resolve) or learned-on-serve with its index now matching a deny rule.
+func (pp *proxyPolicy) artifactDenied(normURL string) bool {
+	pp.mu.Lock()
+	defer pp.mu.Unlock()
+	if _, ok := pp.deniedArtifacts[normURL]; ok {
+		return true
+	}
+	if idx, ok := pp.learned[normURL]; ok && pp.policy != nil && pp.policy.StoreDenied(idx) {
+		return true
+	}
+	return false
+}
+
+// recordIndex remembers (artifact → index) for every artifact a served index listed, so a
+// later deny of that index blocks the artifacts. indexURL/artifacts are normalized to match
+// what the PathDenier checks.
+func (pp *proxyPolicy) recordIndex(indexURL string, artifacts []string) {
+	idx := normalizeEgressURL(indexURL)
+	pp.mu.Lock()
+	defer pp.mu.Unlock()
+	for _, a := range artifacts {
+		pp.learned[normalizeEgressURL(a)] = idx
+	}
+}
+
+// seedDeniedArtifacts resolves every currently-denied pip index to its artifact URLs (via
+// fetch) and pre-populates deniedArtifacts, so a package denied BEFORE serve starts (its
+// index is 403'd, never served, so never learned) still has its artifacts blocked. Best
+// effort: a fetch/parse failure is skipped (the index-deny still blocks normal installs).
+func (pp *proxyPolicy) seedDeniedArtifacts(fetch func(url string) (body []byte, contentType string, err error)) {
+	if pp.policy == nil || fetch == nil {
+		return
+	}
+	for _, glob := range pp.policy.Store().Deny() {
+		indexURL, ok := egress.IndexURLFromDenyGlob(glob)
+		if !ok {
+			continue
+		}
+		body, ct, err := fetch(indexURL)
+		if err != nil {
+			continue
+		}
+		pp.mu.Lock()
+		for _, a := range egress.ParsePackageIndex(body, ct, indexURL) {
+			pp.deniedArtifacts[normalizeEgressURL(a)] = struct{}{}
+		}
+		pp.mu.Unlock()
+	}
 }
 
 func (pp *proxyPolicy) decide(r proxy.Request) proxy.Verdict {
@@ -225,29 +386,33 @@ func (pp *proxyPolicy) evaluate(r proxy.Request, resolved, rewriteHost string) p
 	}
 }
 
-// pathDenyURL builds the canonical URL the package/path-level deny rules match against. It
-// defends the match against tricks an upstream would silently normalize away — otherwise a
-// glob like "https://pypi.org/simple/six/*" is trivially evaded by "/simple/./six/",
-// "/simple//six/", a %2e-encoded dot, a cased host, or the ":443" port. So: the real scheme,
-// the already-canonical host (proxy.canonHost: lower-cased, port-free, no trailing dot), a
-// path.Clean'd path (dot-segments + duplicate slashes collapsed; a trailing slash preserved
-// so "/six/" still matches "/six/*"), and the query appended (a rule may target it).
-func pathDenyURL(r proxy.Request) string {
-	scheme := "https"
-	var rawQuery string
-	if u, err := url.Parse(r.URL); err == nil {
-		if u.Scheme != "" {
-			scheme = u.Scheme
-		}
-		rawQuery = u.RawQuery
+// pathDenyURL is the canonical URL the package/path-level deny rules match against.
+func pathDenyURL(r proxy.Request) string { return normalizeEgressURL(r.URL) }
+
+// normalizeEgressURL canonicalizes a URL for deny matching, defending against the tricks an
+// upstream silently collapses — otherwise a glob like "https://pypi.org/simple/six/*" is
+// evaded by "/simple/./six/", "/simple//six/", a %2e-encoded dot, a cased host, or the ":443"
+// port. It yields: the real scheme; a lower-cased, port-free, trailing-dot-free host; a
+// path.Clean'd path (dot-segments + duplicate slashes collapsed, trailing slash preserved so
+// "/six/" still matches "/six/*"); and the query appended. Used both by the request-time
+// PathDenier and to normalize index-derived artifact URLs, so the two always agree.
+func normalizeEgressURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
 	}
-	clean := path.Clean("/" + strings.TrimPrefix(r.Path, "/"))
-	if strings.HasSuffix(r.Path, "/") && !strings.HasSuffix(clean, "/") {
-		clean += "/" // path.Clean strips a trailing slash; keep it so "/six/" matches "/six/*"
+	scheme := u.Scheme
+	if scheme == "" {
+		scheme = "https"
 	}
-	match := scheme + "://" + r.Host + clean
-	if rawQuery != "" {
-		match += "?" + rawQuery
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	clean := path.Clean("/" + strings.TrimPrefix(u.Path, "/"))
+	if strings.HasSuffix(u.Path, "/") && !strings.HasSuffix(clean, "/") {
+		clean += "/"
+	}
+	match := scheme + "://" + host + clean
+	if u.RawQuery != "" {
+		match += "?" + u.RawQuery
 	}
 	return match
 }

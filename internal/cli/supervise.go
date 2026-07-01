@@ -50,10 +50,10 @@ func superviseServe(ctx context.Context, cfg *config.Config, transport string, d
 	// One connect+serve cycle: dial (reusing the cached prompter), serve until Serve
 	// returns, then close. connected reports whether the dial succeeded, so the loop
 	// can Commit the password and notify onConnected.
-	cycle := func(ctx context.Context, attempt int) (connected bool, err error) {
+	cycle := func(ctx context.Context, attempt int) (authenticated, served bool, err error) {
 		sess, err := openSessionWith(ctx, cfg, transport, prompter)
 		if err != nil {
-			return false, err
+			return false, false, err // dial failed — not authenticated, nothing served
 		}
 		holder.Set(sess)
 		if hooks.onConnected != nil {
@@ -67,12 +67,12 @@ func superviseServe(ctx context.Context, cfg *config.Config, transport string, d
 		stopProxy, perr := startEgressProxy(sess, cfg, out)
 		if perr != nil {
 			_ = sess.Close()
-			return true, perr
+			return true, false, perr // authenticated, but the cycle never served — don't reset backoff
 		}
 		err = disp.Serve(ctx, interval)
 		stopProxy()
 		_ = sess.Close()
-		return true, err
+		return true, true, err // reached Serve — a healthy cycle resets backoff
 	}
 	return runSupervisor(ctx, prompter, cycle, hooks.onDown, sleepCtx)
 }
@@ -84,9 +84,12 @@ type passwordCache interface {
 	Forget()
 }
 
-// cycleFunc attempts one connect+serve cycle, reporting whether the dial connected
-// (so the loop can Commit the password) and the resulting error.
-type cycleFunc func(ctx context.Context, attempt int) (connected bool, err error)
+// cycleFunc attempts one connect+serve cycle. authenticated reports whether the dial
+// authenticated (so the loop can Commit the password / handle auth failure); served reports
+// whether the cycle got far enough to actually serve (so the loop resets backoff only on
+// real progress — a proxy-startup failure is authenticated-but-not-served, and must NOT
+// reset backoff or it spins forever at the initial interval).
+type cycleFunc func(ctx context.Context, attempt int) (authenticated, served bool, err error)
 
 // runSupervisor is the reconnect control flow, separated from the production
 // connect/serve wiring so it can be unit-tested with a fake cycle + sleep. It drives
@@ -97,12 +100,14 @@ func runSupervisor(ctx context.Context, cache passwordCache, cycle cycleFunc, on
 	backoff := reconnectBackoffInitial
 	attempt := 0
 	for {
-		connected, err := cycle(ctx, attempt)
-		if connected {
-			cache.Commit()                                // the dial authenticated — remember the password
-			backoff, attempt = reconnectBackoffInitial, 0 // a healthy connection resets backoff
+		authenticated, served, err := cycle(ctx, attempt)
+		if authenticated {
+			cache.Commit() // the dial authenticated — remember the password
 		} else if remote.IsAuthFailure(err) {
 			cache.Forget() // bad/stale password — re-prompt on the next attempt
+		}
+		if served {
+			backoff, attempt = reconnectBackoffInitial, 0 // a cycle that actually served resets backoff
 		}
 
 		// A cancelled context (Ctrl-C / SIGTERM) is a clean stop, not a drop.

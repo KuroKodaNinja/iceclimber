@@ -234,4 +234,16 @@ func TestEgressMode(t *testing.T) {
 	if err := (&Config{SandboxID: "s", SSH: SSH{Host: "h"}, RemoteRoot: "/r", EgressMode: "vpn"}).validate(""); err == nil {
 		t.Error("egress_mode \"vpn\" should be rejected")
 	}
+	// allowed_domains are matched host-only, so a full-URL/path pattern is a silent-no-match
+	// footgun — validation must reject it.
+	badNet := &Config{SandboxID: "s", SSH: SSH{Host: "h"}, RemoteRoot: "/r",
+		Network: Network{AllowedDomains: []AllowedDomain{{Pattern: "https://pypi.org/simple/*"}}}}
+	if err := badNet.validate(""); err == nil {
+		t.Error("a URL/path pattern in allowed_domains should be rejected (host-only matching)")
+	}
+	okNet := &Config{SandboxID: "s", SSH: SSH{Host: "h"}, RemoteRoot: "/r",
+		Network: Network{AllowedDomains: []AllowedDomain{{Pattern: "pypi.org"}, {Pattern: "*.example.com"}}}}
+	if err := okNet.validate(""); err != nil {
+		t.Errorf("valid host patterns should pass: %v", err)
+	}
 }

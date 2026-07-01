@@ -331,6 +331,48 @@ func TestProxy_PathDenyDrainsBodyKeepsTunnel(t *testing.T) {
 	}
 }
 
+func TestProxy_ResponseObserver(t *testing.T) {
+	// The observer sees the FULL body of an index-path 200 and the client still gets it intact;
+	// a non-index path is not observed (streams).
+	up, tr := upstreamTLS(t, func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "BODY:"+r.URL.Path)
+	})
+	defer up.Close()
+	ca, _ := NewCA()
+	p := New(ca, nil, nil, tr)
+	var observed []string
+	p.SetResponseObserver(
+		func(r Request) bool { return strings.HasPrefix(r.Path, "/simple/") },
+		func(r Request, body []byte) { observed = append(observed, r.Path+"="+string(body)) },
+	)
+	client, stop := clientThroughProxy(t, p)
+	defer stop()
+
+	// Observed path: body delivered intact AND handed to observe.
+	resp, err := client.Get(up.URL + "/simple/six/")
+	if err != nil {
+		t.Fatalf("get observed: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(body) != "BODY:/simple/six/" {
+		t.Errorf("observed response body = %q, want it intact", body)
+	}
+	if len(observed) != 1 || observed[0] != "/simple/six/=BODY:/simple/six/" {
+		t.Errorf("observe saw %v, want the full index body", observed)
+	}
+
+	// Non-observed path: still works, not recorded.
+	r2, err := client.Get(up.URL + "/packages/x.whl")
+	if err != nil {
+		t.Fatalf("get non-observed: %v", err)
+	}
+	r2.Body.Close()
+	if len(observed) != 1 {
+		t.Errorf("a non-index path must not be observed; observed=%v", observed)
+	}
+}
+
 func TestCanonHost(t *testing.T) {
 	for in, want := range map[string]string{
 		"PyPI.org":  "pypi.org",

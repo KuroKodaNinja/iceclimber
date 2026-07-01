@@ -203,11 +203,14 @@ There are two ways the sandbox gets packages, both keeping it off the open inter
   full URL for **policy + audit** (the same allow/deny + persistent-approval + rewrite
   table as `web.fetch`, gated per host) while the native tools do resolution. Because the
   proxy sees full paths, policy can be **package/path-level**, not just per host: a deny
-  rule like `https://pypi.org/simple/leftpad/*` blocks that package's index page on an
-  otherwise-allowed registry (which stops the normal resolve → install), though a broadly
-  allowed artifact CDN — `files.pythonhosted.org`, whose paths are content hashes, not
-  names — can't be package-scoped by a URL glob; host-level allow/deny still applies there.
-  The payoff: lockfiles, transitive/plugin resolution, and download-during-build
+  rule like `https://pypi.org/simple/leftpad/*` blocks that package. It stops the normal
+  resolve → install at the index, **and** the direct wheel download too, even though the
+  wheel lives on a different, broadly-allowed CDN (`files.pythonhosted.org`) under a
+  name-less content-hash path: the proxy binds the deny to the *exact* artifact URLs the
+  package's index lists (resolved from the index host in the rule, so a custom mirror's CDN
+  is covered too) — pre-resolved for packages denied at startup, and learned-on-serve for a
+  package denied mid-session. The payoff: lockfiles, transitive/plugin resolution, and
+  download-during-build
   "just work," and **any** HTTP(S)-honoring tool works with no per-tool Go — pip, npm,
   conda, cargo, go, `git`, `apt`, … Java is the one ecosystem needing more than a cert env
   (the JVM ignores those): Popo builds a JVM truststore from the CA, so `maven build` runs

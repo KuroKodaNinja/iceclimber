@@ -213,9 +213,26 @@ func (d BuildDeps) buildOnlineProxy(ctx context.Context, projectDir, javaVersion
 		return BuildResult{}, fmt.Errorf("run online mvn: %w", err)
 	}
 	if res.ExitCode != 0 {
-		return BuildResult{}, fmt.Errorf("online mvn build failed: %s", lastLines(res.Stderr, 8))
+		// mvn logs to stdout (with -B), so combine both streams for the tail.
+		combined := string(res.Stdout) + string(res.Stderr)
+		if looksLikeProxyDown(combined) {
+			return BuildResult{}, fmt.Errorf("online mvn build failed — the egress proxy is not reachable: proxy-mode `maven build` needs an active `iceclimber serve` (the proxy only listens during a serve session), or use egress_mode: relay for a one-shot build:\n%s", lastLines([]byte(combined), 8))
+		}
+		return BuildResult{}, fmt.Errorf("online mvn build failed: %s", lastLines([]byte(combined), 8))
 	}
 	return BuildResult{Artifacts: d.collectArtifacts(ctx, projectDir), Tier: "proxy"}, nil
+}
+
+// looksLikeProxyDown reports whether mvn's output indicates it couldn't reach the egress
+// proxy on the sandbox loopback — the tell that proxy-mode `maven build` was run without an
+// active serve holding the reverse tunnel up.
+func looksLikeProxyDown(out string) bool {
+	for _, m := range []string{"Connection refused", "ConnectException", "127.0.0.1:", "Connection to 127.0.0.1"} {
+		if strings.Contains(out, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // collectArtifacts lists the build's target/*.jar outputs (sandbox paths), sorted. Runs only

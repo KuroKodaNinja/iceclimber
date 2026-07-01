@@ -4,6 +4,8 @@ package functional
 
 import (
 	"bytes"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/egress"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 )
 
@@ -202,6 +205,44 @@ network:
 	if !strings.Contains(imp, "IMPORT_OK") {
 		t.Errorf("import idna from proxy-installed pkg: %s", imp)
 	}
+
+	// H1 close: a DIRECT fetch of six's actual wheel (on files.pythonhosted.org — a name-less
+	// content-hash path, a DIFFERENT host than the index) is also blocked, because the startup
+	// resolve derived six's artifact URLs from its denied index and denied them wherever hosted.
+	// Fetch via the sandbox's own python (it trusts the egress CA), so a block is attributable
+	// to the deny rule, not TLS. Control: an idna artifact is still reachable.
+	sixArt := firstArtifactURL(t, "https://pypi.org/simple/six/")
+	idnaArt := firstArtifactURL(t, "https://pypi.org/simple/idna/")
+	fetch := func(url string) string {
+		return limaSh(t, `eval "$(`+root+`/popo shellenv)"; `+py+
+			` -c "import urllib.request as u; u.urlopen('`+url+`').read(); print('REACHED')" 2>/dev/null || echo BLOCKED`)
+	}
+	if got := fetch(sixArt); !strings.Contains(got, "BLOCKED") {
+		t.Errorf("a direct fetch of denied six's artifact must be blocked (H1):\n url=%s\n got=%s", sixArt, got)
+	}
+	if got := fetch(idnaArt); !strings.Contains(got, "REACHED") {
+		t.Errorf("an allowed package's artifact must still be reachable directly:\n url=%s\n got=%s", idnaArt, got)
+	}
+}
+
+// firstArtifactURL fetches a pip simple index from the controller (the same source the proxy's
+// startup resolve uses) and returns its first artifact URL, so the test can attempt a direct
+// fetch of it through the proxy. Skips if the index is unreachable (offline controller).
+func firstArtifactURL(t *testing.T, indexURL string) string {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, indexURL, nil)
+	req.Header.Set("Accept", "application/vnd.pypi.simple.v1+json, text/html;q=0.5")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Skipf("cannot reach %s to derive an artifact URL: %v", indexURL, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	arts := egress.ParsePackageIndex(body, resp.Header.Get("Content-Type"), indexURL)
+	if len(arts) == 0 {
+		t.Skipf("no artifacts parsed from %s", indexURL)
+	}
+	return arts[0]
 }
 
 // TestProxyGitEgress banks the breadth payoff: `git` — a dependency-fetch tool iceclimber

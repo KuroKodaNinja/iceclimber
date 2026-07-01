@@ -5,6 +5,85 @@ import (
 	"testing"
 )
 
+func TestIndexURLFromDenyGlob(t *testing.T) {
+	ok := map[string]string{
+		"https://pypi.org/simple/six/*":        "https://pypi.org/simple/six/",
+		"https://pypi.org/simple/six/":         "https://pypi.org/simple/six/",
+		"https://mycorp.dev/pypi/simple/six/*": "https://mycorp.dev/pypi/simple/six/", // custom index path prefix
+	}
+	for glob, want := range ok {
+		if got, ok := IndexURLFromDenyGlob(glob); !ok || got != want {
+			t.Errorf("IndexURLFromDenyGlob(%q) = %q,%v; want %q,true", glob, got, ok, want)
+		}
+	}
+	notPkg := []string{
+		"https://pypi.org/*",            // whole-host glob
+		"https://pypi.org/simple/*",     // all packages, not one
+		"https://pypi.org/simple/a/b/*", // too deep
+		"https://files.pythonhosted.org/packages/*",
+	}
+	for _, glob := range notPkg {
+		if _, ok := IndexURLFromDenyGlob(glob); ok {
+			t.Errorf("IndexURLFromDenyGlob(%q) = ok; want not-ok", glob)
+		}
+	}
+}
+
+func TestParsePackageIndex(t *testing.T) {
+	// PEP 691 JSON — artifacts on a DIFFERENT host than the index (the host-agnostic case),
+	// with a #sha fragment that must be stripped.
+	jsonBody := []byte(`{"meta":{"api-version":"1.0"},"name":"six","files":[` +
+		`{"filename":"six-1.16.0-py2.py3-none-any.whl","url":"https://files.pythonhosted.org/packages/ab/cd/six-1.16.0-py2.py3-none-any.whl#sha256=deadbeef"},` +
+		`{"filename":"six-1.16.0.tar.gz","url":"https://files.pythonhosted.org/packages/ef/01/six-1.16.0.tar.gz"}]}`)
+	got := ParsePackageIndex(jsonBody, "application/vnd.pypi.simple.v1+json", "https://pypi.org/simple/six/")
+	want := []string{
+		"https://files.pythonhosted.org/packages/ab/cd/six-1.16.0-py2.py3-none-any.whl",
+		"https://files.pythonhosted.org/packages/ef/01/six-1.16.0.tar.gz",
+	}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("JSON parse = %v, want %v", got, want)
+	}
+
+	// PEP 503 HTML with a RELATIVE href — resolved against the index URL, fragment stripped.
+	htmlBody := []byte(`<!DOCTYPE html><html><body>` +
+		`<a href="../../packages/ab/cd/six-1.16.0-py2.py3-none-any.whl#sha256=deadbeef">six-1.16.0-py2.py3-none-any.whl</a>` +
+		`</body></html>`)
+	gotHTML := ParsePackageIndex(htmlBody, "text/html", "https://pypi.org/simple/six/")
+	if len(gotHTML) != 1 || gotHTML[0] != "https://pypi.org/packages/ab/cd/six-1.16.0-py2.py3-none-any.whl" {
+		t.Errorf("HTML parse = %v, want the resolved absolute artifact URL", gotHTML)
+	}
+}
+
+func TestValidateHostPattern(t *testing.T) {
+	ok := []string{"pypi.org", "files.pythonhosted.org", "*.example.com", "registry.npmjs.org"}
+	for _, p := range ok {
+		if err := ValidateHostPattern(p); err != nil {
+			t.Errorf("ValidateHostPattern(%q) = %v, want nil", p, err)
+		}
+	}
+	bad := []string{"", " pypi.org", "https://pypi.org", "pypi.org/simple/*", "https://pypi.org/simple/*"}
+	for _, p := range bad {
+		if err := ValidateHostPattern(p); err == nil {
+			t.Errorf("ValidateHostPattern(%q) = nil, want an error (host-only patterns)", p)
+		}
+	}
+}
+
+func TestValidateURLGlob(t *testing.T) {
+	ok := []string{"https://pypi.org/simple/six/*", "http://mirror.internal/*", "*://pypi.org/*", "*"}
+	for _, p := range ok {
+		if err := ValidateURLGlob(p); err != nil {
+			t.Errorf("ValidateURLGlob(%q) = %v, want nil", p, err)
+		}
+	}
+	bad := []string{"", "pypi.org", "pypi.org/simple/six/*", "  https://x/*"}
+	for _, p := range bad {
+		if err := ValidateURLGlob(p); err == nil {
+			t.Errorf("ValidateURLGlob(%q) = nil, want an error (full-URL globs)", p)
+		}
+	}
+}
+
 func TestApplyRewrite(t *testing.T) {
 	rw := Rewrite{Match: "https://repo1.maven.org/maven2/*", RewriteTo: "https://artifactory/maven-central/*", Venue: "sandbox"}
 	got, ok := applyRewrite(rw, "https://repo1.maven.org/maven2/foo/bar.jar")

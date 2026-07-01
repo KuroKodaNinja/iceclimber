@@ -67,14 +67,14 @@ func TestSupervisor_TransientThenReconnect(t *testing.T) {
 	cache := &fakeCache{}
 	var sleeps []time.Duration
 	calls := 0
-	cycle := func(_ context.Context, _ int) (bool, error) {
+	cycle := func(_ context.Context, _ int) (authenticated, served bool, err error) {
 		calls++
 		switch calls {
 		case 1, 2:
-			return false, errors.New("connection reset by peer") // transient
+			return false, false, errors.New("connection reset by peer") // transient
 		default:
 			cancel() // connected; the serve cycle then sees ctx cancellation
-			return true, context.Canceled
+			return true, true, context.Canceled
 		}
 	}
 	if err := runSupervisor(ctx, cache, cycle, nil, instantSleep(&sleeps)); err != nil {
@@ -101,16 +101,16 @@ func TestSupervisor_BackoffResetsAfterHealthyCycle(t *testing.T) {
 	cache := &fakeCache{}
 	var sleeps []time.Duration
 	calls := 0
-	cycle := func(_ context.Context, _ int) (bool, error) {
+	cycle := func(_ context.Context, _ int) (authenticated, served bool, err error) {
 		calls++
 		switch calls {
 		case 1, 2:
-			return false, errors.New("connection reset by peer") // grows backoff: 1s, 2s
+			return false, false, errors.New("connection reset by peer") // grows backoff: 1s, 2s
 		case 3:
-			return true, nil // connected + served a full cycle, then ended cleanly → reset
+			return true, true, nil // connected + served a full cycle, then ended cleanly → reset
 		default:
 			cancel()
-			return false, context.Canceled
+			return false, false, context.Canceled
 		}
 	}
 	if err := runSupervisor(ctx, cache, cycle, nil, instantSleep(&sleeps)); err != nil {
@@ -125,6 +125,37 @@ func TestSupervisor_BackoffResetsAfterHealthyCycle(t *testing.T) {
 	}
 }
 
+// TestSupervisor_ProxyStartupFailureEscalates: a cycle that authenticates but never serves
+// (the proxy-startup failure shape: authenticated=true, served=false) must NOT reset the
+// backoff — otherwise a persistently forwarded egress port spins forever at the initial
+// interval. The password is still Committed (the dial did authenticate), but the backoff
+// grows 1s→2s→4s like any transient drop.
+func TestSupervisor_ProxyStartupFailureEscalates(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cache := &fakeCache{}
+	var sleeps []time.Duration
+	calls := 0
+	cycle := func(_ context.Context, _ int) (authenticated, served bool, err error) {
+		calls++
+		if calls >= 4 {
+			cancel()
+			return true, false, context.Canceled
+		}
+		return true, false, errors.New("egress reverse tunnel: port 18080 is still forwarded") // authenticated, never served
+	}
+	if err := runSupervisor(ctx, cache, cycle, nil, instantSleep(&sleeps)); err != nil {
+		t.Fatal(err)
+	}
+	want := []time.Duration{reconnectBackoffInitial, 2 * reconnectBackoffInitial, 4 * reconnectBackoffInitial}
+	if len(sleeps) < 3 || sleeps[0] != want[0] || sleeps[1] != want[1] || sleeps[2] != want[2] {
+		t.Errorf("proxy-startup failure did not escalate backoff (it must not reset on authenticated-but-not-served): got %v, want prefix %v", sleeps, want)
+	}
+	if cache.commits == 0 {
+		t.Error("an authenticated cycle should still Commit the password even when it never served")
+	}
+}
+
 // TestSupervisor_AuthFailureForgets: a dial that fails with an auth error makes the
 // supervisor Forget the cached password so the next attempt re-prompts.
 func TestSupervisor_AuthFailureForgets(t *testing.T) {
@@ -133,14 +164,14 @@ func TestSupervisor_AuthFailureForgets(t *testing.T) {
 	cache := &fakeCache{}
 	var sleeps []time.Duration
 	calls := 0
-	cycle := func(_ context.Context, _ int) (bool, error) {
+	cycle := func(_ context.Context, _ int) (authenticated, served bool, err error) {
 		calls++
 		if calls == 1 {
 			// the shape remote.IsAuthFailure matches
-			return false, errors.New("ssh handshake h:22: ssh: handshake failed: ssh: unable to authenticate, attempted methods [none publickey]")
+			return false, false, errors.New("ssh handshake h:22: ssh: handshake failed: ssh: unable to authenticate, attempted methods [none publickey]")
 		}
 		cancel()
-		return false, context.Canceled
+		return false, false, context.Canceled
 	}
 	if err := runSupervisor(ctx, cache, cycle, nil, instantSleep(&sleeps)); err != nil {
 		t.Fatalf("runSupervisor returned %v, want nil", err)
@@ -160,8 +191,8 @@ func TestSupervisor_CanceledStopsImmediately(t *testing.T) {
 	cancel()
 	cache := &fakeCache{}
 	var sleeps []time.Duration
-	cycle := func(_ context.Context, _ int) (bool, error) {
-		return false, context.Canceled
+	cycle := func(_ context.Context, _ int) (authenticated, served bool, err error) {
+		return false, false, context.Canceled
 	}
 	if err := runSupervisor(ctx, cache, cycle, nil, instantSleep(&sleeps)); err != nil {
 		t.Fatalf("runSupervisor returned %v, want nil", err)
@@ -179,13 +210,13 @@ func TestSupervisor_BackoffCaps(t *testing.T) {
 	cache := &fakeCache{}
 	var sleeps []time.Duration
 	calls := 0
-	cycle := func(_ context.Context, _ int) (bool, error) {
+	cycle := func(_ context.Context, _ int) (authenticated, served bool, err error) {
 		calls++
 		if calls >= 12 {
 			cancel()
-			return false, context.Canceled
+			return false, false, context.Canceled
 		}
-		return false, errors.New("network unreachable")
+		return false, false, errors.New("network unreachable")
 	}
 	if err := runSupervisor(ctx, cache, cycle, nil, instantSleep(&sleeps)); err != nil {
 		t.Fatal(err)

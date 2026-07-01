@@ -728,13 +728,13 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	// the header reflects the connection state.
 	go func() {
 		seeded := sess
-		cycle := func(ctx context.Context, attempt int) (bool, error) {
+		cycle := func(ctx context.Context, attempt int) (authenticated, served bool, err error) {
 			s := seeded
 			seeded = nil
 			if s == nil {
 				var derr error
 				if s, derr = openSessionWith(ctx, cfg, transport, prompter); derr != nil {
-					return false, derr
+					return false, false, derr
 				}
 			}
 			holder.Set(s)
@@ -752,12 +752,12 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 			stopProxy, perr := startEgressProxy(s, cfg, io.Discard)
 			if perr != nil {
 				_ = s.Close()
-				return true, perr
+				return true, false, perr // authenticated, but never served — keep backing off
 			}
 			serveErr := disp.Serve(ctx, 2*time.Second)
 			stopProxy()
 			_ = s.Close()
-			return true, serveErr
+			return true, true, serveErr
 		}
 		onDown := func(err error, attempt int, backoff time.Duration) {
 			emit(tui.ConnStateMsg{State: tui.ConnReconnecting})

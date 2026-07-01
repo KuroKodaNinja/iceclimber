@@ -2,8 +2,11 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"net"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/egress"
 	"github.com/KuroKodaNinja/iceclimber/internal/proxy"
@@ -117,6 +120,96 @@ func TestProxyPolicy_StoreDenyOverridesConfigAllow(t *testing.T) {
 	pp := newProxyPolicy(pol, nil, "s")
 	if v := pp.decide(proxy.Request{Host: "pypi.org", URL: "https://pypi.org/simple/six/"}); v.Allow {
 		t.Error("an explicit store Deny must override a config allow")
+	}
+}
+
+func TestListenWithRetry(t *testing.T) {
+	denied := errors.New("ssh: tcpip-forward request denied by peer")
+
+	// Transient: fails with the forward-denied race twice, then succeeds — retry absorbs it.
+	t.Run("retries the forward-denied race then succeeds", func(t *testing.T) {
+		calls, slept := 0, 0
+		ln, err := listenWithRetry(func() (net.Listener, error) {
+			calls++
+			if calls < 3 {
+				return nil, denied
+			}
+			return fakeListener{}, nil
+		}, 5, func(time.Duration) { slept++ })
+		if err != nil || ln == nil {
+			t.Fatalf("expected success after retries, got ln=%v err=%v", ln, err)
+		}
+		if calls != 3 || slept != 2 {
+			t.Errorf("calls=%d slept=%d, want 3 and 2", calls, slept)
+		}
+	})
+
+	// Persistent: keeps returning forward-denied — exhausts attempts, returns the last error.
+	t.Run("exhausts on a persistently forwarded port", func(t *testing.T) {
+		calls := 0
+		_, err := listenWithRetry(func() (net.Listener, error) { calls++; return nil, denied }, 5, func(time.Duration) {})
+		if !isForwardDenied(err) {
+			t.Errorf("err = %v, want a forward-denied error", err)
+		}
+		if calls != 5 {
+			t.Errorf("calls = %d, want 5 (all attempts)", calls)
+		}
+	})
+
+	// A non-race error fails fast (no retry, no sleep).
+	t.Run("fails fast on an unrelated error", func(t *testing.T) {
+		calls, slept := 0, 0
+		other := errors.New("connection reset")
+		_, err := listenWithRetry(func() (net.Listener, error) { calls++; return nil, other }, 5, func(time.Duration) { slept++ })
+		if !errors.Is(err, other) || calls != 1 || slept != 0 {
+			t.Errorf("want fail-fast (1 call, 0 sleeps, same err); got calls=%d slept=%d err=%v", calls, slept, err)
+		}
+	})
+}
+
+// fakeListener is a no-op net.Listener for the retry test (never accepts).
+type fakeListener struct{}
+
+func (fakeListener) Accept() (net.Conn, error) { return nil, errors.New("closed") }
+func (fakeListener) Close() error              { return nil }
+func (fakeListener) Addr() net.Addr            { return nil }
+
+func TestProxyPolicy_ArtifactDeny(t *testing.T) {
+	// (a) Startup resolve: a denied pip index seeds its artifacts as denied — host-agnostic,
+	// the artifact lives on a DIFFERENT host than the index.
+	pol := newTestPolicy(t, nil, "gate")
+	if err := pol.Store().AddDeny("https://pypi.org/simple/six/*"); err != nil {
+		t.Fatal(err)
+	}
+	pp := newProxyPolicy(pol, nil, "s")
+	fixture := []byte(`{"files":[{"url":"https://files.pythonhosted.org/packages/ab/cd/six-1.16.0-py3-none-any.whl#sha256=x"}]}`)
+	pp.seedDeniedArtifacts(func(u string) ([]byte, string, error) {
+		if u != "https://pypi.org/simple/six/" {
+			t.Errorf("resolve fetched %q, want the index URL", u)
+		}
+		return fixture, "application/vnd.pypi.simple.v1+json", nil
+	})
+	if !pp.artifactDenied(normalizeEgressURL("https://files.pythonhosted.org/packages/ab/cd/six-1.16.0-py3-none-any.whl")) {
+		t.Error("a resolved artifact of a denied package must be denied (H1 close)")
+	}
+	if pp.artifactDenied(normalizeEgressURL("https://files.pythonhosted.org/packages/zz/idna-3.7.whl")) {
+		t.Error("an unrelated artifact must not be denied")
+	}
+
+	// (b) Learn-on-serve: an allowed package's index is learned; denying the package later
+	// blocks its already-seen artifact — no reconnect needed.
+	pol2 := newTestPolicy(t, nil, "gate")
+	pp2 := newProxyPolicy(pol2, nil, "s")
+	pp2.recordIndex("https://pypi.org/simple/leftpad/", []string{"https://cdn.example.com/x/leftpad-1.0.whl"})
+	art := normalizeEgressURL("https://cdn.example.com/x/leftpad-1.0.whl")
+	if pp2.artifactDenied(art) {
+		t.Error("a learned artifact must NOT be denied until its package is denied")
+	}
+	if err := pol2.Store().AddDeny("https://pypi.org/simple/leftpad/*"); err != nil {
+		t.Fatal(err)
+	}
+	if !pp2.artifactDenied(art) {
+		t.Error("once the package index is denied, its learned artifact must be denied")
 	}
 }
 

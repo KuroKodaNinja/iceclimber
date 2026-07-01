@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -43,18 +44,33 @@ type AuditFunc func(Request, Verdict, int)
 // on an otherwise-allowed registry). Returns (denied, reason). nil = no path-level policy.
 type PathDenier func(Request) (bool, string)
 
+// maxObserveBytes caps the body a ResponseObserver will buffer — package indexes are small;
+// anything larger streams unobserved so a mislabeled artifact can't sit in controller memory.
+const maxObserveBytes = 4 << 20 // 4 MiB
+
 // Proxy is the MITM egress proxy: it terminates TLS with CA-minted leaves, consults the
 // Decider, forwards allowed requests upstream over real TLS, and audits each one.
 type Proxy struct {
-	ca       *CA
-	decide   Decider
-	pathDeny PathDenier
-	audit    AuditFunc
-	tr       *http.Transport
+	ca            *CA
+	decide        Decider
+	pathDeny      PathDenier
+	shouldObserve func(Request) bool
+	observe       func(Request, []byte)
+	audit         AuditFunc
+	tr            *http.Transport
 }
 
 // SetPathDenier installs the per-request path-level veto (see PathDenier).
 func (p *Proxy) SetPathDenier(fn PathDenier) { p.pathDeny = fn }
+
+// SetResponseObserver installs a hook that inspects the FULL body of selected responses
+// (learn-on-serve). For a 200 response to a request where shouldObserve is true and the body
+// is a known length ≤ maxObserveBytes, the proxy buffers the body, passes it to observe, and
+// then delivers it to the client intact; every other response streams unbuffered as usual.
+// Used to learn a pip index's artifact URLs so a mid-session package deny blocks them.
+func (p *Proxy) SetResponseObserver(shouldObserve func(Request) bool, observe func(Request, []byte)) {
+	p.shouldObserve, p.observe = shouldObserve, observe
+}
 
 // New builds a proxy. A nil decider allows everything; a nil audit is silent. upstream
 // may override the upstream transport (tests inject a root pool); nil uses a default that
@@ -224,6 +240,18 @@ func (p *Proxy) forward(w net.Conn, req *http.Request, v Verdict) bool {
 	defer resp.Body.Close()
 	if p.audit != nil {
 		p.audit(pr, v, resp.StatusCode)
+	}
+	// Learn-on-serve: for a small, known-length 200 the observer wants (a pip index), buffer
+	// the body, hand it to observe, then deliver it intact. Everything else streams.
+	if p.shouldObserve != nil && p.observe != nil && resp.StatusCode == http.StatusOK &&
+		resp.ContentLength >= 0 && resp.ContentLength <= maxObserveBytes && p.shouldObserve(pr) {
+		body, rerr := io.ReadAll(io.LimitReader(resp.Body, resp.ContentLength))
+		if rerr != nil {
+			return false // partial read — can't safely stream the remainder
+		}
+		p.observe(pr, body)
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		resp.ContentLength = int64(len(body))
 	}
 	return writeResponse(w, req.Method, resp)
 }

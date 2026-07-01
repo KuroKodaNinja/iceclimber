@@ -2,6 +2,7 @@ package egress
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -49,15 +50,23 @@ func (s *Store) saveRules(r rules) error {
 func (s *Store) Allow() []string { return s.loadRules().Allow }
 func (s *Store) Deny() []string  { return s.loadRules().Deny }
 
-// AddAllow persists an allow rule (idempotent).
+// AddAllow persists an allow rule (idempotent). The pattern is validated as a full-URL glob
+// so a malformed rule fails loudly instead of silently never matching.
 func (s *Store) AddAllow(pattern string) error {
+	if err := ValidateURLGlob(pattern); err != nil {
+		return fmt.Errorf("allow %w", err)
+	}
 	r := s.loadRules()
 	r.Allow = appendUnique(r.Allow, pattern)
 	return s.saveRules(r)
 }
 
-// AddDeny persists a deny rule (idempotent). Deny is checked before allow.
+// AddDeny persists a deny rule (idempotent). Deny is checked before allow. Validated as a
+// full-URL glob (see AddAllow).
 func (s *Store) AddDeny(pattern string) error {
+	if err := ValidateURLGlob(pattern); err != nil {
+		return fmt.Errorf("deny %w", err)
+	}
 	r := s.loadRules()
 	r.Deny = appendUnique(r.Deny, pattern)
 	return s.saveRules(r)

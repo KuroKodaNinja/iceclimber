@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/egress"
 	"gopkg.in/yaml.v3"
 )
 
@@ -274,6 +275,11 @@ func (c *Config) validate(selectSandbox string) error {
 	}
 	if c.EgressProxyPort < 0 || c.EgressProxyPort > 65535 {
 		return fmt.Errorf("egress_proxy_port %d out of range (0 = default)", c.EgressProxyPort)
+	}
+	for i, d := range c.Network.AllowedDomains {
+		if err := egress.ValidateHostPattern(d.Pattern); err != nil {
+			return fmt.Errorf("network.allowed_domains[%d]: %w", i, err)
+		}
 	}
 	return nil
 }

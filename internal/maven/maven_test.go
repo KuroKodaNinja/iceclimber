@@ -32,6 +32,29 @@ func TestLastNonEmpty(t *testing.T) {
 	}
 }
 
+func TestLooksLikeProxyDown(t *testing.T) {
+	down := []string{
+		"[ERROR] Failed to execute goal ... Connection refused",
+		"Caused by: java.net.ConnectException: Connection refused (Connection refused)",
+		"Could not transfer artifact ... Connect to 127.0.0.1:18080 failed",
+	}
+	for _, s := range down {
+		if !looksLikeProxyDown(s) {
+			t.Errorf("looksLikeProxyDown(%q) = false, want true", s)
+		}
+	}
+	notDown := []string{
+		"[ERROR] COMPILATION ERROR : cannot find symbol",
+		"[ERROR] Failed to execute goal on project: dependency X was not found in central",
+		"",
+	}
+	for _, s := range notDown {
+		if looksLikeProxyDown(s) {
+			t.Errorf("looksLikeProxyDown(%q) = true, want false (a real build error, not a proxy-down)", s)
+		}
+	}
+}
+
 func TestResolveTier(t *testing.T) {
 	// Explicit choices are forced regardless of config.
 	if resolveTier("relay", "https://mirror") != pkg.TierRelay {
