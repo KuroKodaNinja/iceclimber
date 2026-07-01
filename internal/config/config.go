@@ -267,6 +267,9 @@ func (c *Config) validate(selectSandbox string) error {
 	default:
 		return fmt.Errorf("egress_mode %q must be \"relay\" or \"proxy\"", c.EgressMode)
 	}
+	if c.EgressProxyPort < 0 || c.EgressProxyPort > 65535 {
+		return fmt.Errorf("egress_proxy_port %d out of range (0 = default)", c.EgressProxyPort)
+	}
 	return nil
 }
 

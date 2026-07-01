@@ -58,7 +58,9 @@ func TestProxy_MITM_AllowsAndReachesUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := New(ca, nil, nil, tr) // allow-all
+	var seen []Request
+	audit := func(r Request, v Verdict, code int) { seen = append(seen, r) }
+	p := New(ca, nil, audit, tr) // allow-all
 	client, stop := clientThroughProxy(t, p)
 	defer stop()
 
@@ -70,6 +72,16 @@ func TestProxy_MITM_AllowsAndReachesUpstream(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 || !strings.Contains(string(body), "/simple/six/") {
 		t.Errorf("through-proxy response = %d %q", resp.StatusCode, body)
+	}
+	// The audit sees the full request path (package/path-level policy is available).
+	sawPath := false
+	for _, r := range seen {
+		if r.Path == "/simple/six/" {
+			sawPath = true
+		}
+	}
+	if !sawPath {
+		t.Errorf("audit did not see the full request path; saw %+v", seen)
 	}
 }
 
@@ -85,18 +97,19 @@ func TestProxy_DeniesByPolicy(t *testing.T) {
 	client, stop := clientThroughProxy(t, p)
 	defer stop()
 
+	// Denied at CONNECT (before minting a leaf), so the client's tunnel setup fails —
+	// no HTTPS response, and the upstream is never reached.
 	resp, err := client.Get(up.URL + "/blocked")
-	if err != nil {
-		t.Fatalf("get: %v", err)
+	if err == nil {
+		resp.Body.Close()
+		t.Fatalf("expected the CONNECT to be refused for a denied host, got %d", resp.StatusCode)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "not on the allowlist") {
-		t.Errorf("denied response = %d %q, want 403 + reason", resp.StatusCode, body)
+	if !strings.Contains(err.Error(), "Forbidden") {
+		t.Errorf("deny error = %v, want a Forbidden CONNECT refusal", err)
 	}
-	// The decider saw the full path (package/path-level policy is available).
-	if len(saw) != 1 || saw[0].Path != "/blocked" {
-		t.Errorf("decider audit = %+v, want one request with path /blocked", saw)
+	// The decider was consulted for the host (CONNECT gate; path-level would re-check later).
+	if len(saw) != 1 || saw[0].Host != "127.0.0.1" {
+		t.Errorf("decider audit = %+v, want one CONNECT-gate check for the host", saw)
 	}
 }
 
@@ -123,6 +136,32 @@ func TestProxy_HTTP2UpstreamNormalizedTo11(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.HasPrefix(string(body), "proto=HTTP/2") {
 		t.Logf("upstream served %q (HTTP/2 not negotiated in this env; normalization still exercised)", body)
+	}
+}
+
+func TestProxy_KeepAliveMultipleRequests(t *testing.T) {
+	// Several requests on ONE MITM'd connection (pip fires many): the CONNECT keep-alive
+	// loop must serve each. The client transport reuses the tunnel across Gets.
+	up, tr := upstreamTLS(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok "+r.URL.Path) })
+	defer up.Close()
+	ca, _ := NewCA()
+	var n int
+	p := New(ca, nil, func(Request, Verdict, int) { n++ }, tr)
+	client, stop := clientThroughProxy(t, p)
+	defer stop()
+	for _, path := range []string{"/a", "/b", "/c"} {
+		resp, err := client.Get(up.URL + path)
+		if err != nil {
+			t.Fatalf("request %s: %v", path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if !strings.Contains(string(body), path) {
+			t.Errorf("%s → %q", path, body)
+		}
+	}
+	if n != 3 {
+		t.Errorf("audited %d requests, want 3 (keep-alive loop served each)", n)
 	}
 }
 

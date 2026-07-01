@@ -97,6 +97,19 @@ func (p *Policy) ConfigAllowed(raw string) bool {
 	return false
 }
 
+// StoreDenied reports whether url matches an explicit operator deny rule in the store —
+// distinct from the unlisted-deny default (which Decide also reports as Deny). Proxy mode
+// uses this so a config allowed_domains entry can pre-allow a host under
+// unlisted_domain_policy: deny, while an explicit deny rule still wins.
+func (p *Policy) StoreDenied(url string) bool {
+	for _, r := range p.store.Deny() {
+		if globMatch(r, url) {
+			return true
+		}
+	}
+	return false
+}
+
 // unlisted policy (gate → hold for approval, deny → refuse).
 func (p *Policy) Decide(url string) Decision {
 	for _, r := range p.store.Deny() {

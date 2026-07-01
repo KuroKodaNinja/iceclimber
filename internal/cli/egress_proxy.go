@@ -157,17 +157,21 @@ func (pp *proxyPolicy) decide(r proxy.Request) proxy.Verdict {
 }
 
 func (pp *proxyPolicy) evaluate(r proxy.Request, resolved, rewriteHost string) proxy.Verdict {
+	// Precedence: an explicit store Deny always wins; then operator-listed allowed_domains
+	// pre-allow (so a config allow-list works even under unlisted_domain_policy: deny);
+	// then the store/unlisted decision.
+	if pp.policy.StoreDenied(resolved) {
+		return proxy.Verdict{Allow: false, Reason: "denied by rule"}
+	}
+	if pp.policy.ConfigAllowed(resolved) {
+		return proxy.Verdict{Allow: true, RewriteHost: rewriteHost}
+	}
 	switch pp.policy.Decide(resolved) {
 	case egress.Allow:
 		return proxy.Verdict{Allow: true, RewriteHost: rewriteHost}
 	case egress.Deny:
 		return proxy.Verdict{Allow: false, Reason: "denied by egress policy"}
 	default: // Hold
-		// Operator-listed allowed_domains pre-allow proxy egress without a prompt (a store
-		// Deny already took precedence above).
-		if pp.policy.ConfigAllowed(resolved) {
-			return proxy.Verdict{Allow: true, RewriteHost: rewriteHost}
-		}
 		if pp.ap == nil {
 			return proxy.Verdict{Allow: false, Reason: "host not on the allow-list (approve it in an interactive `serve`, or add it to network.allowed_domains)"}
 		}

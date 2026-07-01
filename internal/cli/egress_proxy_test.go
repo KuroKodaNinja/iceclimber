@@ -84,6 +84,33 @@ func TestProxyPolicy_DenyOnceCachedNoRepeatPrompt(t *testing.T) {
 	}
 }
 
+func TestProxyPolicy_ConfigAllowBeatsUnlistedDeny(t *testing.T) {
+	// unlisted_domain_policy: deny — a config allowed_domains entry must still be allowed
+	// (regression for the bug where Decide returned Deny before ConfigAllowed was checked).
+	pol := newTestPolicy(t, []egress.AllowedDomain{{Pattern: "pypi.org"}}, "deny")
+	pp := newProxyPolicy(pol, nil, "s")
+	if v := pp.decide(proxy.Request{Host: "pypi.org", URL: "https://pypi.org/simple/six/"}); !v.Allow {
+		t.Error("config-allowed host must be allowed even under unlisted_domain_policy: deny")
+	}
+	if v := pp.decide(proxy.Request{Host: "evil.test", URL: "https://evil.test/"}); v.Allow {
+		t.Error("unlisted host under deny policy must be denied")
+	}
+}
+
+func TestProxyPolicy_Rewrite(t *testing.T) {
+	dir := t.TempDir()
+	store := egress.NewStore(dir+"/a.json", dir+"/p.json")
+	pol := egress.NewPolicy(
+		[]egress.AllowedDomain{{Pattern: "mirror.internal"}},
+		[]egress.Rewrite{{Match: "https://pypi.org/*", RewriteTo: "https://mirror.internal/*"}},
+		"gate", store)
+	pp := newProxyPolicy(pol, nil, "s")
+	v := pp.decide(proxy.Request{Host: "pypi.org", Path: "/simple/six/", URL: "https://pypi.org/simple/six/"})
+	if !v.Allow || v.RewriteHost != "mirror.internal" {
+		t.Errorf("rewrite verdict = %+v, want allow + RewriteHost mirror.internal", v)
+	}
+}
+
 func TestProxyPolicy_StoreDenyOverridesConfigAllow(t *testing.T) {
 	pol := newTestPolicy(t, []egress.AllowedDomain{{Pattern: "pypi.org"}}, "gate")
 	_ = pol.Store().AddDeny(egress.HostGlob("https://pypi.org/"))

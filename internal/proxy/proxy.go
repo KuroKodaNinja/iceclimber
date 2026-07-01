@@ -2,12 +2,12 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -91,13 +91,27 @@ func (p *Proxy) handleConn(c net.Conn) {
 		return
 	}
 	if req.Method != http.MethodConnect {
-		// Plain HTTP: forward the absolute-URL request and write the response back.
+		// Plain HTTP: gate then forward the absolute-URL request.
 		req.RequestURI = ""
-		p.forward(c, req)
+		p.forward(c, req, p.decide(requestOf(req)))
 		return
 	}
 	authority := req.Host // "host:port" — the upstream target, port preserved
 	host := hostOnly(authority)
+
+	// Gate at CONNECT — BEFORE minting a leaf — so the untrusted sandbox can't force
+	// unbounded RSA keygen for hosts it can't reach anyway (domain-level policy needs only
+	// the host; path-level would re-check per request). The verdict is reused for every
+	// request on this connection.
+	pr := Request{Method: req.Method, Host: host, Path: "", URL: "https://" + host + "/"}
+	v := p.decide(pr)
+	if !v.Allow {
+		if p.audit != nil {
+			p.audit(pr, v, http.StatusForbidden)
+		}
+		writeStatus(c, http.StatusForbidden, "egress denied: "+v.Reason)
+		return
+	}
 	if _, err := io.WriteString(c, "HTTP/1.1 200 Connection established\r\n\r\n"); err != nil {
 		return
 	}
@@ -115,7 +129,7 @@ func (p *Proxy) handleConn(c net.Conn) {
 	}
 	defer tlsConn.Close()
 
-	// One MITM'd connection may carry several keep-alive requests.
+	// One MITM'd connection may carry several keep-alive requests (all to the admitted host).
 	tbr := bufio.NewReader(tlsConn)
 	for {
 		r2, err := http.ReadRequest(tbr)
@@ -123,27 +137,38 @@ func (p *Proxy) handleConn(c net.Conn) {
 			return
 		}
 		r2.URL.Scheme, r2.URL.Host, r2.RequestURI = "https", authority, ""
-		if !p.forward(tlsConn, r2) {
+		if !p.forward(tlsConn, r2, v) {
 			return
 		}
 	}
 }
 
-// forward applies policy, forwards an allowed request upstream, and writes the response
-// back to w. Returns whether the client connection can be reused for another request.
-func (p *Proxy) forward(w net.Conn, req *http.Request) bool {
-	host := hostOnly(req.URL.Host)
-	pr := Request{Method: req.Method, Host: host, Path: req.URL.Path, URL: req.URL.String()}
-	v := p.decide(pr)
+// requestOf builds the policy Request from an *http.Request (host without port).
+func requestOf(req *http.Request) Request {
+	return Request{Method: req.Method, Host: hostOnly(req.URL.Host), Path: req.URL.Path, URL: req.URL.String()}
+}
+
+// forward applies the (already-decided) verdict, forwards an allowed request upstream, and
+// streams the response back to w. Returns whether the client connection can be reused.
+func (p *Proxy) forward(w net.Conn, req *http.Request, v Verdict) bool {
+	pr := requestOf(req)
 	if !v.Allow {
 		if p.audit != nil {
 			p.audit(pr, v, http.StatusForbidden)
 		}
+		// Drain the body so the next keep-alive request on this connection parses cleanly.
+		_, _ = io.Copy(io.Discard, req.Body)
+		_ = req.Body.Close()
 		writeStatus(w, http.StatusForbidden, "egress denied: "+v.Reason)
 		return true // deny is not a transport error; keep serving the connection
 	}
-	if v.RewriteHost != "" && v.RewriteHost != host {
-		req.URL.Host = v.RewriteHost
+	if v.RewriteHost != "" && v.RewriteHost != pr.Host {
+		// Redirect to the rewrite target, preserving any non-default port.
+		if _, port, err := net.SplitHostPort(req.URL.Host); err == nil {
+			req.URL.Host = net.JoinHostPort(v.RewriteHost, port)
+		} else {
+			req.URL.Host = v.RewriteHost
+		}
 		req.Host = v.RewriteHost
 	}
 	stripHopByHop(req.Header)
@@ -159,15 +184,25 @@ func (p *Proxy) forward(w net.Conn, req *http.Request) bool {
 		writeStatus(w, http.StatusBadGateway, "upstream error")
 		return false
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body, rerr := io.ReadAll(resp.Body)
 	resp.Body.Close()
+	if rerr != nil {
+		if p.audit != nil {
+			p.audit(pr, v, http.StatusBadGateway)
+		}
+		writeStatus(w, http.StatusBadGateway, "upstream read error")
+		return false
+	}
 	if p.audit != nil {
 		p.audit(pr, v, resp.StatusCode)
 	}
 
-	// Re-serialize to the client as HTTP/1.1 with a definite length — the upstream may
-	// have answered over HTTP/2, whose "HTTP/2.0" status line an HTTP/1.1 client rejects.
-	resp.Body = io.NopCloser(strings.NewReader(string(body)))
+	// Re-serialize to the client as HTTP/1.1 with a definite length: the upstream may have
+	// answered over HTTP/2 (whose "HTTP/2.0" status line an HTTP/1.1 client rejects) or
+	// chunked, and buffering lets us present a clean Content-Length the tunneled client
+	// frames unambiguously. (Full-body buffering is a known limitation for very large
+	// artifacts — relay mode is the path for those; streaming here is future work.)
+	resp.Body = io.NopCloser(bytes.NewReader(body))
 	resp.ContentLength = int64(len(body))
 	resp.Header.Set("Content-Length", fmt.Sprint(len(body)))
 	resp.TransferEncoding = nil

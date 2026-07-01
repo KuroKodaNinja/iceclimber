@@ -24,6 +24,10 @@ import (
 	"time"
 )
 
+// maxCachedLeaves bounds the per-host leaf cache (the CONNECT gate is the primary defense
+// against a sandbox spamming unique hostnames; this caps memory even for admitted hosts).
+const maxCachedLeaves = 1024
+
 // CA is the controller-held certificate authority the MITM proxy signs per-host leaf
 // certificates with. The sandbox trusts the CA's public cert (never the private key,
 // which never leaves the controller). Leaves are minted lazily per SNI and cached.
@@ -131,6 +135,12 @@ func (c *CA) leafFor(host string) (*tls.Certificate, error) {
 	defer c.mu.Unlock()
 	if leaf, ok := c.leaves[host]; ok {
 		return leaf, nil
+	}
+	// Bound the cache (defense-in-depth; the CONNECT gate already blocks minting for
+	// unadmitted hosts). Past the cap, drop the whole cache rather than grow unbounded —
+	// a few extra mints on a huge admitted-host set is fine.
+	if len(c.leaves) >= maxCachedLeaves {
+		c.leaves = map[string]*tls.Certificate{}
 	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {

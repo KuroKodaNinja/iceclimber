@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -745,7 +746,16 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 				})
 			}
 			disp := buildConsoleDispatcher(ctx, s, cfg, act, events)
+			// In proxy egress mode, bring up the reverse-tunneled MITM proxy for this
+			// connection so the sandbox's tools egress through it, gated by the console's
+			// interactive approver (set by buildConsoleDispatcher above).
+			stopProxy, perr := startEgressProxy(s, cfg, io.Discard)
+			if perr != nil {
+				_ = s.Close()
+				return true, perr
+			}
 			serveErr := disp.Serve(ctx, 2*time.Second)
+			stopProxy()
 			_ = s.Close()
 			return true, serveErr
 		}
