@@ -65,6 +65,14 @@ type Config struct {
 	// "30m"); empty = the 1h default; "0" disables the retention sweep (collected pairs
 	// are still pruned). See Config.Retention.
 	MaildirRetention string `yaml:"maildir_retention"`
+	// EgressMode selects how the sandbox obtains packages: "relay" (default — the
+	// controller resolves + relays artifacts in; the sandbox has no network) or "proxy"
+	// (the sandbox's own package managers reach real registries through a controller-run
+	// MITM proxy over the SSH reverse tunnel; still no direct sandbox internet).
+	EgressMode string `yaml:"egress_mode"`
+	// EgressProxyPort is the sandbox loopback port the reverse tunnel exposes the proxy on
+	// (what the sandbox's HTTPS_PROXY points at). Empty/0 = the default (see EgressPort).
+	EgressProxyPort int `yaml:"egress_proxy_port"`
 }
 
 // DefaultMaildirRetention is the retention window applied when maildir_retention is unset.
@@ -82,6 +90,21 @@ func (c *Config) Retention() time.Duration {
 		return DefaultMaildirRetention
 	}
 	return d
+}
+
+// DefaultEgressProxyPort is the sandbox loopback port the egress proxy is tunneled to
+// when egress_proxy_port is unset.
+const DefaultEgressProxyPort = 18080
+
+// EgressProxy reports whether the operator selected the MITM-proxy egress mode.
+func (c *Config) EgressProxy() bool { return strings.EqualFold(c.EgressMode, "proxy") }
+
+// EgressPort is the configured sandbox loopback proxy port, or the default.
+func (c *Config) EgressPort() int {
+	if c.EgressProxyPort > 0 {
+		return c.EgressProxyPort
+	}
+	return DefaultEgressProxyPort
 }
 
 // RuntimesConfig is the operator's per-language runtime-source override.
@@ -238,6 +261,11 @@ func (c *Config) validate(selectSandbox string) error {
 		default:
 			return fmt.Errorf("runtimes.%s.env_manager %q must be \"venv\" or \"conda\"", lang, pref.EnvManager)
 		}
+	}
+	switch strings.ToLower(c.EgressMode) {
+	case "", "relay", "proxy":
+	default:
+		return fmt.Errorf("egress_mode %q must be \"relay\" or \"proxy\"", c.EgressMode)
 	}
 	return nil
 }

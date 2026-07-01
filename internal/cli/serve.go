@@ -100,6 +100,11 @@ func withDispatcher(ctx context.Context, cfg *config.Config, transport string, d
 	h := &sessionHolder{}
 	h.Set(sess)
 	startAgentLogBridge(ctx, cfg, h)
+	stopProxy, err := startEgressProxy(sess, cfg, out)
+	if err != nil {
+		return err
+	}
+	defer stopProxy()
 	disp := buildServeDispatcher(ctx, sess, cfg, deny, out, supervised)
 	return fn(disp)
 }

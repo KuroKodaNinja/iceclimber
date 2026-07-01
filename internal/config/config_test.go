@@ -206,3 +206,28 @@ func TestRetention(t *testing.T) {
 		}
 	}
 }
+
+func TestEgressMode(t *testing.T) {
+	// Defaults: relay (proxy off), default port.
+	c := &Config{}
+	if c.EgressProxy() {
+		t.Error("empty egress_mode should be relay (proxy off)")
+	}
+	if c.EgressPort() != DefaultEgressProxyPort {
+		t.Errorf("EgressPort default = %d, want %d", c.EgressPort(), DefaultEgressProxyPort)
+	}
+	// Proxy mode + explicit port.
+	c = &Config{EgressMode: "proxy", EgressProxyPort: 9999}
+	if !c.EgressProxy() || c.EgressPort() != 9999 {
+		t.Errorf("proxy mode = %v, port = %d", c.EgressProxy(), c.EgressPort())
+	}
+	// Validation: relay/proxy/"" accepted, anything else rejected.
+	for _, m := range []string{"", "relay", "proxy", "PROXY"} {
+		if err := (&Config{SandboxID: "s", SSH: SSH{Host: "h"}, RemoteRoot: "/r", EgressMode: m}).validate(""); err != nil {
+			t.Errorf("egress_mode %q should validate: %v", m, err)
+		}
+	}
+	if err := (&Config{SandboxID: "s", SSH: SSH{Host: "h"}, RemoteRoot: "/r", EgressMode: "vpn"}).validate(""); err == nil {
+		t.Error("egress_mode \"vpn\" should be rejected")
+	}
+}
