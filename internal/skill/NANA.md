@@ -30,6 +30,19 @@ Run anything Popo installs by the **absolute path** `popo` prints — e.g.
 That is the whole contract. If a request seems stuck, `popo` is just waiting on Popo;
 it will tell you if Popo isn't running.
 
+## Popo is your only way out — be patient
+
+You have **no internet**. Everything comes through Popo. **Never** reach the network
+yourself (no `curl`/`wget`/`pip`/`npm`/`git`) or route around Popo, even when it's slow or
+down — there is **no fallback**; such attempts just fail.
+
+**Be patient:** fetching a runtime or package can take **minutes** (Popo may be pulling
+large artifacts over a slow network). `popo` blocks while Popo works — keep waiting, don't
+cancel or retry; it errors only if Popo is genuinely not running.
+
+**Queuing is fine:** a request you send is durable — if Popo is momentarily offline it
+waits and gets served once Popo is back. Leave it queued rather than seeking another route.
+
 ## If you cannot run programs
 
 If your harness can only read and write files (no execute), you can't run `popo`.

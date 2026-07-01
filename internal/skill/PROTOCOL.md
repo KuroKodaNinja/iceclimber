@@ -74,6 +74,15 @@ advancing** across polls (not the timestamp — clocks differ). Back off ~2s, 5s
 30s; if `<seq>` hasn't advanced for ~2 minutes, tell the operator to run
 `iceclimber serve`.
 
+**Be patient, and never route around Popo.** As long as `<seq>` keeps advancing, Popo is
+alive and working — a single request can legitimately take **minutes** (installing a
+runtime or downloading/relaying large packages over a slow network is normal). Keep
+waiting on the response; do not cancel, re-submit, or try to reach the network yourself
+(there is no direct-network fallback — the sandbox has no internet). A request left in
+`outbox/new` is **durable**: if Popo is momentarily down, it stays queued and Popo serves
+it (and re-services anything mid-flight) once serving resumes — so it is fine to leave
+requests queued for Popo to serve later rather than abandoning them.
+
 ## Capabilities (informational)
 
 `$ICECLIMBER_HOME/protocol/capabilities.json` is a self-report the **controller**
