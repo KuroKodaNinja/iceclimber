@@ -75,7 +75,7 @@ func TestDetectRuntimes(t *testing.T) {
 	t.Run("python with venv+conda, node, java", func(t *testing.T) {
 		kv := map[string]string{
 			"PY_PATH": "/usr/bin/python3", "PY_VER": "Python 3.11.2",
-			"PY_VENV": "yes", "PY_ENSUREPIP": "yes", "CONDA_PATH": "/opt/conda/bin/conda",
+			"PY_VENV": "yes", "PY_ENSUREPIP": "yes", "CONDA_PATH": "/opt/conda/bin/conda", "CONDA_VER": "conda 24.5.0",
 			"NODE_PATH": "/usr/bin/node", "NODE_VER": "v20.1.0",
 			"JAVA_PATH": "/usr/bin/java", "JAVA_VER": `openjdk version "17.0.1" 2021-10-19`,
 		}
@@ -89,6 +89,9 @@ func TestDetectRuntimes(t *testing.T) {
 		}
 		if strings.Join(py.EnvManagers, ",") != "venv,conda" {
 			t.Errorf("python env managers = %v, want [venv conda]", py.EnvManagers)
+		}
+		if py.CondaPath != "/opt/conda/bin/conda" || py.CondaVersion != "conda 24.5.0" {
+			t.Errorf("conda path/version = %q/%q, want /opt/conda/bin/conda / conda 24.5.0", py.CondaPath, py.CondaVersion)
 		}
 		if rts[1].Version != "20.1.0" {
 			t.Errorf("node version = %q, want 20.1.0", rts[1].Version)

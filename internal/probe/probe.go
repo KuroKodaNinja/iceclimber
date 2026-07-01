@@ -46,6 +46,11 @@ type RuntimeInfo struct {
 	Version     string   `json:"version,omitempty"`      // parsed, e.g. "3.11.2"
 	VersionRaw  string   `json:"version_raw,omitempty"`  // the unparsed --version line
 	EnvManagers []string `json:"env_managers,omitempty"` // python only: "venv","conda"
+	// CondaPath/CondaVersion are the discovered conda binary (python only, when a conda
+	// is on PATH) — needed to create conda envs / drive conda installs. Path above is the
+	// python interpreter, not conda.
+	CondaPath    string `json:"conda_path,omitempty"`
+	CondaVersion string `json:"conda_version,omitempty"`
 }
 
 // Runtime returns the discovered runtime for lang ("python"/"node"/"java"), if present.
@@ -96,7 +101,10 @@ if command -v python3 >/dev/null 2>&1; then
   python3 -c 'import venv' 2>/dev/null && echo "PY_VENV=yes"
   python3 -c 'import ensurepip' 2>/dev/null && echo "PY_ENSUREPIP=yes"
 fi
-command -v conda >/dev/null 2>&1 && echo "CONDA_PATH=$(command -v conda)"
+if command -v conda >/dev/null 2>&1; then
+  echo "CONDA_PATH=$(command -v conda)"
+  echo "CONDA_VER=$(conda --version 2>&1 | head -n1)"
+fi
 if command -v node >/dev/null 2>&1; then
   echo "NODE_PATH=$(command -v node)"
   echo "NODE_VER=$(node --version 2>&1 | head -n1)"
@@ -221,6 +229,8 @@ func detectRuntimes(kv map[string]string) []RuntimeInfo {
 		}
 		if kv["CONDA_PATH"] != "" {
 			rt.EnvManagers = append(rt.EnvManagers, "conda")
+			rt.CondaPath = kv["CONDA_PATH"]
+			rt.CondaVersion = strings.TrimSpace(kv["CONDA_VER"])
 		}
 		out = append(out, rt)
 	}
