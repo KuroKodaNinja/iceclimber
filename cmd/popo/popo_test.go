@@ -155,6 +155,39 @@ func TestCollect_MovesResponse(t *testing.T) {
 	}
 }
 
+func TestCollectCmd(t *testing.T) {
+	root := t.TempDir()
+	tree := wire.Tree{Root: root}
+	for _, d := range []string{tree.Inbox().New(), tree.Inbox().Cur()} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Usage errors on the wrong arg count.
+	if err := collectCmd(root, nil); err == nil {
+		t.Error("collect with no id should error")
+	}
+	if err := collectCmd(root, []string{"a", "b"}); err == nil {
+		t.Error("collect with two args should error")
+	}
+	// Success moves the response into inbox/cur.
+	name := wire.RequestName("01COLLECTID")
+	if err := os.WriteFile(filepath.Join(tree.Inbox().New(), name), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := collectCmd(root, []string{"01COLLECTID"}); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tree.Inbox().Cur(), name)); err != nil {
+		t.Errorf("response not moved to inbox/cur: %v", err)
+	}
+	// Idempotent: collecting an already-collected/absent id is success, not an error
+	// (the request/await flow already auto-collected it).
+	if err := collectCmd(root, []string{"01COLLECTID"}); err != nil {
+		t.Errorf("re-collect should be idempotent, got %v", err)
+	}
+}
+
 func TestAwait_CollectFailureNonFatal(t *testing.T) {
 	// inbox/cur intentionally absent → the auto-collect rename fails, but await must still
 	// return the response (collection is best-effort; a failed collect just leaves it

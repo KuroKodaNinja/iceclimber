@@ -9,6 +9,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,16 +48,12 @@ func main() {
 	// GC can prune the pair. The normal request/await flow does this automatically; this
 	// verb is for collecting a response read out-of-band.
 	if verb == "collect" {
-		if len(rest) != 1 {
-			fmt.Fprintf(os.Stderr, "popo collect <id>\n")
-			os.Exit(1)
-		}
 		root, err := resolveRoot()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "popo: %v\n", err)
 			os.Exit(1)
 		}
-		if err := collect(wire.Tree{Root: root}, wire.RequestName(rest[0])); err != nil {
+		if err := collectCmd(root, rest); err != nil {
 			fmt.Fprintf(os.Stderr, "popo collect: %v\n", err)
 			os.Exit(1)
 		}
@@ -190,6 +187,20 @@ func await(tree wire.Tree, name string) (wire.Response, error) {
 		}
 		time.Sleep(d)
 	}
+}
+
+// collectCmd handles the `popo collect <id>` verb. It is IDEMPOTENT — an already-
+// collected (or absent) id is success, not an error, because the request/await flow
+// auto-collects and PROTOCOL.md also tells the agent to collect, so a double-collect is
+// expected and harmless.
+func collectCmd(root string, rest []string) error {
+	if len(rest) != 1 {
+		return fmt.Errorf("usage: popo collect <id>")
+	}
+	if err := collect(wire.Tree{Root: root}, wire.RequestName(rest[0])); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // collect marks a response collected by moving it inbox/new -> inbox/cur, so Popo's GC
