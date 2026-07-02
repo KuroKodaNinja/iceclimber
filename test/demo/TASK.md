@@ -7,10 +7,12 @@ What you *do* have is **Popo**, a controller running outside the sandbox that wi
 provision things for you on request. You talk to Popo with the **`popo`** client
 (it's on your `PATH`). Run **`popo help`** to see the verbs and their usage —
 `popo python.install 3.12`, `popo pip.install --python 3.12 <pkg>`, `popo web.fetch
-<url>`, and the Node/Java equivalents. `popo <verb>` blocks until Popo answers and
-prints the result; run installed runtimes by the absolute path it prints. (The
-operator may approve a request interactively, so a command can take a few seconds;
-if `popo` exits 2 it's asking for approval — wait and retry.)
+<url>`, and the Node/Java equivalents. For a runtime install you can **omit the
+version** to get the current recommended line (`popo node.install`) — only pin a
+version when the task requires a specific one. `popo <verb>` blocks until Popo
+answers and prints the result; run installed runtimes by the absolute path it
+prints. (The operator may approve a request interactively, so a command can take a
+few seconds; if `popo` exits 2 it's asking for approval — wait and retry.)
 
 ## Your task
 
@@ -27,7 +29,11 @@ prints a **computed** line (not just an echo of the data).
    `rich`:  `[python] xkcd #<num> title-length=<len(title)>`. Run it with the
    absolute python path `python.install` returned.
 
-3. **JavaScript.** Install **Node 24** and the **`left-pad`** package through Popo.
+3. **JavaScript.** Install **Node** through Popo **without pinning a version** — the task
+   doesn't need a specific one, so run `popo node.install` with no version and let Popo
+   install the current recommended line (don't guess a number). Then install the
+   **`left-pad`** package into *that* Node, passing the exact version the install reported
+   to `npm.install --node <version>`.
    Write `{{ICECLIMBER_HOME}}/work/js/report.js` that reads `comic.json` and prints, using
    `left-pad` to zero-pad the number to 5 digits:
    `[javascript] xkcd #<padded-num> title-length=<title.length>`. Run it with the

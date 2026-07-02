@@ -18,11 +18,19 @@ func TestNanaMDIsMinimalAndPointsToPopo(t *testing.T) {
 			t.Errorf("NANA.md missing %q", want)
 		}
 	}
-	// Runtime-version guidance must be present: default to the latest, don't guess a number
-	// (the whole point of the section — an agent left to guess picks an older line).
-	for _, want := range []string{"node.install", "latest"} {
+	// Behavioral guardrails that keep an air-gapped agent doing the right thing must stay in
+	// the system prompt — each pins a real failure mode observed/anticipated in use:
+	for _, want := range []string{
+		"node.install",              // the omit-version install form (agent stops guessing)
+		"latest",                    // … resolves to the recommended line
+		"default to the latest",     // version guidance is explicit, not implied
+		"Reuse the version",         // use the installed runtime version for package installs
+		"Install the runtime first", // runtime before its packages
+		"no fallback",               // never route around Popo when it's slow/down
+		"be patient",                // don't cancel/retry a slow (minutes-long) request
+	} {
 		if !strings.Contains(NanaMD, want) {
-			t.Errorf("NANA.md missing runtime-version guidance %q", want)
+			t.Errorf("NANA.md missing behavioral guardrail %q", want)
 		}
 	}
 	// The raw mechanics must NOT be in the system prompt — they belong in PROTOCOL.md.

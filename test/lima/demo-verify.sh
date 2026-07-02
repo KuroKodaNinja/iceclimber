@@ -63,6 +63,14 @@ check python "$WORK/py/report.py" "$PY $WORK/py/report.py"
 # 2b. JavaScript (left-pad) under the installed Node, with NODE_PATH set.
 NODE="$(vm_glob "$ICECLIMBER_HOME/runtimes/node/*/bin/node")"
 [ -n "$NODE" ] || fail "no installed Node (did node.install run?)"
+# The brief installs Node WITHOUT pinning a version, so this also proves the agent used the
+# omit-version affordance and got the current recommended line (node.RecommendedLine = 24) —
+# not an older one it guessed. Bump this to match if RecommendedLine changes.
+NODE_VER="$(limactl shell "$DEMO" -- "$NODE" --version 2>/dev/null)"
+case "$NODE_VER" in
+	v24.*) echo "DEMO VERIFY: unpinned node.install resolved to the recommended line ($NODE_VER)" ;;
+	*) fail "unpinned Node install should be the recommended line (v24.x), got \"$NODE_VER\" — the agent may have guessed/pinned an older version instead of omitting it" ;;
+esac
 NMOD="$(vm_glob "$ICECLIMBER_HOME/runtimes/node/*/lib/node_modules")"
 check javascript "$WORK/js/report.js" "NODE_PATH=$NMOD $NODE $WORK/js/report.js"
 

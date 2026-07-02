@@ -52,10 +52,13 @@ Rules of thumb:
   the one available here, and may lack features the packages need.
 - **Only name a version when the task requires it** — e.g. "target Python 3.11", a lockfile
   pinning an engine, or a dependency that needs an exact line.
+- **Install the runtime first, then its packages** — `pip`/`npm`/`maven` install *into* a
+  runtime that must already exist.
 - **Reuse the version Popo actually installed.** Every install result prints the resolved
-  version and absolute path — use *that* version for the matching package installs (e.g. if
-  `node.install` reports Node 24, run `popo npm.install --node 24 …`, not a different line).
-  One runtime line per app; don't mix.
+  version and absolute path. The package verbs take a **concrete** version, not `latest` —
+  pass the exact one the runtime install reported (e.g. if `node.install` reported Node 24,
+  run `popo npm.install --node 24 …`, not `--node latest` and not a different line). One
+  runtime line per app; don't mix.
 
 ## Popo is your only way out — be patient
 
