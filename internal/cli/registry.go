@@ -176,7 +176,7 @@ func webfetchDeps(sess *session) webfetch.Deps {
 // test pass nil (no render surface).
 func buildRegistry(sess *session, pr progress.Func) protocol.Registry {
 	return protocol.Registry{
-		"ping":           protocol.PingHandler(version),
+		"ping":           protocol.PingHandler(version, sess.dispatchConcur),
 		"python.install": python.Handler(newInstaller(sess, pr)),
 		"pip.install":    pip.Handler(pipDeps(sess, pr)),
 		"node.install":   node.Handler(newNodeInstaller(sess, pr)),

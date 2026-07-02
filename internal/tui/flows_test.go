@@ -241,13 +241,13 @@ func TestFlow_ServingIndicator(t *testing.T) {
 		ID: "r1", Type: "pip.install", Status: "ok", Detail: "requests 2.32.3",
 	})
 	c := finalConsole(t, tm)
-	if c.serving != "" {
-		t.Errorf("serving should be cleared after serviced, got %q", c.serving)
+	if len(c.inflight) != 0 {
+		t.Errorf("in-flight should be cleared after serviced, got %+v", c.inflight)
 	}
 	if c.served != 1 || len(c.popoLines) != 1 || !strings.Contains(c.popoLines[0].plain, "requests 2.32.3") {
 		t.Errorf("serviced should clear the banner and land the line; served=%d lines=%+v", c.served, c.popoLines)
 	}
-	// serving == "" guarantees View renders no banner (it's gated on c.serving != "").
+	// empty inflight guarantees View renders no banner (it's gated on len(c.inflight) != 0).
 }
 
 func TestFlow_SandboxEchoToNana(t *testing.T) {

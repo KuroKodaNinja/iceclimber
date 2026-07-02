@@ -90,6 +90,7 @@ ssh:
   identity_file: ~/.ssh/id_ed25519   # optional; falls back to ssh-agent
   known_hosts: ~/.ssh/known_hosts    # host-key verified (no insecure skips)
 # remote_root: /home/agent/.iceclimber   # optional; chosen at bootstrap if absent
+# dispatch_concurrency: 4                 # optional; how many requests Popo serves at once
 ```
 
 Host keys are verified against `known_hosts` — the SSH transport is secure by
@@ -283,6 +284,16 @@ show their progress in the **footer meter** instead, so an agent request and an
 operator action can be in flight at once without colliding.) Headless `serve` prints
 a `▸ <type> …` receipt line at pickup and the serviced line (with its elapsed time)
 on completion.
+
+**Concurrent dispatch.** Popo services up to **`dispatch_concurrency`** requests at once
+(default **4**), so an agent that fans out — subagents, parallel tool calls — doesn't queue
+behind one slow install, and quick ops (`ping`, `web.fetch`) never wait behind a runtime
+install. Requests touching the **same** runtime line (a Python + its pip packages, a Node + its
+npm packages, …) are serialized so two installs can't corrupt one environment; different
+runtimes run in parallel. The console shows `▸ servicing N: <types>` when several are in flight.
+The limit is reported in the `ping` result and documented in the sandbox's `PROTOCOL.md`. Raise
+it in config (`dispatch_concurrency: 8`); on the `exec` transport very high fan-out may need the
+sandbox's `sshd` `MaxSessions` raised (SFTP is unaffected).
 
 ```sh
 ./iceclimber                    # the console (serve + watch + approve + manage)

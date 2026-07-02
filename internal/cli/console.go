@@ -935,6 +935,7 @@ func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Conf
 	reg := buildRegistry(sess, pr)
 	disp := protocol.NewDispatcher(sess.fs, sess.tree, reg)
 	disp.SetRetention(cfg.Retention())
+	disp.SetConcurrency(cfg.Concurrency())
 	disp.SetGate(ap.gate)
 	// Surface heartbeat liveness in the header (serving vs stale), independent of the
 	// SSH link state — non-blocking so the dispatcher never stalls on a slow UI.
@@ -957,10 +958,11 @@ func buildConsoleDispatcher(ctx context.Context, sess *session, cfg *config.Conf
 		e, ok := servicedEvent(ev)
 		if !ok {
 			// Denied by the gate (no serviced event, and the approver's denial is logged
-			// durably but not pushed live) — still clear any in-progress indicator so it
-			// never sticks. Counted as a denial via the durable log seed.
+			// durably but not pushed live) — still clear THIS request's in-progress indicator
+			// (by id, so concurrent siblings keep theirs) so it never sticks. Counted as a
+			// denial via the durable log seed.
 			select {
-			case events <- tui.ClearServingMsg{}:
+			case events <- tui.ClearServingMsg{ID: ev.Req.ID}:
 			default:
 			}
 			return

@@ -139,6 +139,11 @@ You can also drive the sandbox yourself from the console: **`i`** install a
 runtime + packages, **`b`** re-provision, **`s`** live status, **`e`** manage egress
 rules, **`q`** quit.
 
+Popo serves several requests **at once** (default 4, set `dispatch_concurrency`), so an agent
+that fans out (subagents, parallel tool calls) isn't stuck in a queue and quick calls never wait
+behind a slow install; requests into the *same* runtime are serialized so parallel installs can't
+corrupt one environment.
+
 **Prefer scripting/CI?** Everything works headless too: `iceclimber serve` (add
 `--yes` to auto-approve unattended), `iceclimber install python 3.12`,
 `iceclimber install pip rich --python 3.12`, `iceclimber logs -f`, etc.

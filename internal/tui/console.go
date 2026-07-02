@@ -170,10 +170,17 @@ const (
 // claiming "serving".
 type ConnStateMsg struct{ State ConnState }
 
-// ClearServingMsg clears the in-progress "serving" indicator without a serviced event
-// — used when a request is denied by the gate (which produces no serviced event and
-// whose denial is logged durably, not pushed live), so the indicator never sticks.
-type ClearServingMsg struct{}
+// ClearServingMsg clears the in-progress "serving" indicator for one request without a
+// serviced event — used when a request is denied by the gate (which produces no serviced event
+// and whose denial is logged durably, not pushed live), so the indicator never sticks. ID names
+// the request to clear (matching its KindStarted); an empty ID clears all in-flight (defensive).
+type ClearServingMsg struct{ ID string }
+
+// servingReq is one in-flight request tracked by the console's serving indicator.
+type servingReq struct {
+	typ   string
+	start time.Time
+}
 
 // HeartbeatMsg reports a heartbeat write (the dispatcher's OnHeartbeat). The header
 // uses the arrival time to show serving-vs-stale independent of the SSH link state —
@@ -225,24 +232,23 @@ type Console struct {
 	spinning  bool         // a spinner tick loop is live (so running + serving share ONE loop)
 	prog      *ProgressMsg // latest progress sample for the in-flight action ("" running = ignored)
 	progStart time.Time    // when the current phase began (for ETA)
-	// serving is the in-flight request the dispatcher is currently servicing — distinct
-	// from operator `running` so an agent-driven request and an operator action can show
-	// in-flight at once. Latest-wins: a KindStarted sets it, the matching serviced/denied
-	// (or a ClearServingMsg) clears it. Safe because the dispatcher services one request
-	// at a time (a future dispatch-parallelism epic would need ID-keyed tracking).
-	serving      string
-	servingID    string
-	servingStart time.Time
-	servingProg  *ProgressMsg // latest transfer sample for the in-flight request (agent #3)
-	panel        string       // "" | "status" | "egress" — an open read/manage panel
-	status       *StatusSnapshot
-	egress       EgressSnapshot
-	cursor       int    // selected row in the egress panel
-	panelErr     string // last egress action error, shown in the panel ("" = none)
-	width        int
-	height       int
-	scroll       int       // pane scrollback offset in wrapped rows (0 = follow the newest)
-	connState    ConnState // SSH link state (connected vs reconnecting)
+	// inflight tracks every request the dispatcher is currently servicing, keyed by request ID
+	// — distinct from operator `running` so agent-driven requests and an operator action can
+	// show in-flight at once. A KindStarted adds an entry, the matching serviced/denied (or a
+	// ClearServingMsg) removes it. ID-keyed because concurrent dispatch services several at once
+	// (the bounded worker pool); the banner shows a detailed meter for a single request and a
+	// "▸ servicing N: <types>" summary for several.
+	inflight    map[string]servingReq
+	servingProg *ProgressMsg // latest agent transfer sample; shown in the meter only when exactly one is in flight
+	panel       string       // "" | "status" | "egress" — an open read/manage panel
+	status      *StatusSnapshot
+	egress      EgressSnapshot
+	cursor      int    // selected row in the egress panel
+	panelErr    string // last egress action error, shown in the panel ("" = none)
+	width       int
+	height      int
+	scroll      int       // pane scrollback offset in wrapped rows (0 = follow the newest)
+	connState   ConnState // SSH link state (connected vs reconnecting)
 	// Heartbeat freshness — distinct from the link: a connected-but-wedged dispatcher
 	// stops advancing the seq, which the header surfaces as "stale".
 	lastHeartbeat time.Time
@@ -278,7 +284,8 @@ type formState struct {
 // NewConsole builds a console reading events (and, optionally, the agent stream).
 // ops may be nil to disable the operator management menu (e.g. in tests).
 func NewConsole(sandboxID string, events <-chan tea.Msg, agentLog string, ops OpRunner) Console {
-	c := Console{sandboxID: sandboxID, events: events, ops: ops, width: 100, height: 30}
+	c := Console{sandboxID: sandboxID, events: events, ops: ops, width: 100, height: 30,
+		inflight: map[string]servingReq{}}
 	c.spin = spinner.New(spinner.WithSpinner(spinner.Dot))
 	if agentLog != "" {
 		c.nana = tail.NewReader(agentLog)
@@ -408,10 +415,10 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.status = &s
 		return c, nil
 	case activity.Event:
-		wasServing := c.serving != ""
+		wasServing := len(c.inflight) != 0
 		c.applyEvent(msg)
 		// A request just entered service → start the spinner if it isn't already running.
-		if c.serving != "" && !wasServing {
+		if len(c.inflight) != 0 && !wasServing {
 			return c, tea.Batch(c.waitEvent(), c.tickSpinner())
 		}
 		return c, c.waitEvent()
@@ -425,7 +432,14 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.connState = msg.State
 		return c, c.waitEvent()
 	case ClearServingMsg:
-		c.serving, c.servingID, c.servingProg = "", "", nil
+		if msg.ID == "" {
+			c.inflight = map[string]servingReq{} // defensive: clear all
+		} else {
+			delete(c.inflight, msg.ID)
+		}
+		if len(c.inflight) == 0 {
+			c.servingProg = nil
+		}
 		return c, c.waitEvent()
 	case HeartbeatMsg:
 		c.lastHeartbeat, c.heartbeatSeq = msg.At, msg.Seq
@@ -445,7 +459,7 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return c, c.waitEvent()
 	case spinner.TickMsg:
-		if c.running == "" && c.serving == "" {
+		if c.running == "" && len(c.inflight) == 0 {
 			c.spinning = false // both idle → stop the loop (restarted when an action begins)
 			return c, nil
 		}
@@ -582,7 +596,7 @@ func (c Console) View() string {
 		meter = c.renderMeter()
 	}
 	serving := ""
-	if c.serving != "" {
+	if len(c.inflight) != 0 {
 		serving = c.renderServing()
 	}
 	hb := hbStatus{}
@@ -733,7 +747,26 @@ func (c Console) renderMeter() string {
 // the spinner + type + elapsed (servingLine), with a byte bar/%/ETA or (i/n) count
 // appended once a transfer sample for the agent request has arrived (#3).
 func (c Console) renderServing() string {
-	line := servingLine(c.spin.View(), c.serving, time.Since(c.servingStart))
+	n := len(c.inflight)
+	if n == 0 {
+		return ""
+	}
+	if n > 1 {
+		// Several in flight (concurrent dispatch): summarize by count + type. Sort the type list
+		// so the banner is stable (deterministic for tests, no flicker on map iteration order).
+		types := make([]string, 0, n)
+		for _, r := range c.inflight {
+			types = append(types, r.typ)
+		}
+		slices.Sort(types)
+		return servingSummary(c.spin.View(), n, types)
+	}
+	// Exactly one — the detailed per-request meter.
+	var only servingReq
+	for _, r := range c.inflight {
+		only = r
+	}
+	line := servingLine(c.spin.View(), only.typ, time.Since(only.start))
 	p := c.servingProg
 	if p == nil {
 		return line
@@ -745,7 +778,7 @@ func (c Console) renderServing() string {
 		ratio := float64(p.Cur) / float64(p.Total)
 		fmt.Fprintf(b, "  %s %d%%  %s/%s", meterBar(ratio, 18), pct(ratio),
 			progress.HumanBytes(p.Cur), progress.HumanBytes(p.Total))
-		if eta := progress.ETA(p.Cur, p.Total, time.Since(c.servingStart)); eta != "" {
+		if eta := progress.ETA(p.Cur, p.Total, time.Since(only.start)); eta != "" {
 			b.WriteString("  " + eta)
 		}
 	case p.Unit == progress.Items && p.Total > 0:
@@ -914,6 +947,15 @@ func (c Console) formTitle() string {
 	}
 }
 
+// clearInflight drops a completed/denied request from the in-flight set; when none remain, the
+// agent transfer meter sample is dropped too (it belonged to the request that just finished).
+func (c *Console) clearInflight(id string) {
+	delete(c.inflight, id)
+	if len(c.inflight) == 0 {
+		c.servingProg = nil
+	}
+}
+
 func (c *Console) applyEvent(e activity.Event) {
 	// Sandbox echoes are the sandbox's own voice — show them in the [NANA] pane
 	// alongside the agent's stream, not in Popo's activity.
@@ -923,21 +965,21 @@ func (c *Console) applyEvent(e activity.Event) {
 	}
 	switch e.Kind {
 	case activity.KindStarted:
-		// Live-only in-progress indicator: arm it (latest-wins) and stop — it's not a
-		// scrollback line and not a counter. The matching serviced/denied clears it.
-		c.serving, c.servingID, c.servingStart = e.Type, e.ID, time.Now()
+		// Live-only in-progress indicator: add it (keyed by request ID) and stop — it's not a
+		// scrollback line and not a counter. The matching serviced/denied removes it.
+		c.inflight[e.ID] = servingReq{typ: e.Type, start: time.Now()}
 		return
 	case activity.KindServiced:
 		c.served++
 		c.markLastAction(e.TS)
-		c.serving, c.servingID, c.servingProg = "", "", nil // completed → clear in-progress
+		c.clearInflight(e.ID) // completed → drop from in-progress
 	case activity.KindApproved:
 		c.approved++
 		c.markLastAction(e.TS)
 	case activity.KindDenied:
 		c.denied++
 		c.markLastAction(e.TS)
-		c.serving, c.servingID, c.servingProg = "", "", nil // denied → clear in-progress
+		c.clearInflight(e.ID) // denied → drop from in-progress
 	}
 	// Plumbing events (KindOperated reconnect/egress/bootstrap notices, KindVerified) still
 	// render in the [POPO] pane below, but they do NOT advance "last action" — that field

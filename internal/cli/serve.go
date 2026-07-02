@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -140,18 +141,24 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 	}
 	disp := protocol.NewDispatcher(sess.fs, sess.tree, reg)
 	disp.SetRetention(cfg.Retention())
+	disp.SetConcurrency(cfg.Concurrency())
 	if ap != nil {
 		disp.SetGate(ap.gate)
 	}
 
 	// Mark each request as it's picked up (ephemeral — a one-line stdout receipt, no
 	// JSONL append, no meter on a non-TTY pipe). The serviced line with its duration
-	// follows on completion.
+	// follows on completion. Under concurrent dispatch these fire from multiple worker
+	// goroutines, so obsMu serializes the shared writer (else the lines interleave and, on a
+	// bytes.Buffer, data-race).
+	var obsMu sync.Mutex
 	disp.ObserveStart(func(ev protocol.StartEvent) {
 		typ := ev.Req.Type
 		if typ == "" {
 			typ = "?"
 		}
+		obsMu.Lock()
+		defer obsMu.Unlock()
 		fmt.Fprintf(out, "  %s  ▸ %s …\n", time.Now().Format("15:04:05"), typ)
 	})
 	disp.Observe(func(ev protocol.ServiceEvent) {
@@ -159,7 +166,6 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 		if !ok {
 			return // denied by the gate — a denial, not a serviced request
 		}
-		_ = act.Append(e)
 		typ := e.Type
 		if typ == "" {
 			typ = "?"
@@ -168,6 +174,9 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 		if e.DurMS > 0 {
 			line += " · " + progress.HumanDur(time.Duration(e.DurMS)*time.Millisecond)
 		}
+		obsMu.Lock()
+		defer obsMu.Unlock()
+		_ = act.Append(e)
 		fmt.Fprintln(out, strings.TrimRight(line, " "))
 	})
 

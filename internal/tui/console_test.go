@@ -169,8 +169,8 @@ func TestConsole_ServingIndicatorSetAndClear(t *testing.T) {
 	// A started event arms the in-flight indicator — no counter bump, no scrollback line.
 	u, _ := c.Update(activity.Event{TS: "2026-06-28T18:00:00Z", Kind: activity.KindStarted, ID: "r1", Type: "pip.install"})
 	c = u.(Console)
-	if c.serving != "pip.install" || c.servingID != "r1" {
-		t.Fatalf("serving=%q id=%q, want pip.install/r1", c.serving, c.servingID)
+	if len(c.inflight) != 1 || c.inflight["r1"].typ != "pip.install" {
+		t.Fatalf("inflight=%+v, want {r1: pip.install}", c.inflight)
 	}
 	if c.served != 0 || len(c.popoLines) != 0 {
 		t.Errorf("started must not count or add a scrollback line: served=%d lines=%d", c.served, len(c.popoLines))
@@ -179,8 +179,8 @@ func TestConsole_ServingIndicatorSetAndClear(t *testing.T) {
 	// The matching serviced event clears the indicator and now counts + renders.
 	u, _ = c.Update(activity.Event{TS: "2026-06-28T18:00:01Z", Kind: activity.KindServiced, ID: "r1", Type: "pip.install", Status: "ok"})
 	c = u.(Console)
-	if c.serving != "" {
-		t.Errorf("serviced should clear serving, got %q", c.serving)
+	if len(c.inflight) != 0 {
+		t.Errorf("serviced should clear the in-flight entry, got %+v", c.inflight)
 	}
 	if c.served != 1 || len(c.popoLines) != 1 {
 		t.Errorf("after serviced: served=%d lines=%d, want 1/1", c.served, len(c.popoLines))
@@ -274,13 +274,42 @@ func TestConsole_ServingClearedByGateDeny(t *testing.T) {
 	c := NewConsole("sbx", make(chan tea.Msg, 4), "", nil)
 	u, _ := c.Update(activity.Event{TS: "2026-06-28T18:00:00Z", Kind: activity.KindStarted, ID: "r9", Type: "python.install"})
 	c = u.(Console)
-	if c.serving == "" {
-		t.Fatal("started should arm serving")
+	if len(c.inflight) != 1 {
+		t.Fatal("started should arm the in-flight indicator")
 	}
-	u, _ = c.Update(ClearServingMsg{})
+	u, _ = c.Update(ClearServingMsg{ID: "r9"})
 	c = u.(Console)
-	if c.serving != "" || c.servingID != "" {
-		t.Errorf("ClearServingMsg should clear serving, got %q/%q", c.serving, c.servingID)
+	if len(c.inflight) != 0 {
+		t.Errorf("ClearServingMsg{r9} should clear that request, got %+v", c.inflight)
+	}
+}
+
+// TestConsole_ConcurrentServingIndicator: several requests in flight at once render the
+// "▸ servicing N: <types>" summary; clearing one by id (gate-deny) leaves the others; the last
+// one restores the single detailed banner. Guards the ID-keyed indicator under concurrency.
+func TestConsole_ConcurrentServingIndicator(t *testing.T) {
+	c := NewConsole("sbx", make(chan tea.Msg, 8), "", nil)
+	start := func(id, typ string) {
+		u, _ := c.Update(activity.Event{TS: "2026-06-28T18:00:00Z", Kind: activity.KindStarted, ID: id, Type: typ})
+		c = u.(Console)
+	}
+	start("a", "pip.install")
+	start("b", "npm.install")
+	if len(c.inflight) != 2 {
+		t.Fatalf("two started → inflight=%+v, want 2", c.inflight)
+	}
+	if out := c.renderServing(); !strings.Contains(out, "servicing 2") ||
+		!strings.Contains(out, "pip.install") || !strings.Contains(out, "npm.install") {
+		t.Errorf("multi in-flight should summarize count+types; got %q", out)
+	}
+	// Deny one by id — the other survives, and the banner drops to the single detailed form.
+	u, _ := c.Update(ClearServingMsg{ID: "a"})
+	c = u.(Console)
+	if len(c.inflight) != 1 || c.inflight["b"].typ != "npm.install" {
+		t.Fatalf("clearing a should leave only b; got %+v", c.inflight)
+	}
+	if out := c.renderServing(); !strings.Contains(out, "▸ servicing npm.install") {
+		t.Errorf("single in-flight should show the detailed banner; got %q", out)
 	}
 }
 

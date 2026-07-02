@@ -83,6 +83,30 @@ waiting on the response; do not cancel, re-submit, or try to reach the network y
 it (and re-services anything mid-flight) once serving resumes — so it is fine to leave
 requests queued for Popo to serve later rather than abandoning them.
 
+## Concurrency
+
+Popo services requests **in parallel** — a deterministic contract Popo enforces, so you can
+fan out (subagents / several requests at once) without them queuing behind one slow install:
+
+1. Up to **N** requests run at once (N = `dispatch_concurrency`, reported by `ping`; default 4).
+   Send more and the excess simply queues in `outbox/new` and is served as slots free — nothing
+   is dropped.
+2. Requests that touch the **same runtime line are serialized** by Popo — at most one runs at a
+   time — so two installs can't corrupt one environment. The lines: `python.install` + `pip.install`
+   (a Python + its packages), `node.install` + `npm.install`, `java.install` + `maven.install`/
+   `maven.build`, and `conda.install`. You may send same-line requests concurrently, but they
+   won't overlap (a `pip.install` waits for the `python.install` it needs — send the runtime
+   first). Prefer **one** `pip.install`/`npm.install` with several packages over many parallel
+   ones into the same runtime.
+3. Everything else runs fully in parallel: **different** runtimes (Python vs Node vs Java) at the
+   same time, and quick verbs (`ping`, `web.fetch`, `collect`) never wait behind an install.
+4. **Completion order is not guaranteed** — match each response to its request by `id` (you do
+   this already).
+
+So: split independent work across parallel requests freely; just don't fan out multiple installs
+into the *same* runtime line (batch those into one request), and send a runtime before the
+packages that need it.
+
 ## Capabilities (informational)
 
 `$ICECLIMBER_HOME/protocol/capabilities.json` is a self-report the **controller**
@@ -94,7 +118,7 @@ install`/`wrap` — to inform the operator's `status` view. **You don't write it
 
 | verb | params | result (key fields) |
 |---|---|---|
-| `ping` | `{}` | `{ pong_at, popo_version }` |
+| `ping` | `{}` | `{ pong_at, popo_version, dispatch_concurrency }` |
 | `python.install` | `{ version? }` (minor, e.g. "3.12"; omit or "latest" = recommended) | `{ version, path, already_installed }` |
 | `pip.install` | `{ python_version, packages:[{name,version?}] }` | `{ installed:[{name,version,tier,sha256}], failed:[{name,version,error}] }` |
 | `node.install` | `{ version? }` (line, e.g. "24"; omit or "latest" = recommended) | `{ version, path, already_installed }` |

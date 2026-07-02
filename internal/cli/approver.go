@@ -50,6 +50,13 @@ type approver struct {
 	mu       sync.Mutex
 	allowAll map[string]bool // verb types approved "for all this session"
 	denyAll  map[string]bool // verb types denied "for all this session"
+
+	// promptMu serializes the interactive prompt itself. Under concurrent dispatch, several
+	// workers (install gates) — and the egress-proxy policy's held-host approval, which also
+	// funnels through present() — can need a modal at once; the console has a single modal
+	// slot, so two outstanding prompts would clobber each other (a lost Reply hangs a worker to
+	// ctx-deny). Held only across the human decision, so non-prompting checks stay fast.
+	promptMu sync.Mutex
 }
 
 func newApprover(a asker, sandboxID string, act *activity.Logger) *approver {
@@ -59,10 +66,14 @@ func newApprover(a asker, sandboxID string, act *activity.Logger) *approver {
 	}
 }
 
-// present injects the sandbox id and asks. (Liveness no longer needs refreshing here:
-// the dispatcher's background heartbeat ticker keeps it fresh even while the operator
-// decides, so a blocked prompt can't make Popo look dead.)
+// present injects the sandbox id and asks. It holds promptMu for the whole ask so that under
+// concurrent dispatch only ONE modal is outstanding at a time (see promptMu) — every prompt
+// source (the dispatch gate, web.fetch's ApproveFetch, and the egress-proxy policy) funnels
+// through here, so this is the single serialization point. (Liveness isn't refreshed here: the
+// dispatcher's background heartbeat keeps Popo alive even while the operator decides.)
 func (a *approver) present(p prompt) choice {
+	a.promptMu.Lock()
+	defer a.promptMu.Unlock()
 	p.sandbox = a.sandboxID
 	return a.asker.ask(p)
 }
@@ -75,25 +86,29 @@ func (a *approver) gate(_ context.Context, req protocol.Request) error {
 	case "ping", "web.fetch":
 		return nil
 	}
-	a.mu.Lock()
-	switch {
-	case a.denyAll[req.Type]:
-		a.mu.Unlock()
-		// Auto-applied remembered decision — do NOT re-log a denial (the operator
-		// decided once, already logged). Symmetric with the remembered-approve path
-		// below; re-logging here was inflating the denied counter on every request.
-		return fmt.Errorf("operator denied %s", req.Type)
-	case a.allowAll[req.Type]:
-		a.mu.Unlock()
-		return nil
+	// Fast path: a remembered decision needs no prompt (and no re-log — the operator decided
+	// once). Auto-applied remembered decisions must not inflate the counters.
+	if err, ok := a.remembered(req.Type); ok {
+		return err
 	}
-	a.mu.Unlock()
+
+	// Serialize the prompt so concurrent gated workers don't clobber the single modal, and
+	// re-check remembered UNDER the lock: if a sibling just chose "approve/deny all" while we
+	// queued, honor it instead of prompting again. gate holds promptMu directly (rather than via
+	// present) so it can re-check + prompt atomically; ApproveFetch serializes on the same lock.
+	a.promptMu.Lock()
+	defer a.promptMu.Unlock()
+	if err, ok := a.remembered(req.Type); ok {
+		return err
+	}
 
 	title, fields, note := summarizeRequest(req)
-	switch a.present(prompt{
+	p := prompt{
 		title: title, kind: "operation", fields: fields, note: note,
 		rememberLabel: "approve all " + req.Type,
-	}) {
+	}
+	p.sandbox = a.sandboxID
+	switch a.asker.ask(p) {
 	case choiceApproveRemember:
 		a.remember(&a.allowAll, req.Type)
 		a.log(activity.KindApproved, req.Type, title)
@@ -142,6 +157,22 @@ func (a *approver) ApproveFetch(_ context.Context, p webfetch.ApprovalPrompt) we
 	default:
 		a.log(activity.KindDenied, "web.fetch", p.URL)
 		return webfetch.DenyOnce
+	}
+}
+
+// remembered returns the auto-applied verdict for a verb type if the operator chose "…all"
+// earlier this session: (nil, true) for allow, (deny-error, true) for deny, (nil, false) if no
+// remembered decision. No logging — the remembered choice was logged once when made.
+func (a *approver) remembered(typ string) (error, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	switch {
+	case a.denyAll[typ]:
+		return fmt.Errorf("operator denied %s", typ), true
+	case a.allowAll[typ]:
+		return nil, true
+	default:
+		return nil, false
 	}
 }
 

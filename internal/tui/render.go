@@ -140,6 +140,15 @@ func servingLine(spin, typ string, elapsed time.Duration) string {
 		dimStyle.Render(" · "+progress.HumanDur(elapsed))
 }
 
+// servingSummary renders the in-flight banner when SEVERAL requests are being serviced at once
+// (concurrent dispatch): spinner + count + the request types. The detailed per-request meter is
+// shown only for a single in-flight request; with many, the type list is the useful signal.
+func servingSummary(spin string, n int, types []string) string {
+	return " " + dimStyle.Render(spin) + " " +
+		servingStyle.Render(fmt.Sprintf("▸ servicing %d", n)) +
+		dimStyle.Render(": "+strings.Join(types, ", "))
+}
+
 func header(w int, sandboxID string, served, approved, denied int, lastTS time.Time, conn ConnState, hb hbStatus) string {
 	// Two distinct signals: the SSH link, and dispatcher liveness (heartbeat freshness).
 	var state string

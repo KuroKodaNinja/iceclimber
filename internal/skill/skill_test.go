@@ -10,7 +10,7 @@ import (
 // The heavy raw mechanics live in PROTOCOL.md, not here — but load-bearing behavioral guidance
 // (e.g. defaulting runtime versions to the latest) does belong, so the bound is generous.
 func TestNanaMDIsMinimalAndPointsToPopo(t *testing.T) {
-	if len(NanaMD) > 4500 {
+	if len(NanaMD) > 5000 {
 		t.Errorf("NANA.md should stay focused (system prompt); got %d bytes", len(NanaMD))
 	}
 	for _, want := range []string{"popo", "popo help", "absolute path", "PROTOCOL.md"} {

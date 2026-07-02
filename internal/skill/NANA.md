@@ -60,6 +60,14 @@ Rules of thumb:
   run `popo npm.install --node 24 …`, not `--node latest` and not a different line). One
   runtime line per app; don't mix.
 
+## Run independent work in parallel
+
+Popo services several requests at once (up to a limit `ping` reports), so independent work
+needn't wait in line — issue requests concurrently (background `popo` calls / subagents). Popo
+**serializes same-runtime installs for you** (so batch packages into one `pip.install`/
+`npm.install` rather than firing many at the same runtime), while different runtimes and quick
+calls run in parallel. Exact contract: `$ICECLIMBER_HOME/skill/PROTOCOL.md` "Concurrency".
+
 ## Popo is your only way out — be patient
 
 You have **no internet**. Everything comes through Popo. **Never** reach the network

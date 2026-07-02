@@ -7,6 +7,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
@@ -24,6 +25,7 @@ type Dispatcher struct {
 	gate         func(context.Context, Request) error
 	onHeartbeat  func(seq int64)
 	retention    time.Duration // reap responses uncollected this long (0 = never)
+	concurrency  int           // max handlers serviced at once (<1 ⇒ 1, i.e. sequential)
 }
 
 // CodeOperatorDenied is the error code on a response the gate rejected before the
@@ -84,6 +86,19 @@ func (d *Dispatcher) OnHeartbeat(fn func(seq int64)) { d.onHeartbeat = fn }
 // CompletedAt (delivery time), so a long install never trips it.
 func (d *Dispatcher) SetRetention(dur time.Duration) { d.retention = dur }
 
+// SetConcurrency sets how many requests may be serviced at once (the bounded worker pool).
+// A value < 1 means 1 (fully sequential — the pre-concurrency behavior, and what bootstrap's
+// smoke test uses). See PROTOCOL.md "Concurrency" for the contract this enforces.
+func (d *Dispatcher) SetConcurrency(n int) { d.concurrency = n }
+
+// workers is the effective pool size (never < 1).
+func (d *Dispatcher) workers() int {
+	if d.concurrency < 1 {
+		return 1
+	}
+	return d.concurrency
+}
+
 // RunOnce performs a single dispatch cycle: GC completed/abandoned pairs, recover any
 // in-flight requests left in cur/ by a previous crash, then drain new/ oldest-first.
 // GC runs first so a reaped abandoned request isn't wastefully re-serviced by recover.
@@ -95,7 +110,27 @@ func (d *Dispatcher) RunOnce(ctx context.Context) error {
 	if err := d.recover(ctx); err != nil {
 		return err
 	}
-	return d.drainNew(ctx)
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	dr := newDrainer(d.workers(), workCtx, cancel)
+	// Re-drain until a pass submits nothing new: a same-key request skipped this pass (its key
+	// busy) is serviced on the next, once the holder finishes — Serve gets this from its ticker,
+	// RunOnce has none, so it loops. Stays fully synchronous to the caller (bootstrap smoke test
+	// and `serve --once` expect all work done on return).
+	for {
+		n, err := d.drainNew(ctx, dr)
+		if err != nil {
+			cancel()
+			dr.wg.Wait()
+			return dr.errOr(err)
+		}
+		if n == 0 {
+			break
+		}
+		dr.wg.Wait() // finish this batch so freed keys unblock the next pass
+	}
+	dr.wg.Wait()
+	return dr.errOr(nil)
 }
 
 // Serve drains the outbox in a loop, with the heartbeat on a SEPARATE goroutine so a
@@ -115,18 +150,34 @@ func (d *Dispatcher) Serve(ctx context.Context, interval time.Duration) error {
 	defer hbStop()
 	go d.heartbeatLoop(hbCtx, interval)
 
+	// Bounded worker pool for this Serve session (shared across cycles). workCtx is cancelled
+	// on teardown OR the first worker transport error; the deferred wg.Wait drains in-flight
+	// handlers on every exit path so no response is left half-written and no goroutine leaks.
+	workCtx, cancel := context.WithCancel(ctx)
+	dr := newDrainer(d.workers(), workCtx, cancel)
+	defer func() { cancel(); dr.wg.Wait() }()
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		if err := d.gc(ctx); err != nil {
-			return err
+		// A worker transport error (or teardown) cancels workCtx — stop before re-draining, and
+		// surface the real worker error (errOr) rather than a masked context.Canceled.
+		if err := workCtx.Err(); err != nil {
+			return dr.errOr(err)
 		}
-		if err := d.drainNew(ctx); err != nil {
-			return err
+		// gc/drain use the parent ctx for their own fs ops (a worker-triggered workCtx cancel
+		// must not mask the real worker error with a context.Canceled here — dr.errOr recovers it).
+		if err := d.gc(ctx); err != nil {
+			return dr.errOr(err)
+		}
+		if _, err := d.drainNew(ctx, dr); err != nil {
+			return dr.errOr(err)
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case err := <-dr.errCh:
+			return err
 		case <-ticker.C:
 		}
 	}
@@ -171,19 +222,208 @@ func (d *Dispatcher) WriteHeartbeat(ctx context.Context) error {
 	return nil
 }
 
-// drainNew services every request currently in outbox/new, oldest first (List
-// returns ULID names sorted = creation order).
-func (d *Dispatcher) drainNew(ctx context.Context) error {
+// drainNew picks up every serviceable request in outbox/new (oldest first — List returns ULID
+// names in creation order) and submits its handler to the bounded worker pool. Pickup (dedup +
+// the new→cur rename) stays SERIAL and fast on the drain goroutine; the handler runs async on a
+// worker, so a long install no longer blocks the queue behind it. Returns the number of handlers
+// submitted (RunOnce loops until 0) and a transport error from a pickup-path op (drives
+// reconnect); per-request handler errors surface via dr.errCh, not here.
+//
+// Two in-memory guards keep concurrency safe (PROTOCOL.md "Concurrency"):
+//   - inflight (by request name): a request re-delivered while its handler still runs is not
+//     picked up again — else the PosixRename would clobber the live cur/ file and a second worker
+//     would double-service it (responseExists can't see an in-flight request; it lists inbox).
+//   - active keys (by resourceKey): at most one in-flight handler per shared target (a runtime
+//     line / env), so two installs can't corrupt one environment; distinct keys run in parallel.
+//     A key-busy request is left in new/ and retried a later cycle.
+//
+// fs ops here use the parent ctx (not workCtx) so a worker-triggered cancel can't abort the
+// drain mid-op and mask the real error; the sem acquire watches workCtx so a full pool still
+// unblocks promptly on teardown.
+func (d *Dispatcher) drainNew(ctx context.Context, dr *drainer) (int, error) {
 	names, err := d.fs.List(ctx, d.tree.Outbox().New())
 	if err != nil {
-		return fmt.Errorf("list outbox/new: %w", err)
+		return 0, fmt.Errorf("list outbox/new: %w", err)
 	}
+	submitted := 0
 	for _, name := range names {
-		if err := d.serviceFromNew(ctx, name); err != nil {
-			return err
+		if !validRequestName(name) || dr.inflightHas(name) {
+			continue
+		}
+		done, err := d.responseExists(ctx, name)
+		if err != nil {
+			return submitted, err
+		}
+		if done {
+			// Already answered — clear it from new/ (a re-delivery of a completed request).
+			if err := PickUp(ctx, d.fs, d.tree.Outbox(), name); err != nil {
+				return submitted, fmt.Errorf("pickup %s: %w", name, err)
+			}
+			continue
+		}
+		data, err := d.fs.ReadFile(ctx, path.Join(d.tree.Outbox().New(), name))
+		if err != nil {
+			return submitted, fmt.Errorf("read %s: %w", name, err)
+		}
+		key := resourceKey(data)
+		if !dr.reserve(name, key) {
+			continue // key busy — leave in new/, retry a later cycle
+		}
+		// Backpressure: wait for a pool slot, but honor teardown (a worker error cancels workCtx).
+		select {
+		case dr.sem <- struct{}{}:
+		case <-dr.done:
+			dr.release(name, key)
+			return submitted, nil
+		}
+		if err := PickUp(ctx, d.fs, d.tree.Outbox(), name); err != nil {
+			<-dr.sem
+			dr.release(name, key)
+			return submitted, fmt.Errorf("pickup %s: %w", name, err)
+		}
+		submitted++
+		dr.wg.Add(1)
+		go func(name, key string, data []byte) {
+			defer dr.wg.Done()
+			defer func() { <-dr.sem }()
+			defer dr.release(name, key)
+			if err := d.serviceCurData(dr.ctx, name, data); err != nil {
+				dr.fail(err) // transport error → errCh + cancel workCtx
+			}
+		}(name, key, data)
+	}
+	return submitted, nil
+}
+
+// drainer is the per-Serve/RunOnce bounded worker pool + the in-flight/active-key guards. It is
+// created fresh each invocation (never on the Dispatcher, which is rebuilt every reconnect and
+// whose d.seq must keep its single-writer invariant).
+type drainer struct {
+	ctx    context.Context // workCtx — handlers run under it (cancelled on teardown/error)
+	done   <-chan struct{} // workCtx.Done() — the sem acquire watches it
+	sem    chan struct{}   // buffered, size N — the concurrency cap
+	wg     sync.WaitGroup  // in-flight workers (awaited on teardown)
+	errCh  chan error      // buffered 1 — first worker transport error wins
+	cancel context.CancelFunc
+
+	mu       sync.Mutex
+	inflight map[string]struct{} // request names currently owned by a worker
+	active   map[string]struct{} // resource keys currently serviced (serialize same-target)
+}
+
+func newDrainer(n int, workCtx context.Context, cancel context.CancelFunc) *drainer {
+	return &drainer{
+		ctx: workCtx, done: workCtx.Done(),
+		sem: make(chan struct{}, n), errCh: make(chan error, 1), cancel: cancel,
+		inflight: map[string]struct{}{}, active: map[string]struct{}{},
+	}
+}
+
+func (dr *drainer) inflightHas(name string) bool {
+	dr.mu.Lock()
+	defer dr.mu.Unlock()
+	_, ok := dr.inflight[name]
+	return ok
+}
+
+// reserve marks name in-flight and, if keyed, locks its resource key. Returns false (no
+// reservation) when the key is already active — the caller leaves the request queued.
+func (dr *drainer) reserve(name, key string) bool {
+	dr.mu.Lock()
+	defer dr.mu.Unlock()
+	if key != "" {
+		if _, busy := dr.active[key]; busy {
+			return false
+		}
+		dr.active[key] = struct{}{}
+	}
+	dr.inflight[name] = struct{}{}
+	return true
+}
+
+func (dr *drainer) release(name, key string) {
+	dr.mu.Lock()
+	defer dr.mu.Unlock()
+	delete(dr.inflight, name)
+	if key != "" {
+		delete(dr.active, key)
+	}
+}
+
+// fail records the first worker transport error and cancels workCtx so a wedged drain unblocks
+// and Serve returns it (→ reconnect). Extra errors are dropped (errCh is buffered 1).
+func (dr *drainer) fail(err error) {
+	select {
+	case dr.errCh <- err:
+	default:
+	}
+	dr.cancel()
+}
+
+// errOr returns a pending worker error if one occurred, else the passed-in error — so a
+// context.Canceled produced by a worker-triggered cancel doesn't mask the real cause.
+func (dr *drainer) errOr(err error) error {
+	select {
+	case werr := <-dr.errCh:
+		return werr
+	default:
+		return err
+	}
+}
+
+// resourceKey groups requests that touch the same runtime/environment so Popo serializes them
+// (PROTOCOL.md "Concurrency"): distinct keys run in parallel, same key runs one at a time. An
+// empty key means no shared target (ping/collect/web.fetch) — always parallel. The family is the
+// contract surface (asserted against PROTOCOL.md); the value narrows it to a specific target
+// (version or project/env) where the params make that cheap and safe.
+func resourceKey(data []byte) string {
+	var req struct {
+		Type   string `json:"type"`
+		Params struct {
+			Version       string `json:"version"`
+			PythonVersion string `json:"python_version"`
+			NodeVersion   string `json:"node_version"`
+			JavaVersion   string `json:"java_version"`
+			Project       string `json:"project"`
+			File          string `json:"file"`
+		} `json:"params"`
+	}
+	_ = json.Unmarshal(data, &req)
+	fam := runtimeFamily(req.Type)
+	if fam == "" {
+		return ""
+	}
+	p := req.Params
+	// Prefer the most specific target so distinct projects/envs parallelize; fall back to the
+	// runtime version, then the bare family (safe over-serialization if params don't parse).
+	target := firstNonEmpty(p.Project, p.File, p.Version, p.PythonVersion, p.NodeVersion, p.JavaVersion)
+	return fam + ":" + target
+}
+
+// runtimeFamily maps a verb to the runtime line it mutates (the same grouping PROTOCOL.md
+// documents). "" = no shared target. Kept as the single source of truth the doc is tested against.
+func runtimeFamily(reqType string) string {
+	switch reqType {
+	case "python.install", "pip.install":
+		return "python"
+	case "node.install", "npm.install":
+		return "node"
+	case "java.install", "maven.install", "maven.build":
+		return "java"
+	case "conda.install":
+		return "conda"
+	default:
+		return ""
+	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
 		}
 	}
-	return nil
+	return ""
 }
 
 // recover re-services requests stranded in cur/ (picked up but never answered,
@@ -274,28 +514,24 @@ func validRequestName(name string) bool {
 		strings.HasSuffix(name, ".json")
 }
 
-// serviceFromNew dedups, picks up (new->cur), then services a request.
-func (d *Dispatcher) serviceFromNew(ctx context.Context, name string) error {
-	done, err := d.responseExists(ctx, name)
-	if err != nil {
-		return err
-	}
-	if err := PickUp(ctx, d.fs, d.tree.Outbox(), name); err != nil {
-		return fmt.Errorf("pickup %s: %w", name, err)
-	}
-	if done {
-		return nil // already answered; just cleared from new/
-	}
-	return d.serviceCur(ctx, name)
-}
-
-// serviceCur reads the request from cur/, dispatches it, and delivers the
-// response to the inbox.
+// serviceCur reads the request from cur/ then services it — used by recover (crash recovery),
+// which runs sequentially at startup. drainNew's workers call serviceCurData directly with the
+// data already read from new/ (avoiding a re-read after pickup).
 func (d *Dispatcher) serviceCur(ctx context.Context, name string) error {
 	data, err := d.fs.ReadFile(ctx, path.Join(d.tree.Outbox().Cur(), name))
 	if err != nil {
 		return fmt.Errorf("read %s: %w", name, err)
 	}
+	return d.serviceCurData(ctx, name, data)
+}
+
+// serviceCurData dispatches an already-read request and delivers the response to the inbox.
+// Safe to run concurrently across distinct requests: it touches only per-request files
+// (cur/<name> was already picked up; the response is delivered atomically to inbox/<name>) and
+// the observers push to a non-blocking channel. A returned error is a TRANSPORT failure
+// (marshal/deliver) — the caller treats it as a dropped link (reconnect); handler errors become
+// error Responses and are delivered normally.
+func (d *Dispatcher) serviceCurData(ctx context.Context, name string, data []byte) error {
 	if d.observeStart != nil {
 		var req Request // best-effort: the request may not parse, but we still mark pickup
 		_ = json.Unmarshal(data, &req)
@@ -321,8 +557,10 @@ func (d *Dispatcher) serviceCur(ctx context.Context, name string) error {
 	return nil
 }
 
-// dispatch parses a request and routes it to its handler.
-func (d *Dispatcher) dispatch(ctx context.Context, name string, data []byte) Response {
+// dispatch parses a request and routes it to its handler. A handler panic is recovered into an
+// error Response (not a crash) — workers are now detached goroutines, so one bad handler must
+// not take down the whole serve daemon.
+func (d *Dispatcher) dispatch(ctx context.Context, name string, data []byte) (resp Response) {
 	var req Request
 	if err := json.Unmarshal(data, &req); err != nil {
 		return Errf(idFromName(name), "malformed_request", "parse request: %v", err)
@@ -336,6 +574,11 @@ func (d *Dispatcher) dispatch(ctx context.Context, name string, data []byte) Res
 			return Errf(req.ID, CodeOperatorDenied, "%v", err)
 		}
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			resp = Errf(req.ID, "handler_panic", "handler panicked: %v", r)
+		}
+	}()
 	return h(ctx, req)
 }
 

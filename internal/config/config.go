@@ -75,6 +75,27 @@ type Config struct {
 	// EgressProxyPort is the sandbox loopback port the reverse tunnel exposes the proxy on
 	// (what the sandbox's HTTPS_PROXY points at). Empty/0 = the default (see EgressPort).
 	EgressProxyPort int `yaml:"egress_proxy_port"`
+	// DispatchConcurrency is how many requests Popo services at once (the bounded worker pool,
+	// so an agent's parallel requests / subagents don't queue behind a slow install). Empty/0 =
+	// the default (see Concurrency); clamped to >= 1. See PROTOCOL.md "Concurrency".
+	DispatchConcurrency int `yaml:"dispatch_concurrency"`
+}
+
+// DefaultDispatchConcurrency is the worker-pool size applied when dispatch_concurrency is unset.
+// Conservative: comfortably under a typical sshd MaxSessions (~10) even with the heartbeat +
+// per-op exec sessions, and safe for relay installs that also spend controller CPU/network.
+const DefaultDispatchConcurrency = 4
+
+// Concurrency returns the dispatch worker-pool size: the default when unset/0, else the
+// configured value clamped to at least 1 (0 would stall serving; negatives are nonsense).
+func (c *Config) Concurrency() int {
+	if c.DispatchConcurrency == 0 {
+		return DefaultDispatchConcurrency
+	}
+	if c.DispatchConcurrency < 1 {
+		return 1
+	}
+	return c.DispatchConcurrency
 }
 
 // DefaultMaildirRetention is the retention window applied when maildir_retention is unset.
