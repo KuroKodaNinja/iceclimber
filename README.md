@@ -339,6 +339,8 @@ operation the agent requests, with context, and you approve inline:
 | `install node <version>` · `install npm <pkg> --node <version>` | Provision Node/npm directly |
 | `install java <version>` | Provision a Temurin JDK (javac bundled) directly |
 | `install maven <group:artifact:version> --java <version>` | Resolve JVM deps into a classpath (Coursier) |
+| `install shell` | Relay a portable static **bash** into the sandbox (readline history + tab-completion) for a comfortable `iceclimber shell` |
+| `shell` | Open an **interactive shell** in the sandbox over iceclimber's own SSH transport (bastion/password/host-key handling included), with the environment set up: `ICECLIMBER_HOME`, `popo`/`nana` + installed runtimes on `PATH`, egress proxy/CA trust. Drops into the installed bash (falls back to `/bin/sh`). `-c '<cmd>'` runs one command non-interactively (scriptable) |
 | `agent install [claude]` · `agent list` | Relay a coding agent (Claude Code) into the sandbox + configure its subscription token; drops a `$ICECLIMBER_HOME/nana` launcher to start it (auth + NANA.md wired in) |
 | `agent wrap [claude] [--bin <path>]` | Wrap an agent binary **already on the sandbox** (pre-baked image / out-of-band install) with the same `nana`/auth/NANA.md launcher — **no relay**. Binary found on PATH by default, or pass `--bin` |
 | `web fetch <url>` | Run a fetch yourself (same gating) |

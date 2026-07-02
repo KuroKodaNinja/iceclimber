@@ -539,6 +539,26 @@ func TestConsole_SubmitInstallRunsOp(t *testing.T) {
 	}
 }
 
+// TestConsole_SubmitShellInstall proves the install form's "Shell (bash)" option routes to
+// RunInstall with Lang="shell" (no version/packages) — cmdline/TUI parity for `install shell`.
+func TestConsole_SubmitShellInstall(t *testing.T) {
+	ops := &fakeOps{}
+	c := NewConsole("sbx", make(chan tea.Msg), "", ops)
+	c.formKind = "install"
+	c.st = &formState{lang: "shell"}
+
+	updated, cmd := c.submitForm("install")
+	if c2 := updated.(Console); c2.running != "shell install" {
+		t.Fatalf("running = %q, want shell install", c2.running)
+	}
+	if cmd == nil {
+		t.Fatal("submit should return the op command")
+	}
+	if ops.install == nil || ops.install.Lang != "shell" {
+		t.Errorf("RunInstall got %+v, want Lang=shell", ops.install)
+	}
+}
+
 func TestConsole_BootstrapDeclinedRunsNothing(t *testing.T) {
 	ops := &fakeOps{}
 	c := NewConsole("sbx", make(chan tea.Msg), "", ops)

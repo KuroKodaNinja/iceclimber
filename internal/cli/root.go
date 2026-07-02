@@ -75,6 +75,7 @@ func newRootCmd() *cobra.Command {
 		newStatusCmd(),
 		newLogsCmd(),
 		newTuiCmd(),
+		newShellCmd(),
 	)
 	root.AddCommand(stubCommands()...)
 	return root

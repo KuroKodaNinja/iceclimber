@@ -806,6 +806,7 @@ func (c *Console) installForm() *huh.Form {
 			huh.NewOption("Python", "python"),
 			huh.NewOption("JavaScript", "javascript"),
 			huh.NewOption("Java", "java"),
+			huh.NewOption("Shell (bash — for `iceclimber shell`)", "shell"),
 		),
 	)}
 	// One source page per detected system runtime, shown only when the chosen language matches
@@ -841,7 +842,8 @@ func (c *Console) installForm() *huh.Form {
 		)).WithHideFunc(func() bool { return c.st.lang != "python" || pySrc == nil || *pySrc != "system" }))
 	}
 	// Packages are optional. The agent — not the operator — decides what to install while it
-	// writes code, so an operator install is usually just the bare runtime.
+	// writes code, so an operator install is usually just the bare runtime. Hidden for the
+	// shell, which is a single bare binary (no version, no packages).
 	groups = append(groups, huh.NewGroup(
 		huh.NewInput().Title("packages (optional)").
 			Description("Blank installs just the runtime — the agent installs packages as it needs them.").
@@ -850,7 +852,7 @@ func (c *Console) installForm() *huh.Form {
 		huh.NewInput().Title("version (optional)").
 			Description("Blank uses the recommended default — Python 3.12 · JavaScript 24 · Java 21.").
 			Placeholder("3.12 / 24 / 21").Value(&c.st.version),
-	))
+	).WithHideFunc(func() bool { return c.st.lang == "shell" }))
 	return huh.NewForm(groups...)
 }
 
@@ -871,6 +873,8 @@ func installLabel(lang string) string {
 		return "JavaScript install"
 	case "java":
 		return "Java install"
+	case "shell":
+		return "shell install"
 	default:
 		return "Python install"
 	}

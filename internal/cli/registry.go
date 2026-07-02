@@ -14,6 +14,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
+	"github.com/KuroKodaNinja/iceclimber/internal/shell"
 	"github.com/KuroKodaNinja/iceclimber/internal/webfetch"
 )
 
@@ -21,6 +22,20 @@ import (
 // receives operator-facing progress events.
 func newInstaller(sess *session, pr progress.Func) *python.Installer {
 	return python.NewInstaller(python.Config{
+		FS:       sess.fs,
+		Runner:   sess.runner,
+		Root:     sess.tree.Root,
+		OS:       sess.fp.OS,
+		Arch:     sess.fp.Arch,
+		Libc:     sess.fp.Libc.Family,
+		CacheDir: sess.cacheDir,
+		Progress: pr,
+	})
+}
+
+// newShellInstaller builds the interactive-shell (static bash) installer from an open session.
+func newShellInstaller(sess *session, pr progress.Func) *shell.Installer {
+	return shell.NewInstaller(shell.Config{
 		FS:       sess.fs,
 		Runner:   sess.runner,
 		Root:     sess.tree.Root,

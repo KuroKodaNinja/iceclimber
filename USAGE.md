@@ -154,6 +154,19 @@ corrupt one environment.
 `--yes` to auto-approve unattended), `iceclimber install python 3.12`,
 `iceclimber install pip rich --python 3.12`, `iceclimber logs -f`, etc.
 
+## Shelling into the sandbox
+
+To poke around by hand, `iceclimber shell` opens an **interactive shell** in the sandbox
+over iceclimber's own SSH transport — so any bastion/ProxyJump, password caching, and
+host-key trust you've configured apply automatically — with the environment already set up:
+`ICECLIMBER_HOME` exported, `popo`/`nana` and every installed runtime (`python3`, `node`,
+`java`, …) on `PATH`, and the egress proxy/CA-trust vars sourced when you're serving in proxy
+mode. Because a bare BusyBox box only ships `ash`, run **`iceclimber install shell`** once to
+relay in a portable static **bash** (readline history + tab-completion); `iceclimber shell`
+then drops you into it, falling back to `/bin/sh` if it isn't installed. For scripts,
+`iceclimber shell -c '<command>'` runs a single command in that same environment without a
+terminal.
+
 ## What the agent can build
 
 Through Popo, the agent can provision and use three stacks plus web data, so it can

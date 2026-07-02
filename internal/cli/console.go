@@ -498,6 +498,12 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		}
 		echoes = append(echoes, mavenEchoes(out)...)
 		return opResult{typ: "maven.install", detail: pkgSummary(out.Installed, out.Failed), echoes: echoes}
+	case "shell":
+		res, err := newShellInstaller(o.sess(), pr).Install(o.ctx)
+		if err != nil {
+			return opResult{typ: "shell.install", err: err}
+		}
+		return opResult{typ: "shell.install", detail: "bash " + res.Version + " — run `iceclimber shell`"}
 	}
 	return opResult{typ: "install", err: fmt.Errorf("unknown language %q", r.Lang)}
 }

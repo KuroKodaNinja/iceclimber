@@ -33,7 +33,50 @@ func newInstallCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&runtimeSource, "runtime-source", "",
 		"set + persist a per-language runtime source, e.g. python=system,node=managed (or python=system:conda)")
 	cmd.AddCommand(newInstallPythonCmd(), newInstallPipCmd(), newInstallNodeCmd(), newInstallNpmCmd(),
-		newInstallJavaCmd(), newInstallMavenCmd(), newInstallCondaCmd())
+		newInstallJavaCmd(), newInstallMavenCmd(), newInstallCondaCmd(), newInstallShellCmd())
+	return cmd
+}
+
+// newInstallShellCmd relays a portable interactive shell (static bash) into the sandbox so
+// `iceclimber shell` gives history + tab-completion and a sane PATH. Operator-facing only —
+// there is no agent-side `shell.install` verb (the agent doesn't provision its own shell).
+func newInstallShellCmd() *cobra.Command {
+	var transport string
+	cmd := &cobra.Command{
+		Use:   "shell",
+		Short: "Install a portable interactive shell (bash) for `iceclimber shell`",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := config.Load(cfgFile, sandboxID)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
+			defer cancel()
+
+			sess, err := openSession(ctx, cfg, transport)
+			if err != nil {
+				return err
+			}
+			defer sess.Close()
+
+			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
+			res, err := newShellInstaller(sess, pr).Install(ctx)
+			finish()
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			verb := "installed"
+			if res.AlreadyInstalled {
+				verb = "already installed:"
+			}
+			fmt.Fprintf(w, "%s bash %s at %s\n", verb, res.Version, res.Path)
+			fmt.Fprintln(w, "run `iceclimber shell` to drop into it")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	return cmd
 }
 
