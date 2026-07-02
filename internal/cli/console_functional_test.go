@@ -112,16 +112,25 @@ func TestConsoleOps_InstallEmitsProgress(t *testing.T) {
 	}
 	cfg.RemoteRoot = fmt.Sprintf("/tmp/iceclimber-prog-%d", time.Now().UnixNano()) // fresh → forces a transfer
 	ctx := context.Background()
-	sess, err := openSession(ctx, cfg, "auto")
+	// Exec transport: its RemoveAll is a single `rm -rf` (reliable for the ~210MB runtime tree),
+	// where SFTP's recursive RemoveAll has proven flaky here and leaks the root. The progress
+	// wiring under test is transport-agnostic (one shared reader), so exec exercises it fine.
+	sess, err := openSession(ctx, cfg, "exec")
 	if err != nil {
 		t.Skipf("cannot reach sandbox (%v); run `make sandbox-up`", err)
 	}
-	defer sess.Close()
-	t.Cleanup(func() { _ = sess.fs.RemoveAll(ctx, cfg.RemoteRoot) })
+	// Remove the fresh root BEFORE closing the session — a t.Cleanup runs after the deferred
+	// Close, so RemoveAll would hit a dead session and silently leak ~210MB of runtime per run.
+	defer func() { _ = sess.fs.RemoveAll(ctx, cfg.RemoteRoot); sess.Close() }()
 	if err := provision(ctx, sess); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
-	ops, events := newTestOps(t, sess)
+	// A large buffer so download samples can't crowd out the later "transferring" samples on
+	// this undrained-during-install channel (a full 128-buffer silently dropped them → flake).
+	holder := &sessionHolder{}
+	holder.Set(sess)
+	events := make(chan tea.Msg, 8192)
+	ops := &consoleOps{ctx: ctx, holder: holder, act: activity.New(filepath.Join(t.TempDir(), "activity.jsonl")), events: events}
 
 	// Runtime-only install (no packages) → resolve/download/transfer/verify.
 	if _, ok := ops.RunInstall(tui.InstallRequest{Lang: "python"})().(tui.OpResultMsg); !ok {
@@ -165,17 +174,20 @@ func TestConsoleDispatcher_AgentInstallEmitsProgress(t *testing.T) {
 	cfg.RemoteRoot = fmt.Sprintf("/tmp/iceclimber-agentprog-%d", time.Now().UnixNano()) // fresh → forces a transfer
 	cfg.ActivityLog = filepath.Join(t.TempDir(), "activity.jsonl")
 	ctx := context.Background()
-	sess, err := openSession(ctx, cfg, "auto")
+	// Exec transport for a reliable `rm -rf` cleanup (SFTP's recursive RemoveAll leaks the tree
+	// here); the progress wiring under test is transport-agnostic.
+	sess, err := openSession(ctx, cfg, "exec")
 	if err != nil {
 		t.Skipf("cannot reach sandbox (%v); run `make sandbox-up`", err)
 	}
-	defer sess.Close()
-	t.Cleanup(func() { _ = sess.fs.RemoveAll(ctx, cfg.RemoteRoot) })
+	// Remove the fresh root BEFORE closing the session — a t.Cleanup runs after the deferred
+	// Close, so RemoveAll would hit a dead session and silently leak ~210MB of runtime per run.
+	defer func() { _ = sess.fs.RemoveAll(ctx, cfg.RemoteRoot); sess.Close() }()
 	if err := provision(ctx, sess); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
 
-	events := make(chan tea.Msg, 256)
+	events := make(chan tea.Msg, 8192) // large so download samples can't crowd out "transferring"
 	disp := buildConsoleDispatcher(ctx, sess, cfg, activity.New(cfg.ActivityLog), events)
 	disp.SetGate(nil) // auto-approve: this exercises the progress wiring, not the gate
 

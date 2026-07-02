@@ -118,7 +118,13 @@ default to the same bridged log), so whichever view you prefer shows Nana. (Inte
 remains an explicit override.) A headless `nana -p` run shows the agent's **tool calls**
 in `[NANA]` automatically — nana injects `--output-format stream-json --verbose` for you,
 and the bridge renders those events into readable `→ Bash: …` lines (pass your own
-`--output-format` to override, e.g. plain text). As the agent asks Popo for things,
+`--output-format` to override, e.g. plain text). `iceclimber logs` also folds the egress
+audit trail into the feed as `[EGRESS]` lines (every gated `web.fetch` — venue, decision,
+status); filter the feed with `--since 10m` (applies to `[POPO]`/`[EGRESS]`), `--kind
+serviced,denied`, and `--only popo|nana|egress`. All three controller logs (activity,
+audit, the bridged agent stream) rotate — capped and generation-kept via `log_max_bytes`
+/ `log_keep` — so they never grow without bound, and a fresh `serve` streams only new
+agent output (it no longer re-dumps a prior session). As the agent asks Popo for things,
 you'll get an inline approval modal for each:
 
 ```

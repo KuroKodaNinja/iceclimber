@@ -91,7 +91,15 @@ ssh:
   known_hosts: ~/.ssh/known_hosts    # host-key verified (no insecure skips)
 # remote_root: /home/agent/.iceclimber   # optional; chosen at bootstrap if absent
 # dispatch_concurrency: 4                 # optional; how many requests Popo serves at once
+# log_max_bytes: 8388608                  # optional; per-generation cap for the log sinks (0 = 8 MiB default)
+# log_keep: 4                             # optional; rotated generations kept (0 = 4 default)
 ```
+
+The controller log sinks — the activity feed, the egress audit, and the bridged agent
+stream — **rotate**: each is capped at `log_max_bytes` and keeps `log_keep` generations
+(defaults ~8 MiB × 4), so they never grow unbounded. Writes are atomic and safe across
+concurrent goroutines *and* processes (a console plus a headless `serve`), so the same
+rotation policy holds no matter who is writing.
 
 Host keys are verified against `known_hosts` — the SSH transport is secure by
 default, with no insecure skips.
@@ -324,7 +332,7 @@ operation the agent requests, with context, and you approve inline:
 | Command | What it does |
 |---|---|
 | `status` | Liveness (heartbeat freshness), queue depth (awaiting service + **awaiting collection** — a real uncollected count: the agent collects each response on read and Popo GCs collected/abandoned pairs, with a configurable `maildir_retention` sweep), **health-probed** runtimes (✓ runs / ✗ won't), and the sandbox's **capabilities self-report** — the host platform (written at bootstrap) and the installed agent's identity/version/auth (`Claude Code 1.2.3 · auth ✓ · linux/arm64 (glibc)`, or `no agent yet · …` before one is installed). The console header shows the SSH link and heartbeat health as **separate** signals, so a connected-but-wedged Popo reads as stale, not green |
-| `logs -f` | Tail Popo's activity (`[POPO]`) merged with the agent's stream (`[NANA]`, bridged automatically; `--agent-log <file>` overrides) |
+| `logs -f` | Tail Popo's activity (`[POPO]`) merged with the egress audit trail (`[EGRESS]`) and the agent's stream (`[NANA]`, bridged automatically; `--agent-log <file>` overrides). Filter with `--since 10m` (applies to `[POPO]`/`[EGRESS]`), `--kind serviced,denied` (activity kinds), and `--only popo\|nana\|egress` (sources) |
 | `tui` | A live split-pane `[POPO]`/`[NANA]` dashboard (`[NANA]` bridged automatically; `--snapshot` for one static frame) |
 | `pending` / `approve <id>` / `deny <id>` | Async egress approval (when not serving on a TTY) |
 | `install python <minor>` · `install pip <pkg> --python <minor>` | Provision Python directly, without the agent. `--pip-arg` (repeatable) passes an allowlisted pip flag through, e.g. `--pip-arg=--index-url --pip-arg=https://download.pytorch.org/whl/cpu` |
@@ -391,7 +399,8 @@ context. To learn the protocol by hand, see [`test/PLAYGROUND.md`](test/PLAYGROU
 - **Non-configurable SSRF floor.** Private, loopback, link-local, and cloud-metadata
   addresses are refused for both venues, enforced at dial time (rebinding-resistant).
 - **Audit log.** Every fetch appends to a controller-side JSONL audit
-  (`~/.iceclimber/audit/<sandbox_id>.jsonl`).
+  (`~/.iceclimber/audit/<sandbox_id>.jsonl`), surfaced in `iceclimber logs` as `[EGRESS]`
+  and in the console's Egress panel (recent fetches).
 - **Secure transport.** SSH host keys are verified against `known_hosts`.
 
 ---

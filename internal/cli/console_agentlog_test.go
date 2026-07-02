@@ -10,28 +10,10 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs/remotefstest"
 )
 
-// TestResetAgentLog: a serving session must start the bridged agent log fresh, so a
-// new session never shows a previous run's (or a test's) leftover [NANA] stream.
-func TestResetAgentLog(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "sub", "agent.log") // nested dir is created
-	resetAgentLog(p)
-	if b, err := os.ReadFile(p); err != nil || len(b) != 0 {
-		t.Fatalf("reset should create an empty file: %v, %q", err, b)
-	}
-	if err := os.WriteFile(p, []byte("STALE from a previous session\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	resetAgentLog(p)
-	if b, _ := os.ReadFile(p); len(b) != 0 {
-		t.Errorf("reset did not truncate stale content: %q", b)
-	}
-}
-
-// TestPollAgentLogs exercises the console's auto-discovery of agent session logs over
-// a real ExecFS (local runner): a single agent yields unprefixed lines, a second poll
-// returns only what was appended, a truncation restarts from the top, and a second
-// installed agent makes lines name-prefixed. This is the no-`--agent-log` path that
-// feeds the [NANA] pane.
+// TestPollAgentLogs exercises the console's auto-discovery of agent session logs over a real
+// ExecFS: on first sight of a log the offset seeds to EOF (no re-dump of a prior run's output),
+// then only newly-appended lines stream; a truncation/rotation restarts from the top; and a
+// second installed agent makes lines name-prefixed. This is the no-`--agent-log` [NANA] path.
 func TestPollAgentLogs(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -41,34 +23,42 @@ func TestPollAgentLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 	fs := remotefs.NewExecFS(remotefstest.LocalRunner{})
-	offsets := map[string]int{}
+	offsets := map[string]int64{}
 
-	// 1. Initial content → both lines, no prefix (single agent).
-	if err := os.WriteFile(claudeLog, []byte("hello popo\nasking for python\n"), 0o644); err != nil {
+	appendTo := func(p, s string) {
+		f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.WriteString(s)
+		f.Close()
+	}
+
+	// 1. Pre-existing content → first poll SEEDS to EOF and emits nothing (no re-dump).
+	if err := os.WriteFile(claudeLog, []byte("old 1\nold 2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := pollAgentLogs(ctx, fs, base, offsets)
-	if len(got) != 2 || got[0] != "hello popo" || got[1] != "asking for python" {
-		t.Fatalf("first poll = %+v, want the two lines unprefixed", got)
+	if got := pollAgentLogs(ctx, fs, base, offsets); len(got) != 0 {
+		t.Fatalf("first poll should seed to EOF (no re-dump), got %+v", got)
 	}
 
-	// 2. Nothing new → no lines.
+	// 2. New output after seeding → streamed, unprefixed (single agent).
+	appendTo(claudeLog, "hello popo\nasking for python\n")
+	got := pollAgentLogs(ctx, fs, base, offsets)
+	if len(got) != 2 || got[0] != "hello popo" || got[1] != "asking for python" {
+		t.Fatalf("after-seed poll = %+v, want the two new lines unprefixed", got)
+	}
+
+	// 3. Nothing new → no lines. 4. Append → only the new line.
 	if got := pollAgentLogs(ctx, fs, base, offsets); len(got) != 0 {
 		t.Errorf("no-change poll = %+v, want empty", got)
 	}
-
-	// 3. Append → only the new line.
-	f, err := os.OpenFile(claudeLog, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.WriteString("got python 3.12\n")
-	f.Close()
+	appendTo(claudeLog, "got python 3.12\n")
 	if got := pollAgentLogs(ctx, fs, base, offsets); len(got) != 1 || got[0] != "got python 3.12" {
 		t.Errorf("append poll = %+v, want just the new line", got)
 	}
 
-	// 4. Truncate (rotation) → restart from the top.
+	// 5. Truncate (rotation) → ReadFrom restarts from the top on a SEEN file → emits the new content.
 	if err := os.WriteFile(claudeLog, []byte("fresh start\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -76,16 +66,22 @@ func TestPollAgentLogs(t *testing.T) {
 		t.Errorf("post-truncate poll = %+v, want the restarted line", got)
 	}
 
-	// 5. A second installed agent → lines become name-prefixed.
+	// 6. A second installed agent → its first sight seeds to EOF (nothing); then new output from
+	//    both is name-prefixed (multi-agent), sorted by name (claude before other).
 	otherLog := filepath.Join(base, "other", "session.log")
 	if err := os.MkdirAll(filepath.Dir(otherLog), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(otherLog, []byte("other agent up\n"), 0o644); err != nil {
+	if err := os.WriteFile(otherLog, []byte("other seed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if got := pollAgentLogs(ctx, fs, base, offsets); len(got) != 0 {
+		t.Fatalf("new agent's first sight should seed to EOF, got %+v", got)
+	}
+	appendTo(claudeLog, "claude too\n")
+	appendTo(otherLog, "other up\n")
 	got = pollAgentLogs(ctx, fs, base, offsets)
-	if len(got) != 1 || got[0] != "[other] other agent up" {
-		t.Fatalf("multi-agent poll = %+v, want the new agent's line prefixed", got)
+	if len(got) != 2 || got[0] != "[claude] claude too" || got[1] != "[other] other up" {
+		t.Fatalf("multi-agent poll = %+v, want both new lines name-prefixed (sorted)", got)
 	}
 }

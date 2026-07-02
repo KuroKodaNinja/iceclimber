@@ -66,6 +66,37 @@ func (s *SFTPFS) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	return data, nil
 }
 
+// ReadFrom reads path from byte off to EOF (or the whole file if it shrank below off), native to
+// SFTP via Seek. next is the EOF position after the read.
+func (s *SFTPFS) ReadFrom(ctx context.Context, path string, off int64) ([]byte, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	f, err := s.c.Open(path)
+	if err != nil {
+		return nil, 0, fmt.Errorf("sftpfs readfrom %s: %w", path, err)
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, 0, fmt.Errorf("sftpfs readfrom %s: %w", path, err)
+	}
+	start := off
+	if fi.Size() < off {
+		start = 0 // rotated/truncated → restart from the top
+	}
+	if start > 0 {
+		if _, err := f.Seek(start, io.SeekStart); err != nil {
+			return nil, 0, fmt.Errorf("sftpfs readfrom %s: %w", path, err)
+		}
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, 0, fmt.Errorf("sftpfs readfrom %s: %w", path, err)
+	}
+	return data, start + int64(len(data)), nil
+}
+
 func (s *SFTPFS) List(ctx context.Context, dir string) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

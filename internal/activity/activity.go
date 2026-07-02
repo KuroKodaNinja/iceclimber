@@ -10,7 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/KuroKodaNinja/iceclimber/internal/logfile"
 )
 
 // Event kinds.
@@ -46,19 +49,47 @@ type Event struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// Logger appends events to a JSONL file. A zero-value path disables logging.
+// Logger appends events to a rotating JSONL file and maintains a small cumulative-counts
+// snapshot alongside it (so the console header seeds in O(1) and its counters survive log
+// rotation instead of dropping when old lines age out). A zero-value path disables logging.
+// Safe for concurrent Append (parallel dispatch) — the underlying logfile.Writer is
+// thread- and process-safe, and the counts tally is mutex-guarded.
 type Logger struct {
 	path string
+	w    *logfile.Writer
+
+	mu       sync.Mutex
+	served   int
+	approved int
+	denied   int
+	last     time.Time
+	dirty    int // counting-events since the last snapshot flush
 }
 
-// New returns a logger writing to path (empty path = no-op).
-func New(path string) *Logger { return &Logger{path: path} }
+// snapshotFlushEvery bounds how many serviced/approved/denied events accumulate before the
+// counts snapshot is rewritten (a crash loses at most this many from the display counter; the
+// durable log still holds them).
+const snapshotFlushEvery = 8
+
+// New returns a logger writing to path with the default rotation policy (empty path = no-op).
+func New(path string) *Logger { return NewSized(path, logfile.DefaultMaxBytes, logfile.DefaultKeep) }
+
+// NewSized is New with an explicit rotation policy (from config).
+func NewSized(path string, maxBytes int64, keep int) *Logger {
+	l := &Logger{path: path, w: logfile.New(path, maxBytes, keep)}
+	if path != "" {
+		s := SeedCounts(path) // continue the cumulative tally from the snapshot (or a one-time backfill)
+		l.served, l.approved, l.denied, l.last = s.Served, s.Approved, s.Denied, s.LastAction
+	}
+	return l
+}
 
 // Path returns the file the logger writes to (empty if disabled).
 func (l *Logger) Path() string { return l.path }
 
-// Append stamps the event with the current UTC time (if unset) and appends it as
-// one JSON line, creating the file and parent directory as needed.
+// Append stamps the event (UTC now if unset), writes it as one JSON line, and — for a
+// serviced/approved/denied event — advances the cumulative counters and (throttled) persists the
+// snapshot.
 func (l *Logger) Append(e Event) error {
 	if l.path == "" {
 		return nil
@@ -66,21 +97,57 @@ func (l *Logger) Append(e Event) error {
 	if e.TS == "" {
 		e.TS = time.Now().UTC().Format(time.RFC3339)
 	}
-	if err := os.MkdirAll(filepath.Dir(l.path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
 	line, err := json.Marshal(e)
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(append(line, '\n'))
-	return err
+	if err := l.w.Append(append(line, '\n')); err != nil {
+		return err
+	}
+	l.tally(e)
+	return nil
+}
+
+// tally updates the cumulative counters for a real action event and flushes the snapshot on the
+// throttle boundary.
+func (l *Logger) tally(e Event) {
+	switch e.Kind {
+	case KindServiced, KindApproved, KindDenied:
+	default:
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	switch e.Kind {
+	case KindServiced:
+		l.served++
+	case KindApproved:
+		l.approved++
+	case KindDenied:
+		l.denied++
+	}
+	if t, perr := time.Parse(time.RFC3339, e.TS); perr == nil {
+		l.last = t
+	}
+	l.dirty++
+	if l.dirty >= snapshotFlushEvery {
+		l.dirty = 0
+		_ = writeSnapshot(l.path, Snapshot{Served: l.served, Approved: l.approved, Denied: l.denied, LastAction: l.last})
+	}
+}
+
+// Close flushes the counts snapshot and releases the log file. Idempotent.
+func (l *Logger) Close() error {
+	if l.path == "" {
+		return nil
+	}
+	l.mu.Lock()
+	if l.dirty > 0 {
+		l.dirty = 0
+		_ = writeSnapshot(l.path, Snapshot{Served: l.served, Approved: l.approved, Denied: l.denied, LastAction: l.last})
+	}
+	l.mu.Unlock()
+	return l.w.Close()
 }
 
 // Read replays the durable log at path into its events (skipping blank/garbled
@@ -143,4 +210,60 @@ func LastAction(events []Event) time.Time {
 		}
 	}
 	return last
+}
+
+// Snapshot is the cumulative counts sidecar kept next to the (rotating) activity log, so the
+// console header seeds in O(1) and its counters don't drop when old log lines rotate away.
+type Snapshot struct {
+	Served     int       `json:"served"`
+	Approved   int       `json:"approved"`
+	Denied     int       `json:"denied"`
+	LastAction time.Time `json:"last_action"`
+}
+
+// snapshotPath is the counts sidecar for an activity-log path.
+func snapshotPath(logPath string) string { return logPath + ".counts.json" }
+
+// writeSnapshot persists s atomically (tmp + rename) next to logPath. Best-effort.
+func writeSnapshot(logPath string, s Snapshot) error {
+	p := snapshotPath(logPath)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
+}
+
+// ReadSnapshot returns the counts sidecar for logPath (ok=false if absent/unreadable).
+func ReadSnapshot(logPath string) (Snapshot, bool) {
+	data, err := os.ReadFile(snapshotPath(logPath))
+	if err != nil {
+		return Snapshot{}, false
+	}
+	var s Snapshot
+	if json.Unmarshal(data, &s) != nil {
+		return Snapshot{}, false
+	}
+	return s, true
+}
+
+// SeedCounts returns the cumulative counters for the header: the O(1) snapshot when present,
+// otherwise a one-time backfill by replaying the durable log (Counts/LastAction) — which it then
+// persists as the snapshot so subsequent seeds are O(1). A missing log yields zeros.
+func SeedCounts(logPath string) Snapshot {
+	if s, ok := ReadSnapshot(logPath); ok {
+		return s
+	}
+	evs, _ := Read(logPath)
+	served, approved, denied := Counts(evs)
+	s := Snapshot{Served: served, Approved: approved, Denied: denied, LastAction: LastAction(evs)}
+	_ = writeSnapshot(logPath, s)
+	return s
 }

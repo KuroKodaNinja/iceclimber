@@ -14,7 +14,7 @@ import (
 // interactive terminal it execs the agent clean (so its TUI keeps its tty); when
 // stdout is not a tty (headless/-p runs) it mirrors the stream to session.log so the
 // operator console can show it without a --agent-log flag. All paths are absolute.
-func renderRun(d Descriptor, dir, binPath, nanaPath string) string {
+func renderRun(d Descriptor, dir, binPath, nanaPath, popoPath string) string {
 	var b strings.Builder
 	wired := "wired to NANA.md"
 	if d.SystemPromptFlag == "" {
@@ -27,6 +27,7 @@ func renderRun(d Descriptor, dir, binPath, nanaPath string) string {
 	fmt.Fprintf(&b, "self=%s\n", remote.ShellQuote(dir))
 	fmt.Fprintf(&b, "[ -f \"$self/env.sh\" ] && . \"$self/env.sh\"\n")
 	fmt.Fprintf(&b, "bin=%s\n", remote.ShellQuote(binPath))
+	fmt.Fprintf(&b, "popo=%s\n", remote.ShellQuote(popoPath))
 
 	// Decide capture before mangling the args: headless when stdout isn't a tty or a
 	// print flag is present. An interactive run (tty, no print flag) is never tee'd —
@@ -65,7 +66,13 @@ func renderRun(d Descriptor, dir, binPath, nanaPath string) string {
 	// Headless: mirror stdout+stderr to session.log so a serving process can bridge it.
 	fmt.Fprintf(&b, "  log=\"$self/session.log\"\n")
 	fmt.Fprintf(&b, "  printf '\\n=== nana session %%s ===\\n' \"$(date 2>/dev/null || echo)\" >>\"$log\" 2>/dev/null || true\n")
-	fmt.Fprintf(&b, "  \"$bin\" \"$@\" 2>&1 | tee -a \"$log\"\n")
+	// Cap the sandbox log at the writer: `popo log` is a rotating, reopen-safe tee. Fall back
+	// to plain `tee -a` only if popo is somehow absent (it's dropped at bootstrap).
+	fmt.Fprintf(&b, "  if [ -x \"$popo\" ]; then\n")
+	fmt.Fprintf(&b, "    \"$bin\" \"$@\" 2>&1 | \"$popo\" log \"$log\"\n")
+	fmt.Fprintf(&b, "  else\n")
+	fmt.Fprintf(&b, "    \"$bin\" \"$@\" 2>&1 | tee -a \"$log\"\n")
+	fmt.Fprintf(&b, "  fi\n")
 	fmt.Fprintf(&b, "else\n")
 	fmt.Fprintf(&b, "  exec \"$bin\" \"$@\"\n") // interactive: keep the agent's tty
 	fmt.Fprintf(&b, "fi\n")

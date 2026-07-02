@@ -409,6 +409,14 @@ func egressView(w, h int, e EgressSnapshot, cursor int, panelErr string) string 
 		line(row == cursor, fmt.Sprintf("%-5s %s", r.Kind, r.Pattern), st)
 		row++
 	}
+	// Read-only tail of the egress audit trail (same records `iceclimber logs` shows as
+	// [EGRESS]) — makes the otherwise write-only audit log visible from the console too.
+	if len(e.Recent) > 0 {
+		b.WriteString("\n" + dimStyle.Render(" recent fetches (audit)") + "\n")
+		for _, r := range e.Recent {
+			b.WriteString("   " + dimStyle.Render(truncate(r, w-6)) + "\n")
+		}
+	}
 	b.WriteString("\n" + dimStyle.Render("↑/↓ select   [a] approve · [d] deny (pending)   [f] forget (rule)   [r] refresh   [esc] close"))
 	return panelBox(cPopo, w, h, "Egress", b.String())
 }

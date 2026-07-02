@@ -247,3 +247,30 @@ func TestEgressMode(t *testing.T) {
 		t.Errorf("valid host patterns should pass: %v", err)
 	}
 }
+
+// TestValidateDurationAndConcurrency: a typo'd maildir_retention and a negative
+// dispatch_concurrency are surfaced at load, not silently swallowed at use.
+func TestValidateDurationAndConcurrency(t *testing.T) {
+	base := func() *Config { return &Config{SandboxID: "s", SSH: SSH{Host: "h"}, RemoteRoot: "/r"} }
+
+	if c := base(); func() error { c.MaildirRetention = "1hr"; return c.validate("") }() == nil {
+		t.Error("maildir_retention \"1hr\" (typo) should be rejected, not silently defaulted")
+	}
+	for _, good := range []string{"", "0", "1h", "30m", "90s"} {
+		c := base()
+		c.MaildirRetention = good
+		if err := c.validate(""); err != nil {
+			t.Errorf("maildir_retention %q should validate: %v", good, err)
+		}
+	}
+	if c := base(); func() error { c.DispatchConcurrency = -1; return c.validate("") }() == nil {
+		t.Error("negative dispatch_concurrency should be rejected")
+	}
+	for _, n := range []int{0, 1, 4, 16} {
+		c := base()
+		c.DispatchConcurrency = n
+		if err := c.validate(""); err != nil {
+			t.Errorf("dispatch_concurrency %d should validate: %v", n, err)
+		}
+	}
+}

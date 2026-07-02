@@ -82,13 +82,14 @@ func TestRenderEnv(t *testing.T) {
 }
 
 func TestRenderRun(t *testing.T) {
-	got := renderRun(Claude, "/r/agent/claude", "/r/agent/claude/claude", "/r/skill/NANA.md")
+	got := renderRun(Claude, "/r/agent/claude", "/r/agent/claude/claude", "/r/skill/NANA.md", "/r/popo")
 	for _, want := range []string{
 		"#!/bin/sh",
 		`. "$self/env.sh"`,        // sources auth/env when present
 		`nana='/r/skill/NANA.md'`, // references NANA.md
 		`set -- '--append-system-prompt' "$(cat "$nana")" "$@"`, // NANA as system context, then passthrough
 		`bin='/r/agent/claude/claude'`,
+		`popo='/r/popo'`,                                    // capping-tee binary
 		`[ -t 1 ] || headless=1`,                             // capture when not a tty…
 		`case "$a" in -p|--print) headless=1; printrun=1 ;;`, // …or a print flag is present
 		`if [ "$headless" = 1 ]; then`,
@@ -97,8 +98,10 @@ func TestRenderRun(t *testing.T) {
 		`if [ "$printrun" = 1 ]; then`,
 		`--output-format|--output-format=*) have_fmt=1 ;;`,
 		`[ "$have_fmt" = 0 ] && set -- '--output-format' 'stream-json' '--verbose' "$@"`,
-		`| tee -a "$log"`,  // headless: mirror to session.log
-		`exec "$bin" "$@"`, // interactive: clean tty
+		`if [ -x "$popo" ]; then`,          // headless: capping tee via popo log…
+		`| "$popo" log "$log"`,             // …rotating, reopen-safe
+		`| tee -a "$log"`,                  // fallback when popo is absent
+		`exec "$bin" "$@"`,                 // interactive: clean tty
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("run script missing %q:\n%s", want, got)
@@ -110,7 +113,7 @@ func TestRenderRun(t *testing.T) {
 // block (only agents that declare a parseable stream mode opt in).
 func TestRenderRun_NoStreamArgs(t *testing.T) {
 	d := Descriptor{Name: "x", DisplayName: "X", Bin: "x", PrintFlags: []string{"-p"}, SystemPromptFlag: "--sys"}
-	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md")
+	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md", "/r/popo")
 	if strings.Contains(got, "have_fmt") || strings.Contains(got, "output-format") {
 		t.Errorf("agent without StreamArgs should not inject a stream block:\n%s", got)
 	}
@@ -120,11 +123,11 @@ func TestRenderRun_NoStreamArgs(t *testing.T) {
 // still gets the tty-gated session.log capture.
 func TestRenderRun_NoSystemPromptFlag(t *testing.T) {
 	d := Descriptor{Name: "x", DisplayName: "X", Bin: "x"}
-	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md")
+	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md", "/r/popo")
 	if strings.Contains(got, "append-system-prompt") || strings.Contains(got, "nana=") {
 		t.Errorf("agent without a system-prompt flag should not wire NANA in:\n%s", got)
 	}
-	if !strings.Contains(got, `exec "$bin" "$@"`) || !strings.Contains(got, `| tee -a "$log"`) {
+	if !strings.Contains(got, `exec "$bin" "$@"`) || !strings.Contains(got, `| "$popo" log "$log"`) {
 		t.Errorf("missing launch/capture branches:\n%s", got)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 )
@@ -43,9 +44,14 @@ func superviseServe(ctx context.Context, cfg *config.Config, transport string, d
 	prompter := remote.NewCachingPrompter(nil)
 
 	// The bridge reads the live session via the holder, so it follows reconnects;
-	// started once (and the agent.log reset once) for the whole serve run.
+	// started once for the whole serve run.
 	holder := &sessionHolder{}
 	startAgentLogBridge(ctx, cfg, holder)
+
+	// One activity logger for the whole run (not per reconnect — else it would leak an open fd
+	// and split the counts snapshot per cycle). Flushed + closed on return.
+	act := activity.NewSized(activityPath(cfg), cfg.LogMaxBytes, cfg.LogKeep)
+	defer act.Close()
 
 	// One connect+serve cycle: dial (reusing the cached prompter), serve until Serve
 	// returns, then close. connected reports whether the dial succeeded, so the loop
@@ -70,7 +76,7 @@ func superviseServe(ctx context.Context, cfg *config.Config, transport string, d
 		// session), then — in proxy egress mode — bring up the reverse-tunneled MITM
 		// proxy for this connection so it gates through that same approver. Torn down at
 		// cycle end; the next reconnect re-establishes it.
-		disp := buildServeDispatcher(ctx, sess, cfg, deny, out, supervised)
+		disp := buildServeDispatcher(ctx, sess, cfg, deny, out, supervised, act)
 		stopProxy, perr := startEgressProxy(ctx, sess, cfg, out)
 		if perr != nil {
 			// The proxy is an enhancement, not the session: a failed reverse tunnel must NOT

@@ -105,7 +105,9 @@ func withDispatcher(ctx context.Context, cfg *config.Config, transport string, d
 	h := &sessionHolder{}
 	h.Set(sess)
 	startAgentLogBridge(ctx, cfg, h)
-	disp := buildServeDispatcher(ctx, sess, cfg, deny, out, supervised)
+	act := activity.NewSized(activityPath(cfg), cfg.LogMaxBytes, cfg.LogKeep)
+	defer act.Close()
+	disp := buildServeDispatcher(ctx, sess, cfg, deny, out, supervised, act)
 	stopProxy, perr := startEgressProxy(ctx, sess, cfg, out)
 	if perr != nil {
 		// A failed egress proxy must not abort serve — warn and continue (relay verbs work).
@@ -123,9 +125,7 @@ func withDispatcher(ctx context.Context, cfg *config.Config, transport string, d
 // (re)connect since the dispatcher snapshots the session's fs/runner at
 // construction. The caller owns the agent.log bridge (started once per serve run, so
 // it survives reconnects without re-truncating the log).
-func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config, deny []string, out io.Writer, supervised bool) *protocol.Dispatcher {
-	act := activity.New(activityPath(cfg))
-
+func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config, deny []string, out io.Writer, supervised bool, act *activity.Logger) *protocol.Dispatcher {
 	// Build the approver before the registry so web.fetch's Deps receives it.
 	var ap *approver
 	if supervised {
@@ -188,9 +188,7 @@ func buildServeDispatcher(ctx context.Context, sess *session, cfg *config.Config
 // without a flag), reading the live session via holder so it follows reconnects.
 // Started once per serve run.
 func startAgentLogBridge(ctx context.Context, cfg *config.Config, holder *sessionHolder) {
-	agentLog := agentLogPath(cfg)
-	resetAgentLog(agentLog)
-	go bridgeAgentLog(ctx, holder, agentLog)
+	go bridgeAgentLog(ctx, holder, agentLogPath(cfg), cfg.LogMaxBytes, cfg.LogKeep)
 }
 
 // serviceDetail builds a short, human one-line summary of a response for the

@@ -19,9 +19,15 @@ import (
 // the agent.log path under that HOME. The runtime cache is os.TempDir-based, so a temp
 // HOME doesn't force re-downloads.
 func startServe(t *testing.T, cfg string) (*exec.Cmd, string) {
+	return startServeTransport(t, cfg, "sftp")
+}
+
+// startServeTransport is startServe with an explicit remote FS transport (sftp|exec), so
+// the agent-log bridge can be exercised over both channels.
+func startServeTransport(t *testing.T, cfg, transport string) (*exec.Cmd, string) {
 	t.Helper()
 	home := t.TempDir()
-	cmd := exec.Command(iceclimberBin, "serve", "--yes", "--config", cfg, "--transport", "sftp")
+	cmd := exec.Command(iceclimberBin, "serve", "--yes", "--config", cfg, "--transport", transport)
 	cmd.Env = append(os.Environ(), "HOME="+home)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start serve: %v", err)
@@ -110,70 +116,79 @@ func TestAgentInstallClaude(t *testing.T) {
 // writing a session.log in the sandbox, run `serve` in the background, and assert the
 // line reaches the controller file.
 func TestAgentLogBridge(t *testing.T) {
-	sb := requireSandbox(t)
-	root := "/tmp/iceclimber-bridge-" + protocol.NewID()
-	cfg := writeConfigRoot(t, sb, root)
-	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
+	for _, transport := range []string{"sftp", "exec"} {
+		t.Run(transport, func(t *testing.T) {
+			sb := requireSandbox(t)
+			root := "/tmp/iceclimber-bridge-" + protocol.NewID()
+			cfg := writeConfigRoot(t, sb, root)
+			runIceclimber(t, "bootstrap", "--config", cfg, "--transport", transport)
 
-	// Stand in for a headless nana run: a plain line plus a claude stream-json
-	// tool-call event in the session.log. The bridge should pass the plain line
-	// through and render the stream-json into a readable "→ Bash: …" pane line.
-	streamEvent := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"popo python.install 3.12"}}]}}`
-	limaSh(t, "mkdir -p "+root+"/agent/claude && { printf 'nana: hello popo\\n'; printf '%s\\n' "+remoteQuote(streamEvent)+"; } > "+root+"/agent/claude/session.log")
+			// The bridge seeds each session.log's offset to EOF on first sight (streams only
+			// NEW output — no re-dump of a prior run), so create an EMPTY log before serve and
+			// APPEND after. Stand in for a headless nana run: a plain line plus a claude
+			// stream-json tool-call event; the bridge passes the plain line through and renders
+			// the stream-json into a readable "→ Bash: …" pane line.
+			streamEvent := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"popo python.install 3.12"}}]}}`
+			limaSh(t, "mkdir -p "+root+"/agent/claude && : > "+root+"/agent/claude/session.log")
 
-	// Run serve under a private HOME so its controller-side agent.log lands in a temp
-	// dir, not the operator's real ~/.iceclimber.
-	_, agentLog := startServe(t, cfg)
+			// Run serve under a private HOME so its controller-side agent.log lands in a temp
+			// dir, not the operator's real ~/.iceclimber.
+			_, agentLog := startServeTransport(t, cfg, transport)
 
-	// The bridge polls every 1.5s; give it a generous window. Success = the plain
-	// line AND the formatted tool-call line both reached the controller agent.log.
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		b, _ := os.ReadFile(agentLog)
-		if strings.Contains(string(b), "nana: hello popo") && strings.Contains(string(b), "→ Bash: popo python.install 3.12") {
-			return // bridged + stream-json formatted — success
-		}
-		time.Sleep(500 * time.Millisecond)
+			// Append output on a loop (each ~1s) until it streams through: the very first
+			// appends may land before the bridge's first poll (seeded past), but once seeded
+			// every later append streams. This is robust to serve's connect latency.
+			deadline := time.Now().Add(30 * time.Second)
+			for time.Now().Before(deadline) {
+				limaSh(t, "{ printf 'nana: hello popo\\n'; printf '%s\\n' "+remoteQuote(streamEvent)+"; } >> "+root+"/agent/claude/session.log")
+				b, _ := os.ReadFile(agentLog)
+				if strings.Contains(string(b), "nana: hello popo") && strings.Contains(string(b), "→ Bash: popo python.install 3.12") {
+					return // bridged incrementally + stream-json formatted — success
+				}
+				time.Sleep(1 * time.Second)
+			}
+			b, _ := os.ReadFile(agentLog)
+			t.Fatalf("serve did not bridge the sandbox session.log to %s; have: %q", agentLog, b)
+		})
 	}
-	b, _ := os.ReadFile(agentLog)
-	t.Fatalf("serve did not bridge the sandbox session.log to %s; have: %q", agentLog, b)
 }
 
-// TestServeResetsStaleAgentLog is the regression guard for the "stale [NANA]" bug: a
-// new serving session must start the controller-side agent.log fresh, so it never
-// shows a previous run's (or a leftover test's) agent stream as if it were live.
-func TestServeResetsStaleAgentLog(t *testing.T) {
+// TestServeDoesNotReimportPriorSession is the regression guard for the agent-log
+// re-import bug: a fresh serve must NOT re-dump the sandbox session.log's pre-existing
+// (prior-run) output into the controller agent.log — the bridge seeds each file's offset
+// to EOF on first sight, so only output produced AFTER serve attaches streams. (The old
+// truncate-reset was dropped: truncating the shared controller log is a multi-writer
+// clobber hazard; EOF-seed achieves "only this run" without blowing away the file.)
+func TestServeDoesNotReimportPriorSession(t *testing.T) {
 	sb := requireSandbox(t)
-	root := "/tmp/iceclimber-reset-" + protocol.NewID()
+	root := "/tmp/iceclimber-noreimport-" + protocol.NewID()
 	cfg := writeConfigRoot(t, sb, root)
 	runIceclimber(t, "bootstrap", "--config", cfg, "--transport", "sftp")
 
-	// Seed a stale agent.log under a private HOME, as a prior session would have left.
-	home := t.TempDir()
-	agentLog := filepath.Join(home, ".iceclimber", sandboxName, "agent.log")
-	if err := os.MkdirAll(filepath.Dir(agentLog), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(agentLog, []byte("STALE: install Python sent to popo\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// A prior session's output already sits in the sandbox session.log before serve starts.
+	limaSh(t, "mkdir -p "+root+"/agent/claude && printf 'OLD-PRIOR-SESSION line\\n' > "+root+"/agent/claude/session.log")
 
-	serve := exec.Command(iceclimberBin, "serve", "--yes", "--config", cfg, "--transport", "sftp")
-	serve.Env = append(os.Environ(), "HOME="+home)
-	if err := serve.Start(); err != nil {
-		t.Fatalf("start serve: %v", err)
-	}
-	defer func() { _ = serve.Process.Kill(); _, _ = serve.Process.Wait() }()
+	_, agentLog := startServe(t, cfg)
 
-	// serve resets agent.log at startup; the stale line must disappear quickly.
-	deadline := time.Now().Add(10 * time.Second)
+	// Drive NEW output on a loop until it streams — proving the bridge is live and seeded.
+	deadline := time.Now().Add(30 * time.Second)
+	streamed := false
 	for time.Now().Before(deadline) {
-		if b, _ := os.ReadFile(agentLog); !strings.Contains(string(b), "STALE") {
-			return // reset cleared the prior session's stream — success
+		limaSh(t, "printf 'NEW-AFTER-ATTACH line\\n' >> "+root+"/agent/claude/session.log")
+		if b, _ := os.ReadFile(agentLog); strings.Contains(string(b), "NEW-AFTER-ATTACH") {
+			streamed = true
+			break
 		}
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(1 * time.Second)
 	}
-	t.Fatal("serve did not reset the stale agent.log — [NANA] would show a previous session's stream")
+	if !streamed {
+		t.Fatal("bridge never streamed new output — cannot assert no-reimport")
+	}
+	// The bridge is live and has streamed post-attach output; the pre-existing prior-session
+	// line must never have been re-imported into the controller agent.log.
+	if b, _ := os.ReadFile(agentLog); strings.Contains(string(b), "OLD-PRIOR-SESSION") {
+		t.Fatalf("serve re-imported the prior session's output — agent.log has:\n%s", b)
+	}
 }
 
 // TestAgentWrapPreexisting proves `agent wrap` wires the nana/run launcher around a

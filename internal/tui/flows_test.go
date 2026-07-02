@@ -788,11 +788,14 @@ func TestFlow_EgressPanel(t *testing.T) {
 	ops.egress = EgressSnapshot{
 		Pending: []EgressPending{{ID: "01J", Host: "api.x.com", URL: "https://api.x.com/data"}},
 		Rules:   []EgressRule{{Kind: "allow", Pattern: "https://xkcd.com/*"}},
+		Recent:  []string{"12:00:01  GET https://xkcd.com/info · allow · 200"},
 	}
 	tm := startConsole(t, ops)
 	waitText(t, tm, "i install")
 	press(tm, "e")
-	waitAll(t, tm, "Egress", "api.x.com", "xkcd.com")
+	// The recent-fetch audit tail is surfaced read-only in the egress panel (parity with
+	// `iceclimber logs`' [EGRESS] feed).
+	waitAll(t, tm, "Egress", "api.x.com", "xkcd.com", "recent fetches")
 
 	// Row 0 is the pending entry — approve it.
 	press(tm, "a")

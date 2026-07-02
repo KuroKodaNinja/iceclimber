@@ -68,9 +68,16 @@ func newRecFS() *recFS {
 	return &recFS{files: map[string][]byte{}, modes: map[string]os.FileMode{}, links: map[string]string{}}
 }
 
-func (f *recFS) Mkdir(context.Context, string) error                    { return nil }
-func (f *recFS) WriteFile(_ context.Context, p string, d []byte) error  { f.files[p] = d; return nil }
-func (f *recFS) ReadFile(_ context.Context, p string) ([]byte, error)   { return f.files[p], nil }
+func (f *recFS) Mkdir(context.Context, string) error                   { return nil }
+func (f *recFS) WriteFile(_ context.Context, p string, d []byte) error { f.files[p] = d; return nil }
+func (f *recFS) ReadFile(_ context.Context, p string) ([]byte, error)  { return f.files[p], nil }
+func (f *recFS) ReadFrom(_ context.Context, p string, off int64) ([]byte, int64, error) {
+	d := f.files[p]
+	if int64(len(d)) < off {
+		off = 0
+	}
+	return d[off:], int64(len(d)), nil
+}
 func (f *recFS) List(context.Context, string) ([]string, error)         { return nil, nil }
 func (f *recFS) Rename(context.Context, string, string) error           { return nil }
 func (f *recFS) Chmod(_ context.Context, p string, m os.FileMode) error { f.modes[p] = m; return nil }

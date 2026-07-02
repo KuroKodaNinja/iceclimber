@@ -6,8 +6,10 @@ package audit
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/KuroKodaNinja/iceclimber/internal/logfile"
 )
 
 // Entry is one audit record. Bodies are referenced by hash + size, not stored.
@@ -26,16 +28,25 @@ type Entry struct {
 	Outcome      string `json:"outcome"` // "ok" | "error"
 }
 
-// Logger appends entries to a JSONL file. A zero-value path disables logging.
+// Logger appends entries to a rotating JSONL file. A zero-value path disables logging. Safe for
+// concurrent Append (parallel web.fetch) — the underlying logfile.Writer is thread/process-safe.
 type Logger struct {
 	path string
+	w    *logfile.Writer
 }
 
-// New returns a logger writing to path (empty path = no-op).
-func New(path string) *Logger { return &Logger{path: path} }
+// New returns a logger writing to path with the default rotation policy (empty path = no-op).
+func New(path string) *Logger { return NewSized(path, logfile.DefaultMaxBytes, logfile.DefaultKeep) }
 
-// Append stamps the entry with the current UTC time and appends it as one JSON
-// line, creating the file and parent directory as needed.
+// NewSized is New with an explicit rotation policy (from config).
+func NewSized(path string, maxBytes int64, keep int) *Logger {
+	return &Logger{path: path, w: logfile.New(path, maxBytes, keep)}
+}
+
+// Path returns the file the logger writes to (empty if disabled).
+func (l *Logger) Path() string { return l.path }
+
+// Append stamps the entry with the current UTC time (if unset) and appends it as one JSON line.
 func (l *Logger) Append(e Entry) error {
 	if l.path == "" {
 		return nil
@@ -43,19 +54,41 @@ func (l *Logger) Append(e Entry) error {
 	if e.TS == "" {
 		e.TS = time.Now().UTC().Format(time.RFC3339)
 	}
-	if err := os.MkdirAll(filepath.Dir(l.path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
 	line, err := json.Marshal(e)
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(append(line, '\n'))
-	return err
+	return l.w.Append(append(line, '\n'))
+}
+
+// Close releases the log file. Idempotent.
+func (l *Logger) Close() error {
+	if l.path == "" {
+		return nil
+	}
+	return l.w.Close()
+}
+
+// Read replays the audit log at path into its entries (skipping blank/garbled lines). A missing
+// file yields no entries, not an error — so `iceclimber logs` can surface the audit feed even
+// before the first fetch. Mirrors activity.Read.
+func Read(path string) ([]Entry, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []Entry
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var e Entry
+		if json.Unmarshal([]byte(line), &e) == nil {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }

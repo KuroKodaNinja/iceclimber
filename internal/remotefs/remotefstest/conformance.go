@@ -36,6 +36,30 @@ func RunConformance(t *testing.T, newFS NewFS) {
 		}
 	})
 
+	t.Run("readfrom_incremental_and_rotation", func(t *testing.T) {
+		rfs, base := newFS(t)
+		p := base + "/log"
+		mustOK(t, rfs.WriteFile(ctx, p, []byte("aaa\nbbb\n"))) // 8 bytes
+
+		// Fresh (off 0): the whole file, next at EOF.
+		data, next, err := rfs.ReadFrom(ctx, p, 0)
+		if err != nil || string(data) != "aaa\nbbb\n" || next != 8 {
+			t.Fatalf("fresh ReadFrom = %q next=%d err=%v; want whole file / next 8", data, next, err)
+		}
+		// Grow the file: reading from `next` returns only the new tail.
+		mustOK(t, rfs.WriteFile(ctx, p, []byte("aaa\nbbb\nccc\n"))) // 12 bytes
+		data, next2, err := rfs.ReadFrom(ctx, p, next)
+		if err != nil || string(data) != "ccc\n" || next2 != 12 {
+			t.Fatalf("incremental ReadFrom = %q next=%d err=%v; want \"ccc\\n\" / next 12", data, next2, err)
+		}
+		// Shrink below the offset (rotation/truncation): restart from the top.
+		mustOK(t, rfs.WriteFile(ctx, p, []byte("z\n"))) // 2 bytes
+		data, next3, err := rfs.ReadFrom(ctx, p, next2)
+		if err != nil || string(data) != "z\n" || next3 != 2 {
+			t.Fatalf("rotation ReadFrom = %q next=%d err=%v; want \"z\\n\" / next 2", data, next3, err)
+		}
+	})
+
 	t.Run("list_empty_dir_is_not_error", func(t *testing.T) {
 		rfs, base := newFS(t)
 		d := base + "/empty"

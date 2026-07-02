@@ -151,7 +151,7 @@ func (i *Installer) wire(ctx context.Context, d Descriptor, token, dir, binPath 
 		res.AuthConfigured = true
 	}
 
-	if err := i.writeExec(ctx, path.Join(dir, "run"), renderRun(d, dir, binPath, path.Join(i.cfg.Root, "skill", "NANA.md"))); err != nil {
+	if err := i.writeExec(ctx, path.Join(dir, "run"), renderRun(d, dir, binPath, path.Join(i.cfg.Root, "skill", "NANA.md"), path.Join(i.cfg.Root, "popo"))); err != nil {
 		return res, fmt.Errorf("write agent launcher: %w", err)
 	}
 	launcher := path.Join(i.cfg.Root, "nana")

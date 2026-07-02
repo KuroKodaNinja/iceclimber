@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/audit"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/egress"
 	"github.com/KuroKodaNinja/iceclimber/internal/probe"
@@ -38,6 +39,7 @@ type session struct {
 	controllerConda  string
 	controllerMvn    string
 	auditPath        string
+	auditLogger      *audit.Logger // the egress audit sink; owned by the session, closed on Close
 	policy           *egress.Policy
 	sandboxID        string
 	egressProxy      bool              // egress_mode: proxy (native tools egress through the MITM proxy)
@@ -120,6 +122,9 @@ func (s *session) condaPath() string {
 
 // Close releases the SFTP client (if any) and the SSH connection.
 func (s *session) Close() error {
+	if s.auditLogger != nil {
+		_ = s.auditLogger.Close()
+	}
 	if s.sftp != nil {
 		_ = s.sftp.Close()
 	}
@@ -181,7 +186,7 @@ func openSessionWith(ctx context.Context, cfg *config.Config, transport string, 
 		}
 	}
 
-	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, controllerConda: cfg.ControllerConda, controllerMvn: cfg.ControllerMvn, auditPath: auditPath(cfg), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID, egressProxy: cfg.EgressProxy(), dispatchConcur: cfg.Concurrency(), runtimeStore: runtimesStore(cfg), runtimeConfig: configRuntimeSources(cfg.Runtimes)}
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, controllerConda: cfg.ControllerConda, controllerMvn: cfg.ControllerMvn, auditPath: auditPath(cfg), auditLogger: audit.NewSized(auditPath(cfg), cfg.LogMaxBytes, cfg.LogKeep), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID, egressProxy: cfg.EgressProxy(), dispatchConcur: cfg.Concurrency(), runtimeStore: runtimesStore(cfg), runtimeConfig: configRuntimeSources(cfg.Runtimes)}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"

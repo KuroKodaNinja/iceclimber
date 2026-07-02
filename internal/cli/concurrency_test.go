@@ -135,7 +135,9 @@ func TestServeDispatcher_ConcurrentObserversNoRace(t *testing.T) {
 	cfg := &config.Config{SandboxID: "sbx", DispatchConcurrency: 8}
 
 	var out bytes.Buffer // the shared writer both observers race on if unguarded
-	disp := buildServeDispatcher(ctx, sess, cfg, nil, &out, false)
+	act := activity.New(filepath.Join(t.TempDir(), "activity.jsonl"))
+	defer act.Close()
+	disp := buildServeDispatcher(ctx, sess, cfg, nil, &out, false, act)
 
 	const nreq = 24
 	for i := 0; i < nreq; i++ {

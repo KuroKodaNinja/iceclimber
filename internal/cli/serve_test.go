@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/probe"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
@@ -84,7 +85,7 @@ func TestServeDispatcher_PickupLine(t *testing.T) {
 	sess := &session{fs: fs, tree: tree, transport: "exec", sandboxID: "s", fp: &probe.Fingerprint{}}
 	cfg := &config.Config{SandboxID: "s", ActivityLog: filepath.Join(t.TempDir(), "activity.jsonl")}
 	var out bytes.Buffer
-	disp := buildServeDispatcher(ctx, sess, cfg, nil, &out, false)
+	disp := buildServeDispatcher(ctx, sess, cfg, nil, &out, false, activity.New(cfg.ActivityLog))
 
 	id := protocol.NewID()
 	name := protocol.RequestName(id)
@@ -116,7 +117,7 @@ func TestBuildServeDispatcher_AppliesRetention(t *testing.T) {
 	sess := &session{fs: fs, tree: tree, transport: "exec", sandboxID: "s", fp: &probe.Fingerprint{}}
 	cfg := &config.Config{SandboxID: "s", ActivityLog: filepath.Join(t.TempDir(), "a.jsonl"), MaildirRetention: "1h"}
 	var out bytes.Buffer
-	disp := buildServeDispatcher(ctx, sess, cfg, nil, &out, false)
+	disp := buildServeDispatcher(ctx, sess, cfg, nil, &out, false, activity.New(cfg.ActivityLog))
 
 	// An old (2h) uncollected response + its request — reaped iff retention is wired.
 	name := protocol.RequestName(protocol.NewID())

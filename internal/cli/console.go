@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -17,8 +15,10 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/agent"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/audit"
 	"github.com/KuroKodaNinja/iceclimber/internal/egress"
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
+	"github.com/KuroKodaNinja/iceclimber/internal/logfile"
 	"github.com/KuroKodaNinja/iceclimber/internal/maven"
 	"github.com/KuroKodaNinja/iceclimber/internal/node"
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
@@ -370,8 +370,24 @@ func (o *consoleOps) Egress() tui.EgressSnapshot {
 	for _, d := range st.Deny() {
 		snap.Rules = append(snap.Rules, tui.EgressRule{Kind: "deny", Pattern: d})
 	}
+	// Surface the tail of the egress audit trail so the TUI's egress home can show the
+	// same completed-fetch history `iceclimber logs` renders as [EGRESS] (parity — the
+	// audit log is otherwise write-only). Best-effort: a missing/garbled log is just empty.
+	if ap := o.sess().auditPath; ap != "" {
+		if entries, err := audit.Read(ap); err == nil {
+			if start := len(entries) - egressRecentN; start > 0 {
+				entries = entries[start:]
+			}
+			for _, e := range entries {
+				snap.Recent = append(snap.Recent, shortTime(e.TS)+"  "+auditBody(e))
+			}
+		}
+	}
 	return snap
 }
+
+// egressRecentN caps the audit tail shown in the TUI egress panel.
+const egressRecentN = 8
 
 // ApprovePending resolves a held request by allowing its host and dropping it from
 // pending (mirrors `iceclimber approve`); DenyPending denies the host instead.
@@ -801,7 +817,8 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	prompter.Commit()   // the startup dial authenticated — remember the password for reconnects
 	uiReady.Store(true) // from here every dial is a reconnect → route its prompt to the modal, never /dev/tty
 
-	act := activity.New(activityPath(cfg))
+	act := activity.NewSized(activityPath(cfg), cfg.LogMaxBytes, cfg.LogKeep)
+	defer act.Close() // flush the counts snapshot + release the rotating log fd
 	// bootstrapped nudges the serve cycle to re-check + start serving the instant the operator
 	// bootstraps in-place (below), instead of waiting on the reconnect backoff.
 	bootstrapped := make(chan struct{}, 1)
@@ -824,16 +841,16 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 		}
 	}
 
-	// With no explicit --agent-log, default to the controller-side agent.log and
-	// bridge the sandbox's agent stream into it, so [NANA] populates with no flag.
-	// Reset it first (synchronously) so this session shows only its own stream — not
-	// a previous run's leftover. The bridge reads the live session via the holder, so
-	// it follows reconnects.
+	// With no explicit --agent-log, default to the controller-side agent.log and bridge the
+	// sandbox's agent stream into it, so [NANA] populates with no flag. The bridge seeds each
+	// session.log to its current EOF (streams only NEW output — no re-dump of a prior run) and
+	// writes through a rotating logfile.Writer, so we no longer truncate-reset (which would
+	// clobber a concurrent writer). The bridge reads the live session via the holder, so it
+	// follows reconnects.
 	logPath := agentLog
 	if logPath == "" {
 		logPath = agentLogPath(cfg)
-		resetAgentLog(logPath)
-		go bridgeAgentLog(ctx, holder, logPath)
+		go bridgeAgentLog(ctx, holder, logPath, cfg.LogMaxBytes, cfg.LogKeep)
 	}
 
 	// Seed the header counters + the "last action" time from the durable activity log
@@ -841,12 +858,12 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	// anything, so a just-serviced event isn't counted twice (seed + the live event on the
 	// channel). The seed makes "last action" coherent with the cumulative counters on restart
 	// (e.g. "serviced 47 · … · last action 2d ago") instead of "—" or a startup countdown.
-	seedServed, seedApproved, seedDenied := 0, 0, 0
-	var seedLast time.Time
-	if evs, rerr := activity.Read(activityPath(cfg)); rerr == nil {
-		seedServed, seedApproved, seedDenied = activity.Counts(evs)
-		seedLast = activity.LastAction(evs)
-	}
+	// O(1) seed from the counts snapshot (backfills once from the log if absent); this keeps
+	// startup fast regardless of lifetime activity and keeps the counters monotonic across log
+	// rotation (the snapshot, not a log re-read, is authoritative).
+	snap := activity.SeedCounts(activityPath(cfg))
+	seedServed, seedApproved, seedDenied := snap.Served, snap.Approved, snap.Denied
+	seedLast := snap.LastAction
 
 	// Serve in the background with auto-reconnect. The first cycle serves the already
 	// open session; on a drop the supervisor reconnects (capped backoff, forever) and
@@ -1013,29 +1030,20 @@ func startedEvent(ev protocol.StartEvent) activity.Event {
 	}
 }
 
-// resetAgentLog truncates (creates empty) the controller-side agent log at the start
-// of a serving session, so the [NANA] views show only the current session's agent
-// stream — never a previous run's (or a test's) leftover output. Best-effort.
-func resetAgentLog(path string) {
-	if path == "" {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
-	}
-	_ = os.WriteFile(path, nil, 0o644)
-}
-
-// bridgeAgentLog copies new lines from the sandbox's per-agent session.log files
-// (written by the nana launcher in headless mode) into the controller-side file dst,
-// so every view (console / tui / logs) shows the agent's stream by tailing one local
-// file — no --agent-log flag needed. The per-file read/offset/rotation logic and the
-// stream-json rendering live in pollAgentLogs.
-func bridgeAgentLog(ctx context.Context, holder *sessionHolder, dst string) {
+// bridgeAgentLog copies new lines from the sandbox's per-agent session.log files (written by the
+// nana launcher in headless mode) into the controller-side agent log at dst, so every view
+// (console / tui / logs) shows the agent's stream by tailing one local file — no --agent-log flag
+// needed. It writes through a rotating logfile.Writer (bounded, process-safe) and, per file,
+// seeds the offset to EOF on first sight so a fresh serve streams only NEW output (no re-dump of
+// a prior run) then reads incrementally via ReadFrom (only the new bytes each tick, not the whole
+// remote file). Stream-json rendering lives in pollAgentLogs.
+func bridgeAgentLog(ctx context.Context, holder *sessionHolder, dst string, maxBytes int64, keep int) {
 	if dst == "" {
 		return
 	}
-	offsets := map[string]int{}
+	w := logfile.New(dst, maxBytes, keep)
+	defer w.Close()
+	offsets := map[string]int64{}
 	t := time.NewTicker(1500 * time.Millisecond)
 	defer t.Stop()
 	for {
@@ -1050,19 +1058,20 @@ func bridgeAgentLog(ctx context.Context, holder *sessionHolder, dst string) {
 				continue
 			}
 			base := path.Join(sess.tree.Root, "agent")
-			if lines := pollAgentLogs(ctx, sess.fs, base, offsets); len(lines) > 0 {
-				appendLines(dst, lines)
+			for _, l := range pollAgentLogs(ctx, sess.fs, base, offsets) {
+				_ = w.Append([]byte(l + "\n"))
 			}
 		}
 	}
 }
 
-// pollAgentLogs reads the per-agent session.log files under base and returns the
-// lines that appeared since the last call, advancing offsets in place. A log shorter
-// than its offset was rotated/truncated → restart from the top. Lines are prefixed
-// with the agent name when more than one agent is installed. Missing logs / a missing
-// base are skipped (nil).
-func pollAgentLogs(ctx context.Context, fs remotefs.FS, base string, offsets map[string]int) []string {
+// pollAgentLogs reads the per-agent session.log files under base incrementally (ReadFrom from the
+// tracked byte offset) and returns the lines that appeared since the last call, advancing offsets
+// in place. On first sight of a file the offset is seeded to EOF (nothing emitted) so a fresh
+// bridge doesn't re-dump existing/prior-run output. A log shorter than its offset was
+// rotated/truncated → ReadFrom restarts it from the top. Lines are prefixed with the agent name
+// when more than one agent is installed. Missing logs / a missing base are skipped (nil).
+func pollAgentLogs(ctx context.Context, fs remotefs.FS, base string, offsets map[string]int64) []string {
 	names, err := fs.List(ctx, base)
 	if err != nil {
 		return nil
@@ -1071,50 +1080,34 @@ func pollAgentLogs(ctx context.Context, fs remotefs.FS, base string, offsets map
 	var out []string
 	for _, name := range names {
 		logp := path.Join(base, name, "session.log")
-		data, err := fs.ReadFile(ctx, logp)
-		if err != nil {
+		if off, seen := offsets[logp]; !seen {
+			// First observation: seed to EOF so we stream only NEW output from here.
+			if _, next, err := fs.ReadFrom(ctx, logp, 0); err == nil {
+				offsets[logp] = next
+			}
 			continue
-		}
-		off := offsets[logp]
-		if len(data) < off {
-			off = 0
-		}
-		if len(data) <= off {
-			offsets[logp] = len(data)
-			continue
-		}
-		chunk := string(data[off:])
-		offsets[logp] = len(data)
-		for _, line := range strings.Split(strings.TrimRight(chunk, "\n"), "\n") {
-			if line == "" {
+		} else {
+			data, next, err := fs.ReadFrom(ctx, logp, off)
+			if err != nil {
 				continue
 			}
-			// Render stream-json tool-call events into readable lines (plain text
-			// passes through); one event can yield several pane lines or none.
-			for _, fl := range formatAgentLine(line) {
-				if multi {
-					fl = "[" + name + "] " + fl
+			offsets[logp] = next
+			for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+				if line == "" {
+					continue
 				}
-				out = append(out, fl)
+				// Render stream-json tool-call events into readable lines (plain text passes
+				// through); one event can yield several pane lines or none.
+				for _, fl := range formatAgentLine(line) {
+					if multi {
+						fl = "[" + name + "] " + fl
+					}
+					out = append(out, fl)
+				}
 			}
 		}
 	}
 	return out
-}
-
-// appendLines appends lines to the controller-side agent-log file (best-effort).
-func appendLines(dst string, lines []string) {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return
-	}
-	f, err := os.OpenFile(dst, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	for _, l := range lines {
-		fmt.Fprintln(f, l)
-	}
 }
 
 // trustHostInteractive fetches the sandbox's offered host key, shows its

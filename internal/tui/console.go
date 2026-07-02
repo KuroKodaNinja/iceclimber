@@ -198,12 +198,16 @@ const heartbeatStale = 8 * time.Second
 type EgressRule struct{ Kind, Pattern string } // Kind: "allow" | "deny"
 type EgressPending struct{ ID, Host, URL string }
 
-// EgressSnapshot is the operator's egress state (pending first, then rules).
+// EgressSnapshot is the operator's egress state (pending first, then rules). Recent is
+// the tail of the egress audit trail (pre-rendered display lines), shown read-only below
+// the rules so the TUI's egress home mirrors `iceclimber logs`' [EGRESS] feed.
 type EgressSnapshot struct {
 	Pending []EgressPending
 	Rules   []EgressRule
+	Recent  []string
 }
 
+// rows counts only the selectable rows (pending + rules); Recent is read-only display.
 func (e EgressSnapshot) rows() int { return len(e.Pending) + len(e.Rules) }
 
 // Console is the embed-serve operator console: it renders the live activity feed

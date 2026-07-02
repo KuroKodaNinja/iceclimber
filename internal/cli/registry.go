@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/agent"
-	"github.com/KuroKodaNinja/iceclimber/internal/audit"
 	"github.com/KuroKodaNinja/iceclimber/internal/conda"
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/maven"
@@ -163,7 +162,7 @@ func webfetchDeps(sess *session) webfetch.Deps {
 		FS:        sess.fs,
 		Root:      sess.tree.Root,
 		Policy:    sess.policy,
-		Audit:     audit.New(sess.auditPath),
+		Audit:     sess.auditLogger,
 		SandboxID: sess.sandboxID,
 		Approver:  sess.approver,
 	}

@@ -34,7 +34,13 @@ type fakeFS struct {
 func (f *fakeFS) Mkdir(_ context.Context, p string) error          { f.mkdirs = append(f.mkdirs, p); return nil }
 func (f *fakeFS) WriteFile(context.Context, string, []byte) error  { return nil }
 func (f *fakeFS) ReadFile(context.Context, string) ([]byte, error) { return f.body, nil }
-func (f *fakeFS) List(context.Context, string) ([]string, error)   { return nil, nil }
+func (f *fakeFS) ReadFrom(_ context.Context, _ string, off int64) ([]byte, int64, error) {
+	if int64(len(f.body)) < off {
+		off = 0
+	}
+	return f.body[off:], int64(len(f.body)), nil
+}
+func (f *fakeFS) List(context.Context, string) ([]string, error) { return nil, nil }
 func (f *fakeFS) Rename(_ context.Context, from, to string) error {
 	f.renames = append(f.renames, [2]string{from, to})
 	return nil

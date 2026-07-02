@@ -5,9 +5,64 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/KuroKodaNinja/iceclimber/internal/tail"
 )
+
+// TestRotationWhileTailing is the `logs -f` / console scenario: activity.jsonl rotates
+// (under a tiny cap) while a tail.Reader follows it. The follower must keep yielding new
+// lines across the rotation (tail.Reader restarts from the top of the fresh file on the
+// size-shrink) — it never gets stuck or errors — so the operator's live feed survives a
+// log roll.
+func TestRotationWhileTailing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "activity.jsonl")
+	// Tiny cap so a handful of events forces at least one rotation; keep a couple of gens.
+	l := NewSized(path, 300, 3)
+	defer l.Close()
+
+	tr := tail.NewReader(path)
+	_ = tr.History() // seed at EOF (empty)
+
+	seen := map[string]bool{}
+	const n = 40
+	for i := 0; i < n; i++ {
+		detail := "evt-" + strings.Repeat("x", 20) + "-" + itoa(i)
+		if err := l.Append(Event{Kind: KindServiced, Type: "ping", Status: "ok", Detail: detail}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		for _, line := range tr.Poll() {
+			var e Event
+			if json.Unmarshal([]byte(line), &e) == nil {
+				seen[e.Detail] = true
+			}
+		}
+	}
+	// A rotation must actually have fired (else the cap is wrong and we prove nothing).
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("expected a rotated activity.jsonl.1 under the tiny cap: %v", err)
+	}
+	// The follower kept up across the rotation: the last events (in the fresh file) were seen.
+	for i := n - 3; i < n; i++ {
+		if d := "evt-" + strings.Repeat("x", 20) + "-" + itoa(i); !seen[d] {
+			t.Errorf("tail did not follow across rotation — missed %q", d)
+		}
+	}
+}
+
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	var b []byte
+	for i > 0 {
+		b = append([]byte{byte('0' + i%10)}, b...)
+		i /= 10
+	}
+	return string(b)
+}
 
 func TestLoggerAppendRoundTrip(t *testing.T) {
 	// Parent dir intentionally absent — Append must create it.
@@ -128,5 +183,53 @@ func TestLoggerEmptyPathIsNoop(t *testing.T) {
 	}
 	if l.Path() != "" {
 		t.Errorf("path = %q, want empty", l.Path())
+	}
+}
+
+// TestSeedCountsSnapshotAndBackfill: SeedCounts backfills from the log on first call, writes the
+// snapshot, and thereafter reads it in O(1) (independent of the log).
+func TestSeedCountsSnapshotAndBackfill(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "activity.jsonl")
+	l := New(path)
+	for i := 0; i < 3; i++ {
+		_ = l.Append(Event{Kind: KindServiced})
+	}
+	_ = l.Append(Event{Kind: KindApproved})
+	_ = l.Append(Event{Kind: KindDenied})
+	_ = l.Close() // flushes the snapshot
+
+	s := SeedCounts(path)
+	if s.Served != 3 || s.Approved != 1 || s.Denied != 1 {
+		t.Fatalf("seed = %+v, want 3/1/1", s)
+	}
+	// The snapshot is now authoritative — deleting the log must not change the seed (O(1) read).
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if s2 := SeedCounts(path); s2.Served != 3 || s2.Approved != 1 || s2.Denied != 1 {
+		t.Errorf("seed after log removal = %+v, want 3/1/1 (snapshot must be authoritative)", s2)
+	}
+}
+
+// TestCountersMonotonicAcrossRotation is the key regression: with a tiny cap that forces the log
+// to rotate away old lines, the cumulative counters must NOT drop — they come from the snapshot,
+// not a re-read of the (now-truncated) log.
+func TestCountersMonotonicAcrossRotation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "activity.jsonl")
+	l := NewSized(path, 400, 2) // small: many serviced events → several rotations
+	const n = 300
+	for i := 0; i < n; i++ {
+		_ = l.Append(Event{Kind: KindServiced})
+	}
+	_ = l.Close()
+
+	// The log itself was rotated (old lines dropped), so a naive Counts(Read) would undercount…
+	evs, _ := Read(path)
+	if got, _, _ := Counts(evs); got >= n {
+		t.Fatalf("precondition: the log should have rotated (Counts(Read)=%d, want < %d)", got, n)
+	}
+	// …but the snapshot preserved the full cumulative total.
+	if s := SeedCounts(path); s.Served != n {
+		t.Errorf("cumulative served after rotation = %d, want %d (counters must not drop on rotation)", s.Served, n)
 	}
 }

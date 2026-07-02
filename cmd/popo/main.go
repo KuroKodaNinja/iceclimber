@@ -44,6 +44,17 @@ func main() {
 		return
 	}
 
+	// log is local-only (no maildir round-trip): a capping tee. It mirrors stdin to stdout
+	// while appending each line to a rotating, reopen-safe file — the launcher pipes headless
+	// nana output through it so the sandbox session.log stays bounded within a run.
+	if verb == "log" {
+		if err := logCmd(rest); err != nil {
+			fmt.Fprintf(os.Stderr, "popo log: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// collect is local-only: mark a response collected (inbox/new -> inbox/cur) so Popo's
 	// GC can prune the pair. The normal request/await flow does this automatically; this
 	// verb is for collecting a response read out-of-band.
@@ -98,6 +109,7 @@ var verbs = map[string]string{
 	"web.fetch":      "popo web.fetch <url> [--method M] [--header K:V]... [--body STR]",
 	"collect":        "popo collect <id>                       mark a response collected (usually automatic)",
 	"shellenv":       "popo shellenv                           eval \"$(./popo shellenv)\" — popo/nana on PATH",
+	"log":            "popo log <file> [--max-bytes N] [--keep K]   capping tee: mirror stdin to stdout, append to a rotating file",
 }
 
 // shellEnvBlock renders the eval-able export block: ICECLIMBER_HOME + root on PATH

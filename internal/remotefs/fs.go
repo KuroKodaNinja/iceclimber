@@ -21,6 +21,11 @@ type FS interface {
 	WriteFile(ctx context.Context, path string, data []byte) error
 	// ReadFile returns the contents of path.
 	ReadFile(ctx context.Context, path string) ([]byte, error)
+	// ReadFrom returns the bytes of path from byte offset `off` to EOF, plus `next` — the offset
+	// to pass on the following call (the EOF position after this read). If the file is shorter
+	// than `off` (rotation/truncation), it reads the whole file from 0, so a tailer restarts
+	// cleanly. Lets a remote log be tailed incrementally instead of re-read whole each poll.
+	ReadFrom(ctx context.Context, path string, off int64) (data []byte, next int64, err error)
 	// List returns the sorted basenames in dir. An empty directory yields an
 	// empty slice and a nil error; a missing directory is an error.
 	List(ctx context.Context, dir string) ([]string, error)

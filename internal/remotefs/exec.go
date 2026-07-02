@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
@@ -46,6 +47,39 @@ func (e *ExecFS) ReadFile(ctx context.Context, path string) ([]byte, error) {
 		return nil, e.statusErr("read", path, res)
 	}
 	return res.Stdout, nil
+}
+
+// ReadFrom reads path from byte off to EOF (or the whole file if it shrank below off) via
+// `wc -c` (size, for rotation detection) + `tail -c +N` (the new tail). next is the EOF position
+// after the read. Both are BusyBox-safe.
+func (e *ExecFS) ReadFrom(ctx context.Context, path string, off int64) ([]byte, int64, error) {
+	szRes, err := e.r.Run(ctx, "wc -c < "+remote.ShellQuote(path), nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("execfs readfrom %s: %w", path, err)
+	}
+	if szRes.ExitCode != 0 {
+		return nil, 0, e.statusErr("readfrom", path, szRes)
+	}
+	size, perr := strconv.ParseInt(strings.TrimSpace(string(szRes.Stdout)), 10, 64)
+	if perr != nil {
+		return nil, 0, fmt.Errorf("execfs readfrom %s: bad size %q", path, szRes.Stdout)
+	}
+	start := off
+	if size < off {
+		start = 0 // rotated/truncated → whole file
+	}
+	if start >= size {
+		return nil, size, nil // nothing new
+	}
+	// tail -c +N is 1-indexed by byte, so bytes [start..EOF] = tail -c +(start+1).
+	res, err := e.r.Run(ctx, "tail -c +"+strconv.FormatInt(start+1, 10)+" "+remote.ShellQuote(path), nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("execfs readfrom %s: %w", path, err)
+	}
+	if res.ExitCode != 0 {
+		return nil, 0, e.statusErr("readfrom", path, res)
+	}
+	return res.Stdout, start + int64(len(res.Stdout)), nil
 }
 
 func (e *ExecFS) List(ctx context.Context, dir string) ([]string, error) {

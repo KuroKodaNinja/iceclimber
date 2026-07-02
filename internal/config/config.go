@@ -79,6 +79,11 @@ type Config struct {
 	// so an agent's parallel requests / subagents don't queue behind a slow install). Empty/0 =
 	// the default (see Concurrency); clamped to >= 1. See PROTOCOL.md "Concurrency".
 	DispatchConcurrency int `yaml:"dispatch_concurrency"`
+	// LogMaxBytes / LogKeep bound the controller log sinks (activity, egress audit, the bridged
+	// agent stream): each rotates at LogMaxBytes and keeps LogKeep generations. 0 = the built-in
+	// defaults (see internal/logfile: 8 MiB × 4). Applies to the sandbox session.log too.
+	LogMaxBytes int64 `yaml:"log_max_bytes"`
+	LogKeep     int   `yaml:"log_keep"`
 }
 
 // DefaultDispatchConcurrency is the worker-pool size applied when dispatch_concurrency is unset.
@@ -292,6 +297,22 @@ func (c *Config) validate(selectSandbox string) error {
 	}
 	if c.EgressProxyPort < 0 || c.EgressProxyPort > 65535 {
 		return fmt.Errorf("egress_proxy_port %d out of range (0 = default)", c.EgressProxyPort)
+	}
+	// Surface a bad maildir_retention here rather than silently falling back to the default at
+	// use (Retention()) — a typo like "1hr" would otherwise disable nothing yet mislead.
+	if c.MaildirRetention != "" {
+		if _, err := time.ParseDuration(c.MaildirRetention); err != nil {
+			return fmt.Errorf("maildir_retention %q is not a valid duration (e.g. \"1h\", \"30m\", \"0\"): %w", c.MaildirRetention, err)
+		}
+	}
+	if c.DispatchConcurrency < 0 {
+		return fmt.Errorf("dispatch_concurrency %d must be >= 0 (0 = default %d)", c.DispatchConcurrency, DefaultDispatchConcurrency)
+	}
+	if c.LogMaxBytes < 0 {
+		return fmt.Errorf("log_max_bytes %d must be >= 0 (0 = default)", c.LogMaxBytes)
+	}
+	if c.LogKeep < 0 {
+		return fmt.Errorf("log_keep %d must be >= 0 (0 = default)", c.LogKeep)
 	}
 	for i, d := range c.Network.AllowedDomains {
 		if err := egress.ValidateHostPattern(d.Pattern); err != nil {
