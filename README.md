@@ -9,7 +9,8 @@ link. A controller you run *outside* the sandbox provisions language runtimes
 (**Python, JavaScript/Node, Java**), packages, and web data on the agent's behalf —
 and **you** stay in the loop, approving each operation.
 
-> **Want to build something with it?** → **[USAGE.md](USAGE.md)** is the
+> **New here?** → **[QUICKSTART.md](QUICKSTART.md)**: `iceclimber setup` walks a
+> sandbox from zero to serving in one command. **[USAGE.md](USAGE.md)** is the
 > start-to-finish guide: point Popo at a box, wire your agent, and let it build.
 
 One Go binary, two roles, named after the Ice Climbers:
@@ -349,6 +350,7 @@ shell: `iceclimber completion bash|zsh|fish --help` has install instructions.
 
 | Command | What it does |
 |---|---|
+| `setup` | **Guided first run**: config → trust → bootstrap → optional shell/agent → console, each step idempotent and skippable. Headless form: `setup --host H --user U --yes` |
 | `status` | Liveness (heartbeat freshness), queue depth (awaiting service + **awaiting collection** — a real uncollected count: the agent collects each response on read and Popo GCs collected/abandoned pairs, with a configurable `maildir_retention` sweep), **health-probed** runtimes (✓ runs / ✗ won't), and the sandbox's **capabilities self-report** — the host platform (written at bootstrap) and the installed agent's identity/version/auth (`Claude Code 1.2.3 · auth ✓ · linux/arm64 (glibc)`, or `no agent yet · …` before one is installed). The console header shows the SSH link and heartbeat health as **separate** signals, so a connected-but-wedged Popo reads as stale, not green |
 | `logs -f` | Tail Popo's activity (`[POPO]`) merged with the egress audit trail (`[EGRESS]`) and the agent's stream (`[NANA]`, bridged automatically; `--agent-log <file>` overrides). Filter with `--since 10m` (applies to `[POPO]`/`[EGRESS]`), `--kind serviced,denied` (activity kinds), and `--only popo\|nana\|egress` (sources) |
 | `tui` | A live split-pane `[POPO]`/`[NANA]` dashboard (`[NANA]` bridged automatically; `--snapshot` for one static frame) |
