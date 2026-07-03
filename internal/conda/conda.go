@@ -36,6 +36,7 @@ type Config struct {
 	Libc            string
 	ControllerConda string       // operator's conda on the controller (default "conda")
 	HTTPClient      *http.Client // optional; nil → a default client for relay package downloads
+	CacheDir        string       // shared artifact cache for pinned package downloads ("" → the relay default)
 }
 
 // Manager installs conda packages into one conda env.

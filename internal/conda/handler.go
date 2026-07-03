@@ -24,6 +24,7 @@ type Deps struct {
 	Libc            string
 	CondaBin        string // sandbox conda binary (from the probe)
 	ControllerConda string // operator's conda on the controller (relay tier; default "conda")
+	CacheDir        string // shared artifact cache for the relay tier's pinned downloads
 	Progress        progress.Func
 }
 
@@ -59,7 +60,7 @@ func Run(ctx context.Context, d Deps, pythonVersion string, specs []pkg.Spec, ti
 			Runner: d.Runner, FS: d.FS, CondaBin: d.CondaBin,
 			EnvPrefix: python.CondaEnvPrefix(d.Root, pythonVersion),
 			Root:      d.Root, Progress: d.Progress, ExtraArgs: extraArgs,
-			Arch: d.Arch, Libc: d.Libc, ControllerConda: d.ControllerConda,
+			Arch: d.Arch, Libc: d.Libc, ControllerConda: d.ControllerConda, CacheDir: d.CacheDir,
 		})
 		return m.RelayInstall(ctx, specs, python.MinorOf(pythonVersion))
 	}

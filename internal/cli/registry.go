@@ -243,6 +243,7 @@ func condaDeps(sess *session, pr progress.Func) conda.Deps {
 		Libc:            sess.fp.Libc.Family,
 		CondaBin:        sess.condaPath(),
 		ControllerConda: sess.controllerConda,
+		CacheDir:        sess.cacheDir,
 		Progress:        pr,
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/KuroKodaNinja/iceclimber/internal/relay"
 )
 
 // Adoptium (Eclipse Temurin) publishes a queryable assets API with per-build
@@ -47,7 +49,7 @@ func (i *Installer) resolve(ctx context.Context, feature string) (resolved, erro
 	feature = strings.TrimSpace(feature)
 	url := fmt.Sprintf("%s/assets/latest/%s/hotspot?architecture=%s&image_type=jdk&os=%s",
 		adoptiumAPI, feature, arch, apiOS)
-	body, _, err := i.httpGet(ctx, url)
+	body, _, err := relay.HTTPGet(ctx, i.cfg.HTTPClient, url)
 	if err != nil {
 		return resolved{}, fmt.Errorf("query Adoptium API: %w", err)
 	}

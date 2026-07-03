@@ -17,6 +17,7 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
 	"github.com/KuroKodaNinja/iceclimber/internal/progress"
+	"github.com/KuroKodaNinja/iceclimber/internal/relay"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 )
@@ -159,12 +160,27 @@ func (m *Manager) downloadChannel(ctx context.Context, localChan string, recs []
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, err
 		}
-		sum, err := downloadFile(ctx, client, url, filepath.Join(dir, fn))
+		dest := filepath.Join(dir, fn)
+		if r.SHA256 != "" {
+			// Pinned: fetch through the shared relay cache (per-asset flock, sha256-verified
+			// on hits and downloads), then copy into the transient channel. A fleet
+			// re-provisioning N sandboxes downloads each package once, not N times.
+			pin := strings.ToLower(r.SHA256)
+			f := &relay.Fetcher{CacheDir: m.cfg.CacheDir, Client: client, Progress: nil}
+			cached, err := f.Fetch(ctx, relay.Asset{Name: sub + "-" + fn, URL: url, SHA256: pin})
+			if err != nil {
+				return nil, fmt.Errorf("download %s: %w", fn, err)
+			}
+			if err := copyFile(cached, dest); err != nil {
+				return nil, fmt.Errorf("stage %s: %w", fn, err)
+			}
+			shas[r.Name] = pin
+			continue
+		}
+		// md5-only legacy record: no validatable pin, so download directly (uncached).
+		sum, err := downloadFile(ctx, client, url, dest)
 		if err != nil {
 			return nil, fmt.Errorf("download %s: %w", fn, err)
-		}
-		if r.SHA256 != "" && !strings.EqualFold(r.SHA256, sum) {
-			return nil, fmt.Errorf("sha256 mismatch for %s: solve %s, downloaded %s", fn, r.SHA256, sum)
 		}
 		shas[r.Name] = sum
 	}
@@ -472,6 +488,24 @@ func synthesizeRepodata(subdir string, recs []condaRecord) ([]byte, error) {
 		}
 	}
 	return json.MarshalIndent(rd, "", "  ")
+}
+
+// copyFile copies a cached artifact into the transient channel dir.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // downloadFile GETs url into dest and returns the sha256 of the bytes written.

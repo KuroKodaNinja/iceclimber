@@ -9,19 +9,12 @@ package java
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"net/http"
-	"os"
 	"path"
-	"path/filepath"
-	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/progress"
+	"github.com/KuroKodaNinja/iceclimber/internal/relay"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 )
@@ -70,13 +63,13 @@ func (i *Installer) Install(ctx context.Context, version string) (Result, error)
 	target := i.targetDir(r.FullVersion)
 	bin := path.Join(target, "bin", "java")
 
-	if ok, err := i.exists(ctx, bin); err != nil {
+	if ok, err := relay.Exists(ctx, i.cfg.FS, bin); err != nil {
 		return Result{}, err
 	} else if ok {
 		return Result{Version: r.FullVersion, Path: bin, AlreadyInstalled: true}, nil
 	}
 
-	tarball, err := i.download(ctx, r)
+	tarball, err := i.fetch(ctx, r)
 	if err != nil {
 		return Result{}, err
 	}
@@ -97,105 +90,16 @@ func (i *Installer) targetDir(full string) string {
 	return path.Join(i.cfg.Root, "runtimes", "java", fmt.Sprintf("%s-%s-%s", full, i.cfg.Arch, i.cfg.Libc))
 }
 
-func (i *Installer) exists(ctx context.Context, p string) (bool, error) {
-	names, err := i.cfg.FS.List(ctx, path.Dir(p))
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		return false, err
-	}
-	base := path.Base(p)
-	for _, n := range names {
-		if n == base {
-			return true, nil
-		}
-	}
-	return false, nil
+// fetch downloads the resolved asset through the shared relay cache (per-asset flock;
+// sha256 verified on cache hits and downloads alike).
+func (i *Installer) fetch(ctx context.Context, r resolved) (string, error) {
+	f := &relay.Fetcher{CacheDir: i.cfg.CacheDir, Client: i.cfg.HTTPClient, Progress: i.cfg.Progress}
+	return f.Fetch(ctx, relay.Asset{Name: r.AssetName, URL: r.URL, SHA256: r.SHA256})
 }
 
 // verify runs the freshly installed java over the exec channel. `java -version`
 // prints to stderr and exits 0; we only check the exit code.
 func (i *Installer) verify(ctx context.Context, bin string) error {
-	res, err := i.cfg.Runner.Run(ctx, remote.ShellQuote(bin)+" -version", nil)
-	if err != nil {
-		return err
-	}
-	if res.ExitCode != 0 {
-		return fmt.Errorf("exit %d: %s", res.ExitCode, strings.TrimSpace(string(res.Stderr)))
-	}
-	return nil
+	return relay.VerifyRun(ctx, i.cfg.Runner, remote.ShellQuote(bin)+" -version")
 }
 
-// download fetches the asset into CacheDir (keyed by name) and verifies its
-// SHA256, reusing a valid cached copy.
-func (i *Installer) download(ctx context.Context, r resolved) (string, error) {
-	cache := i.cfg.CacheDir
-	if cache == "" {
-		cache = filepath.Join(os.TempDir(), "iceclimber-cache")
-	}
-	if err := os.MkdirAll(cache, 0o755); err != nil {
-		return "", err
-	}
-	dst := filepath.Join(cache, r.AssetName)
-	if sum, err := fileSHA256(dst); err == nil && sum == r.SHA256 {
-		return dst, nil
-	}
-
-	body, length, err := i.httpGet(ctx, r.URL)
-	if err != nil {
-		return "", fmt.Errorf("download %s: %w", r.AssetName, err)
-	}
-	defer body.Close()
-
-	tmp := dst + ".tmp"
-	out, err := os.Create(tmp)
-	if err != nil {
-		return "", err
-	}
-	h := sha256.New()
-	src := i.cfg.Progress.Reader(body, "downloading", length)
-	if _, err := io.Copy(io.MultiWriter(out, h), src); err != nil {
-		out.Close()
-		os.Remove(tmp)
-		return "", err
-	}
-	out.Close()
-	if got := hex.EncodeToString(h.Sum(nil)); got != r.SHA256 {
-		os.Remove(tmp)
-		return "", fmt.Errorf("sha256 mismatch for %s: got %s, want %s", r.AssetName, got, r.SHA256)
-	}
-	if err := os.Rename(tmp, dst); err != nil {
-		return "", err
-	}
-	return dst, nil
-}
-
-func (i *Installer) httpGet(ctx context.Context, url string) (io.ReadCloser, int64, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, 0, err
-	}
-	resp, err := i.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, 0, fmt.Errorf("GET %s: %s", url, resp.Status)
-	}
-	return resp.Body, resp.ContentLength, nil
-}
-
-func fileSHA256(p string) (string, error) {
-	f, err := os.Open(p)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
