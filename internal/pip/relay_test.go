@@ -8,11 +8,17 @@ import (
 )
 
 func TestPlatformTags(t *testing.T) {
-	if got := platformTags("aarch64", "musl"); got[0] != "musllinux_1_2_aarch64" {
-		t.Errorf("musl tags = %v", got)
+	// musl must NOT accept bare linux_<arch>: those wheels are near-universally
+	// glibc-linked and would import-fail on a musl box.
+	musl := platformTags("aarch64", "musl")
+	if musl[0] != "musllinux_1_2_aarch64" || musl[len(musl)-1] == "linux_aarch64" {
+		t.Errorf("musl tags = %v", musl)
 	}
-	if got := platformTags("x86_64", "glibc"); got[0] != "manylinux_2_28_x86_64" {
-		t.Errorf("glibc tags = %v", got)
+	// glibc must accept bare linux_<arch> (last), like native pip on a glibc box —
+	// some indexes ship only legacy-tagged wheels (e.g. PyTorch's CPU builds).
+	glibc := platformTags("x86_64", "glibc")
+	if glibc[0] != "manylinux_2_28_x86_64" || glibc[len(glibc)-1] != "linux_x86_64" {
+		t.Errorf("glibc tags = %v", glibc)
 	}
 }
 

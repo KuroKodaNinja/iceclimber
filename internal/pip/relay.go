@@ -138,9 +138,15 @@ func downloadArgs(specs []pkg.Spec, minor, arch, libc, indexURL, dest string, ex
 func platformTags(arch, libc string) []string {
 	switch libc {
 	case "musl":
+		// No bare linux_<arch> here: legacy-tagged wheels are near-universally
+		// glibc-linked and would import-fail on a musl box.
 		return []string{"musllinux_1_2_" + arch, "musllinux_1_1_" + arch}
 	case "glibc":
-		return []string{"manylinux_2_28_" + arch, "manylinux_2_17_" + arch, "manylinux2014_" + arch}
+		// linux_<arch> last: native pip on a glibc box accepts legacy bare-linux
+		// wheels, and some indexes ship only those (e.g. PyTorch's CPU wheels).
+		// Without it pip silently resolves a different build from the fallback
+		// index — for torch, the CUDA one, dragging in triton + nvidia_* deps.
+		return []string{"manylinux_2_28_" + arch, "manylinux_2_17_" + arch, "manylinux2014_" + arch, "linux_" + arch}
 	default:
 		return []string{"linux_" + arch}
 	}
