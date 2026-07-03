@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/huh"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
+	"github.com/KuroKodaNinja/iceclimber/internal/audit"
 	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/tail"
 )
@@ -229,6 +231,7 @@ type Console struct {
 	sandboxID string
 	events    <-chan tea.Msg
 	nana      *tail.Reader
+	auditTail *tail.Reader // audit-log tail for live [EGRESS] lines in the [POPO] pane (nil = off)
 	ops       OpRunner
 	popoLines []popoLine
 	nanaLines []string
@@ -307,6 +310,18 @@ func NewConsole(sandboxID string, events <-chan tea.Msg, agentLog string, ops Op
 	c.spin = spinner.New(spinner.WithSpinner(spinner.Dot))
 	if agentLog != "" {
 		c.nana = tail.NewReader(agentLog)
+	}
+	return c
+}
+
+// WithEgressLog tails the controller-side egress audit log and renders each new entry
+// as a live [EGRESS] line in the [POPO] pane — the console parity for `iceclimber logs`'
+// merged feed. Live-only by design: the reader seeds to EOF (the pane shows this run's
+// activity, like [POPO]); history is `iceclimber logs`' job.
+func (c Console) WithEgressLog(path string) Console {
+	if path != "" {
+		c.auditTail = tail.NewReader(path)
+		_ = c.auditTail.History() // seed to EOF — live entries only
 	}
 	return c
 }
@@ -507,6 +522,11 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if c.nana != nil {
 			for _, l := range c.nana.Poll() {
 				c.addNana(l)
+			}
+		}
+		if c.auditTail != nil {
+			for _, l := range c.auditTail.Poll() {
+				c.addEgress(l)
 			}
 		}
 		return c, tick()
@@ -1023,6 +1043,22 @@ func (c *Console) applyEvent(e activity.Event) {
 	// tracks real serviced/approved/denied activity, not connection churn (else it reads as a
 	// meaningless countdown from startup).
 	c.popoLines = append(c.popoLines, eventToLine(e))
+	if len(c.popoLines) > maxLines {
+		c.popoLines = c.popoLines[len(c.popoLines)-maxLines:]
+	}
+}
+
+// addEgress renders one audit-log JSONL line as a live [EGRESS] line in the [POPO] pane
+// (the console parity for `iceclimber logs`). Garbled lines are skipped.
+func (c *Console) addEgress(raw string) {
+	var e audit.Entry
+	if json.Unmarshal([]byte(raw), &e) != nil {
+		return
+	}
+	c.popoLines = append(c.popoLines, popoLine{
+		plain: shortTime(e.TS) + "  [EGRESS] " + audit.Body(e),
+		style: warnStyle,
+	})
 	if len(c.popoLines) > maxLines {
 		c.popoLines = c.popoLines[len(c.popoLines)-maxLines:]
 	}

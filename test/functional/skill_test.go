@@ -3,6 +3,7 @@
 package functional
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -43,5 +44,21 @@ func TestSkillAndStatus(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("status missing %q:\n%s", want, out)
 		}
+	}
+
+	// --json is the machine-readable shape (and the schema the fleet table will
+	// aggregate, plan §14.6): parseable, same facts.
+	jout := runIceclimber(t, "status", "--json", "--config", cfg, "--transport", "sftp")
+	var parsed struct {
+		Sandbox   string   `json:"sandbox"`
+		Root      string   `json:"root"`
+		Heartbeat string   `json:"heartbeat_seq"`
+		Runtimes  []string `json:"runtimes"`
+	}
+	if err := json.Unmarshal(jout, &parsed); err != nil {
+		t.Fatalf("status --json unparseable: %v\n%s", err, jout)
+	}
+	if parsed.Sandbox == "" || parsed.Root == "" || parsed.Heartbeat == "" || len(parsed.Runtimes) == 0 {
+		t.Errorf("status --json missing facts: %+v", parsed)
 	}
 }

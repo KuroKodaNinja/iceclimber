@@ -176,6 +176,37 @@ func TestFlow_NanaPaneHint(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 }
 
+// TestFlow_EgressFeedLine: with an egress log wired, a new audit entry appended while the
+// console runs renders live as an [EGRESS] line in the [POPO] pane (parity with
+// `iceclimber logs`). Pre-existing entries are NOT shown (the reader seeds to EOF —
+// live-only, like the [POPO] pane; history is `iceclimber logs`' job).
+func TestFlow_EgressFeedLine(t *testing.T) {
+	auditLog := filepath.Join(t.TempDir(), "audit.jsonl")
+	if err := os.WriteFile(auditLog,
+		[]byte(`{"ts":"2026-06-28T11:00:00Z","type":"web.fetch","url":"https://old.example/x","method":"GET","venue":"controller","decision":"allow","status_code":200,"outcome":"ok"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	model := NewConsole("sbx", make(chan tea.Msg), "", newRecordOps()).WithEgressLog(auditLog)
+	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(120, 40))
+	waitText(t, tm, "i install")
+
+	// Append a live entry → it must appear, [EGRESS]-tagged.
+	f, err := os.OpenFile(auditLog, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString(`{"ts":"2026-06-28T12:00:00Z","type":"web.fetch","url":"https://xkcd.com/info.0.json","method":"GET","venue":"controller","decision":"allow","status_code":200,"outcome":"ok"}` + "\n")
+	f.Close()
+	waitAll(t, tm, "[EGRESS]", "xkcd.com", "allow")
+
+	c := finalConsole(t, tm)
+	for _, l := range c.popoLines {
+		if strings.Contains(l.plain, "old.example") {
+			t.Error("pre-existing audit history must not be re-dumped into the live pane")
+		}
+	}
+}
+
 func TestFlow_NanaPaneTailsAgentLog(t *testing.T) {
 	// The console tails the (bridged) agent-log file and renders it in [NANA] — the
 	// same path whether the file is the auto-bridged default or an explicit --agent-log.

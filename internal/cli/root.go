@@ -78,6 +78,7 @@ func newRootCmd() *cobra.Command {
 		newLogsCmd(),
 		newTuiCmd(),
 		newShellCmd(),
+		newCacheCmd(),
 	)
 	// pending/approve/deny predate the `egress` group; they stay as hidden top-level
 	// aliases so existing scripts keep working (the group is the documented surface).
@@ -85,7 +86,6 @@ func newRootCmd() *cobra.Command {
 		alias.Hidden = true
 		root.AddCommand(alias)
 	}
-	root.AddCommand(stubCommands()...)
 	return root
 }
 

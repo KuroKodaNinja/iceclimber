@@ -5,6 +5,7 @@ package audit
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -67,6 +68,32 @@ func (l *Logger) Close() error {
 		return nil
 	}
 	return l.w.Close()
+}
+
+// Body renders the human one-line text of an entry: method + target URL, the venue it
+// was served from (controller|sandbox-exec), the controller decision (allow|held|denied),
+// and the outcome (status code or error). Shared by `iceclimber logs` ([EGRESS] lines),
+// the console's live feed, and the egress panel's recent-fetch list — one rendering, no
+// three-way drift.
+func Body(e Entry) string {
+	method := e.Method
+	if method == "" {
+		method = "GET"
+	}
+	head := fmt.Sprintf("%-4s %s", method, e.URL)
+	if e.Venue != "" {
+		head += "  (" + e.Venue + ")"
+	}
+	parts := []string{head}
+	if e.Decision != "" {
+		parts = append(parts, e.Decision)
+	}
+	if e.Outcome == "error" {
+		parts = append(parts, "error")
+	} else if e.StatusCode > 0 {
+		parts = append(parts, fmt.Sprintf("%d", e.StatusCode))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // Read replays the audit log at path into its entries (skipping blank/garbled lines). A missing

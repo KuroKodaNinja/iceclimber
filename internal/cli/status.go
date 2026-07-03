@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path"
 	"strings"
@@ -34,6 +35,19 @@ func newStatusCmd() *cobra.Command {
 
 			s := collectStatus(ctx, sess.fs, sess.runner, sess.tree)
 			w := cmd.OutOrStdout()
+			// --json: the machine-readable shape (also the schema a fleet status table
+			// row aggregates — see plan §14.6).
+			if jsonOutput {
+				if s.Runtimes == nil {
+					s.Runtimes = []string{}
+				}
+				return json.NewEncoder(w).Encode(struct {
+					Sandbox   string `json:"sandbox"`
+					Root      string `json:"root"`
+					Transport string `json:"transport"`
+					statusSnapshot
+				}{cfg.SandboxID, sess.tree.Root, sess.transport, s})
+			}
 			fmt.Fprintf(w, "sandbox:   %s  (%s, transport %s)\n", cfg.SandboxID, sess.tree.Root, sess.transport)
 			if s.HeartbeatSeq == "" {
 				fmt.Fprintln(w, "heartbeat: none yet — run `iceclimber serve`")
@@ -65,12 +79,12 @@ func newStatusCmd() *cobra.Command {
 // statusSnapshot is the sandbox status gathered from the protocol tree. Shared by
 // the `status` command and the console's live status panel.
 type statusSnapshot struct {
-	HeartbeatSeq string
-	HeartbeatAge string // e.g. "3s" ("" if no parseable timestamp)
-	QueueOut     int    // requests awaiting service (outbox/new)
-	QueueIn      int    // responses delivered but not yet collected by the agent (inbox/new)
-	Runtimes     []string
-	Caps         string // e.g. "Claude Code 1.2.3 · auth ✓ · linux/arm64 (glibc)", or "" if not reported
+	HeartbeatSeq string   `json:"heartbeat_seq"`       // "" = no heartbeat yet
+	HeartbeatAge string   `json:"heartbeat_age"`       // e.g. "3s" ("" if no parseable timestamp)
+	QueueOut     int      `json:"awaiting_service"`    // requests awaiting service (outbox/new)
+	QueueIn      int      `json:"awaiting_collection"` // responses delivered but not yet collected (inbox/new)
+	Runtimes     []string `json:"runtimes"`
+	Caps         string   `json:"agent"` // e.g. "Claude Code 1.2.3 · auth ✓ · linux/arm64 (glibc)", or "" if not reported
 }
 
 // collectStatus reads liveness, queue depth, installed runtimes (health-probed, all

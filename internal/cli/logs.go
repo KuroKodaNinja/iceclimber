@@ -231,30 +231,9 @@ func eventBody(e activity.Event) string {
 	}
 }
 
-// auditBody renders the human text of an egress audit entry: method + target URL, the
-// venue it was served from (controller|sandbox-exec), the controller decision
-// (allow|held|denied), and the outcome (status code or error). Shared by logs ([EGRESS])
-// and the TUI egress panel's recent-fetch list.
-func auditBody(e audit.Entry) string {
-	method := e.Method
-	if method == "" {
-		method = "GET"
-	}
-	head := fmt.Sprintf("%-4s %s", method, e.URL)
-	if e.Venue != "" {
-		head += "  (" + e.Venue + ")"
-	}
-	parts := []string{head}
-	if e.Decision != "" {
-		parts = append(parts, e.Decision)
-	}
-	if e.Outcome == "error" {
-		parts = append(parts, "error")
-	} else if e.StatusCode > 0 {
-		parts = append(parts, fmt.Sprintf("%d", e.StatusCode))
-	}
-	return strings.Join(parts, " · ")
-}
+// auditBody delegates to the shared renderer (audit.Body) — one rendering for the CLI
+// feed, the console feed, and the egress panel.
+func auditBody(e audit.Entry) string { return audit.Body(e) }
 
 func shortTime(ts string) string {
 	if t, err := time.Parse(time.RFC3339, ts); err == nil {

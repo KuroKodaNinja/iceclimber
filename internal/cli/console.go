@@ -813,7 +813,8 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	defer w.stop()
 
 	model := tui.NewConsole(cfg.SandboxID, w.events, w.agentLogPath, w.ops).
-		WithSeedCounts(w.seed.Served, w.seed.Approved, w.seed.Denied, w.seed.LastAction)
+		WithSeedCounts(w.seed.Served, w.seed.Approved, w.seed.Denied, w.seed.LastAction).
+		WithEgressLog(auditPath(cfg))
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 	w.stop() // stop serving now (defer is the backstop); a pending approval fails safe via done
 	return err
