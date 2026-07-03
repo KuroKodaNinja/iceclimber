@@ -82,10 +82,17 @@ func TestRenderEnv(t *testing.T) {
 }
 
 func TestRenderRun(t *testing.T) {
-	got := renderRun(Claude, "/r/agent/claude", "/r/agent/claude/claude", "/r/skill/NANA.md", "/r/popo")
+	got := renderRun(Claude, "/r/agent/claude", "/r/agent/claude/claude", "/r/skill/NANA.md", "/r/popo", "/r")
 	for _, want := range []string{
 		"#!/bin/sh",
-		`. "$self/env.sh"`,        // sources auth/env when present
+		`. "$self/env.sh"`, // sources auth/env when present
+		// sources the proxy-mode egress env (HTTPS_PROXY + CA trust) when present, so the
+		// agent's native tools route through the gated proxy; a no-op in relay mode. The
+		// || true guards set -e against the sourced file's last-command status; the export
+		// guards set -u (egress-env.sh dereferences ICECLIMBER_HOME; env.sh may be absent).
+		`export ICECLIMBER_HOME="$root"`,
+		`{ [ -f "$root/egress-env.sh" ] && . "$root/egress-env.sh"; } || true`,
+		`root='/r'`,
 		`nana='/r/skill/NANA.md'`, // references NANA.md
 		`set -- '--append-system-prompt' "$(cat "$nana")" "$@"`, // NANA as system context, then passthrough
 		`bin='/r/agent/claude/claude'`,
@@ -113,7 +120,7 @@ func TestRenderRun(t *testing.T) {
 // block (only agents that declare a parseable stream mode opt in).
 func TestRenderRun_NoStreamArgs(t *testing.T) {
 	d := Descriptor{Name: "x", DisplayName: "X", Bin: "x", PrintFlags: []string{"-p"}, SystemPromptFlag: "--sys"}
-	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md", "/r/popo")
+	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md", "/r/popo", "/r")
 	if strings.Contains(got, "have_fmt") || strings.Contains(got, "output-format") {
 		t.Errorf("agent without StreamArgs should not inject a stream block:\n%s", got)
 	}
@@ -123,7 +130,7 @@ func TestRenderRun_NoStreamArgs(t *testing.T) {
 // still gets the tty-gated session.log capture.
 func TestRenderRun_NoSystemPromptFlag(t *testing.T) {
 	d := Descriptor{Name: "x", DisplayName: "X", Bin: "x"}
-	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md", "/r/popo")
+	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md", "/r/popo", "/r")
 	if strings.Contains(got, "append-system-prompt") || strings.Contains(got, "nana=") {
 		t.Errorf("agent without a system-prompt flag should not wire NANA in:\n%s", got)
 	}

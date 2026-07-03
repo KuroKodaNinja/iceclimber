@@ -173,7 +173,10 @@ Bootstrap sets up **only the basic iceclimber sandbox**: it fingerprints the box
 `ping`/`pong` smoke test, drops `NANA.md` + `PROTOCOL.md`, relays the `popo` client to
 `<root>/popo`, and (in proxy egress mode) installs the trust config. Language runtimes
 are a **separate** concern — bootstrap never installs or chooses them. Then wire
-`NANA.md` into your agent's instructions (see the Nana side).
+`NANA.md` into your agent's instructions (see the Nana side). `NANA.md` is **rendered for
+the sandbox's egress mode**: in proxy mode it tells the agent native tools (pip/npm/git)
+work through the gated proxy (runtimes still via `popo`); in relay mode it forbids native
+network tools outright. `skill print` shows the same render your config produces.
 
 Re-running `bootstrap` is **safe and idempotent** — it never touches `<root>/runtimes`,
 so already-installed runtimes/packages (which take a while to transfer) are preserved
@@ -186,6 +189,14 @@ The console and headless serve **detect whether a box is bootstrapped** (they lo
 console parks in a "not bootstrapped — press **b** to set it up" state (no background
 proxy, no reconnect loop, no password prompt), and `serve` fails fast with *"sandbox … is
 not bootstrapped — run `iceclimber bootstrap` first"* instead of a raw maildir error.
+
+**One serving process per sandbox.** `serve` and the console hold a per-sandbox
+single-writer lock for their whole run — a second serve/console fails fast naming the
+first (pid + role), so two dispatchers can never double-service one maildir. Mutating
+one-shots (`install`, `bootstrap`, `agent install`, `maven build`) are likewise exclusive
+among themselves, but **may run alongside an active serve** (you'll see a notice) — proxy
+egress requires that coexistence, e.g. `maven build` online through the serving proxy. A
+crashed process never wedges the sandbox: the lock dies with its holder.
 
 ### 4. Install runtimes (managed or system)
 
@@ -329,15 +340,23 @@ operation the agent requests, with context, and you approve inline:
 
 ### Other Popo commands
 
+Global flags on every command: `--config` (default `iceclimber.yaml`), `--sandbox`
+(a guard **and a selector** — with the default `--config` it also finds
+`iceclimber-<id>.yaml` in the cwd or `~/.iceclimber/<id>/config.yaml`, so one directory
+can drive several sandboxes; `all`/globs are reserved for the fleet phase),
+`--transport auto|sftp|exec`, and `--json` (where supported). Tab completion for your
+shell: `iceclimber completion bash|zsh|fish --help` has install instructions.
+
 | Command | What it does |
 |---|---|
 | `status` | Liveness (heartbeat freshness), queue depth (awaiting service + **awaiting collection** — a real uncollected count: the agent collects each response on read and Popo GCs collected/abandoned pairs, with a configurable `maildir_retention` sweep), **health-probed** runtimes (✓ runs / ✗ won't), and the sandbox's **capabilities self-report** — the host platform (written at bootstrap) and the installed agent's identity/version/auth (`Claude Code 1.2.3 · auth ✓ · linux/arm64 (glibc)`, or `no agent yet · …` before one is installed). The console header shows the SSH link and heartbeat health as **separate** signals, so a connected-but-wedged Popo reads as stale, not green |
 | `logs -f` | Tail Popo's activity (`[POPO]`) merged with the egress audit trail (`[EGRESS]`) and the agent's stream (`[NANA]`, bridged automatically; `--agent-log <file>` overrides). Filter with `--since 10m` (applies to `[POPO]`/`[EGRESS]`), `--kind serviced,denied` (activity kinds), and `--only popo\|nana\|egress` (sources) |
 | `tui` | A live split-pane `[POPO]`/`[NANA]` dashboard (`[NANA]` bridged automatically; `--snapshot` for one static frame) |
-| `pending` / `approve <id>` / `deny <id>` | Async egress approval (when not serving on a TTY) |
-| `install python <minor>` · `install pip <pkg> --python <minor>` | Provision Python directly, without the agent. `--pip-arg` (repeatable) passes an allowlisted pip flag through, e.g. `--pip-arg=--index-url --pip-arg=https://download.pytorch.org/whl/cpu` |
-| `install node <version>` · `install npm <pkg> --node <version>` | Provision Node/npm directly |
-| `install java <version>` | Provision a Temurin JDK (javac bundled) directly |
+| `egress pending` / `egress approve <id>` / `egress deny <id>` | Async egress approval (when not serving on a TTY). The bare `pending`/`approve`/`deny` remain as hidden aliases |
+| `egress rules list` / `egress rules forget <pattern>` | Inspect + remove the persisted allow/deny rules (the same store the console's egress panel manages) |
+| `install python [minor]` · `install pip <pkg> --python <minor>` | Provision Python directly, without the agent. `--pip-arg` (repeatable) passes an allowlisted pip flag through, e.g. `--pip-arg=--index-url --pip-arg=https://download.pytorch.org/whl/cpu` |
+| `install node [version]` · `install npm <pkg> --node <version>` | Provision Node/npm directly |
+| `install java [version]` | Provision a Temurin JDK (javac bundled) directly. Runtime versions are optional everywhere — omitted (or `latest`) resolves to the recommended line |
 | `install maven <group:artifact:version> --java <version>` | Resolve JVM deps into a classpath (Coursier) |
 | `install shell` | Relay a portable static **bash** into the sandbox (readline history + tab-completion) for a comfortable `iceclimber shell` |
 | `shell` | Open an **interactive shell** in the sandbox over iceclimber's own SSH transport (bastion/password/host-key handling included), with the environment set up: `ICECLIMBER_HOME`, `popo`/`nana` + installed runtimes on `PATH`, egress proxy/CA trust. Drops into the installed bash (falls back to `/bin/sh`). `-c '<cmd>'` runs one command non-interactively (scriptable) |

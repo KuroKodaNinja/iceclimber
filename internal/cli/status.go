@@ -15,7 +15,6 @@ import (
 )
 
 func newStatusCmd() *cobra.Command {
-	var transport string
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show sandbox liveness, queue depth, runtimes, and the agent's capabilities",
@@ -60,7 +59,6 @@ func newStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	return cmd
 }
 

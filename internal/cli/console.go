@@ -795,6 +795,14 @@ func splitSpecs(s string) []string {
 // ctx.Done), and the deferred `holder.Get().Close()` backstops teardown (idempotent
 // if the supervisor already closed it).
 func runConsole(parent context.Context, cfg *config.Config, transport, agentLog string) error {
+	// Single-writer: the console is a serving process — hold the per-sandbox lock for the
+	// whole run (spanning reconnects) so a second console/serve or a concurrent mutating
+	// one-shot fails fast instead of double-servicing the maildir.
+	lk, err := acquireServeLock(cfg, "console")
+	if err != nil {
+		return err
+	}
+	defer lk.Release()
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	events := make(chan tea.Msg, 64)

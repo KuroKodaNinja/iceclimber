@@ -23,7 +23,7 @@ func newMavenCmd() *cobra.Command {
 }
 
 func newMavenBuildCmd() *cobra.Command {
-	var transport, javaVersion, mavenVersion, project string
+	var javaVersion, mavenVersion, project string
 	cmd := &cobra.Command{
 		Use:   "build [goal...]",
 		Short: "Build a sandbox Maven project (pom.xml) with mvn: air-gapped in relay mode (controller primes an offline .m2, sandbox runs `mvn -o package`); online through the proxy in egress_mode: proxy",
@@ -38,7 +38,7 @@ func newMavenBuildCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 20*time.Minute)
 			defer cancel()
-			sess, err := openSession(ctx, cfg, transport)
+			sess, err := openLockedSession(ctx, cfg, transport, "maven build")
 			if err != nil {
 				return err
 			}
@@ -60,7 +60,6 @@ func newMavenBuildCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVar(&javaVersion, "java", "", "sandbox JDK feature version for JAVA_HOME, e.g. 21 (required)")
 	cmd.Flags().StringVar(&project, "project", "", "sandbox project dir with a pom.xml (required)")
 	cmd.Flags().StringVar(&mavenVersion, "maven-version", "", "Apache Maven version to relay (default: match the controller's mvn)")

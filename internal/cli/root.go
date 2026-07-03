@@ -16,10 +16,13 @@ var (
 	sandboxID  string
 	jsonOutput bool
 	verbose    bool
+	// transport is the remote FS transport (auto|sftp|exec) — persistent because nearly
+	// every sandbox-touching command needs it (it was copy-pasted per command before).
+	transport string
 )
 
 func newRootCmd() *cobra.Command {
-	var consoleTransport, consoleAgentLog string
+	var consoleAgentLog string
 	root := &cobra.Command{
 		Use:           "iceclimber",
 		Short:         "Operate a Claude agent in an SSH-only sandbox (Popo controller / Nana sandbox)",
@@ -43,17 +46,17 @@ func newRootCmd() *cobra.Command {
 			if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
 				fmt.Fprintln(cmd.ErrOrStderr(),
 					"iceclimber: no terminal detected — running headless serve (use subcommands for other actions)")
-				return runHeadless(cmd.Context(), cfg, consoleTransport, cmd.OutOrStdout())
+				return runHeadless(cmd.Context(), cfg, transport, cmd.OutOrStdout())
 			}
-			return runConsole(cmd.Context(), cfg, consoleTransport, consoleAgentLog)
+			return runConsole(cmd.Context(), cfg, transport, consoleAgentLog)
 		},
 	}
 	pf := root.PersistentFlags()
 	pf.StringVar(&cfgFile, "config", "iceclimber.yaml", "path to the controller config")
-	pf.StringVar(&sandboxID, "sandbox", "", "sandbox id (must match the config's sandbox_id)")
+	pf.StringVar(&sandboxID, "sandbox", "", "sandbox id — a guard against the wrong box, and a selector: with the default --config it also finds iceclimber-<id>.yaml or ~/.iceclimber/<id>/config.yaml")
 	pf.BoolVar(&jsonOutput, "json", false, "machine-readable JSON output where supported")
 	pf.BoolVarP(&verbose, "verbose", "v", false, "verbose logging")
-	root.Flags().StringVar(&consoleTransport, "transport", "auto", "remote FS transport for the console: auto|sftp|exec")
+	pf.StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	root.Flags().StringVar(&consoleAgentLog, "agent-log", "", "also show the sandbox agent's output stream ([NANA])")
 
 	root.AddCommand(
@@ -68,15 +71,19 @@ func newRootCmd() *cobra.Command {
 		newMavenCmd(),
 		newAgentCmd(),
 		newWebCmd(),
-		newPendingCmd(),
-		newApproveCmd(),
-		newDenyCmd(),
+		newEgressCmd(),
 		newSkillCmd(),
 		newStatusCmd(),
 		newLogsCmd(),
 		newTuiCmd(),
 		newShellCmd(),
 	)
+	// pending/approve/deny predate the `egress` group; they stay as hidden top-level
+	// aliases so existing scripts keep working (the group is the documented surface).
+	for _, alias := range []*cobra.Command{newPendingCmd(), newApproveCmd(), newDenyCmd()} {
+		alias.Hidden = true
+		root.AddCommand(alias)
+	}
 	root.AddCommand(stubCommands()...)
 	return root
 }

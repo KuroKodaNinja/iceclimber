@@ -25,9 +25,13 @@ func newSkillPrintCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "print",
 		Short: "Print NANA.md (wire it into your sandbox agent); --protocol prints PROTOCOL.md",
-		Args:  cobra.NoArgs,
+		Long: "Print the NANA.md contract exactly as bootstrap drops it for this sandbox — its\n" +
+			"network-access section is rendered for the configured egress mode (proxy documents\n" +
+			"native-tool egress through the gated proxy; relay forbids native network tools).\n" +
+			"Without a loadable config it renders the default mode (proxy).",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			doc := skill.NanaMD
+			doc := skill.NanaMD(printEgressMode())
 			if protocolDoc {
 				doc = skill.ProtocolMD
 			}
@@ -39,8 +43,18 @@ func newSkillPrintCmd() *cobra.Command {
 	return cmd
 }
 
+// printEgressMode resolves the egress mode for `skill print` so its NANA.md matches the one
+// bootstrap dropped. Best-effort: without a loadable config (skill print is also used as
+// plain documentation, outside any sandbox dir) it falls back to the default mode (proxy).
+func printEgressMode() bool {
+	cfg, err := config.Load(cfgFile, sandboxID)
+	if err != nil {
+		return true // config default: egress_mode proxy
+	}
+	return cfg.EgressProxy()
+}
+
 func newSkillPathCmd() *cobra.Command {
-	var transport string
 	var protocolDoc bool
 	cmd := &cobra.Command{
 		Use:   "path",
@@ -75,7 +89,6 @@ func newSkillPathCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().BoolVar(&protocolDoc, "protocol", false, "print the PROTOCOL.md path instead of NANA.md")
 	return cmd
 }

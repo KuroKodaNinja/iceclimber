@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/conda"
+	"github.com/KuroKodaNinja/iceclimber/internal/java"
+	"github.com/KuroKodaNinja/iceclimber/internal/node"
+	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/maven"
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
@@ -37,11 +40,22 @@ func newInstallCmd() *cobra.Command {
 	return cmd
 }
 
+
+// optionalVersion resolves an optional runtime-version arg: omitted (or "latest")
+// becomes the language's recommended line via resolve — the same affordance popo and
+// the console already have (decision #83), so the CLI stops being the one surface that
+// demands an exact version.
+func optionalVersion(args []string, resolve func(string) string) string {
+	if len(args) == 0 {
+		return resolve("")
+	}
+	return resolve(args[0])
+}
+
 // newInstallShellCmd relays a portable interactive shell (static bash) into the sandbox so
 // `iceclimber shell` gives history + tab-completion and a sane PATH. Operator-facing only —
 // there is no agent-side `shell.install` verb (the agent doesn't provision its own shell).
 func newInstallShellCmd() *cobra.Command {
-	var transport string
 	cmd := &cobra.Command{
 		Use:   "shell",
 		Short: "Install a portable interactive shell (bash) for `iceclimber shell`",
@@ -54,7 +68,7 @@ func newInstallShellCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
 			defer cancel()
 
-			sess, err := openSession(ctx, cfg, transport)
+			sess, err := openLockedSession(ctx, cfg, transport, "install")
 			if err != nil {
 				return err
 			}
@@ -76,7 +90,6 @@ func newInstallShellCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	return cmd
 }
 
@@ -118,7 +131,7 @@ func overlayRuntimeSources(store *runtimes.Store, flagStr string) error {
 }
 
 func newInstallMavenCmd() *cobra.Command {
-	var transport, javaVersion, tier, mirror string
+	var javaVersion, tier, mirror string
 	cmd := &cobra.Command{
 		Use:   "maven <group:artifact:version>...",
 		Short: "Resolve JVM dependencies (Maven coordinates) into a classpath via Coursier",
@@ -135,7 +148,7 @@ func newInstallMavenCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
 			defer cancel()
 
-			sess, err := openSession(ctx, cfg, transport)
+			sess, err := openLockedSession(ctx, cfg, transport, "install")
 			if err != nil {
 				return err
 			}
@@ -164,7 +177,6 @@ func newInstallMavenCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVar(&javaVersion, "java", "", "target JDK feature version, e.g. 21 (required)")
 	cmd.Flags().StringVar(&tier, "tier", "auto", "resolution tier: auto|mirror|relay")
 	cmd.Flags().StringVar(&mirror, "mirror", "", "Maven repository URL (overrides config; Tier 0)")
@@ -186,11 +198,10 @@ func parseCoords(args []string) ([]pkg.Spec, error) {
 }
 
 func newInstallJavaCmd() *cobra.Command {
-	var transport string
 	cmd := &cobra.Command{
-		Use:   "java <version>",
-		Short: "Install a portable Temurin JDK (javac bundled)",
-		Args:  cobra.ExactArgs(1),
+		Use:   "java [version]",
+		Short: "Install a portable Temurin JDK (javac bundled); no version = the recommended line",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(cfgFile, sandboxID)
 			if err != nil {
@@ -199,14 +210,14 @@ func newInstallJavaCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
 			defer cancel()
 
-			sess, err := openSession(ctx, cfg, transport)
+			sess, err := openLockedSession(ctx, cfg, transport, "install")
 			if err != nil {
 				return err
 			}
 			defer sess.Close()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			res, err := newJavaInstaller(sess, pr).Install(ctx, args[0])
+			res, err := newJavaInstaller(sess, pr).Install(ctx, optionalVersion(args, java.ResolveLine))
 			finish()
 			if err != nil {
 				return err
@@ -224,12 +235,11 @@ func newInstallJavaCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	return cmd
 }
 
 func newInstallNpmCmd() *cobra.Command {
-	var transport, nodeVersion, tier, project string
+	var nodeVersion, tier, project string
 	cmd := &cobra.Command{
 		Use:   "npm [<pkg>[@version]...]",
 		Short: "Install npm packages, or a whole project's package.json (--project), into a Node runtime (Tier 0 mirror / Tier 1 relay)",
@@ -248,7 +258,7 @@ func newInstallNpmCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
 			defer cancel()
 
-			sess, err := openSession(ctx, cfg, transport)
+			sess, err := openLockedSession(ctx, cfg, transport, "install")
 			if err != nil {
 				return err
 			}
@@ -277,7 +287,6 @@ func newInstallNpmCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVar(&nodeVersion, "node", "", "target node version line, e.g. 20 (required)")
 	cmd.Flags().StringVar(&tier, "tier", "auto", "resolution tier: auto|mirror|relay")
 	cmd.Flags().StringVar(&project, "project", "", "sandbox project dir with a package.json — install its deps (npm install/ci) instead of named packages")
@@ -300,11 +309,10 @@ func parseNpmSpecs(args []string) []pkg.Spec {
 }
 
 func newInstallNodeCmd() *cobra.Command {
-	var transport string
 	cmd := &cobra.Command{
-		Use:   "node <version>",
-		Short: "Install a portable Node.js runtime (npm bundled)",
-		Args:  cobra.ExactArgs(1),
+		Use:   "node [version]",
+		Short: "Install a portable Node.js runtime (npm bundled); no version = the recommended line",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(cfgFile, sandboxID)
 			if err != nil {
@@ -313,14 +321,14 @@ func newInstallNodeCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
 			defer cancel()
 
-			sess, err := openSession(ctx, cfg, transport)
+			sess, err := openLockedSession(ctx, cfg, transport, "install")
 			if err != nil {
 				return err
 			}
 			defer sess.Close()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			res, err := newNodeInstaller(sess, pr).Install(ctx, args[0])
+			res, err := newNodeInstaller(sess, pr).Install(ctx, optionalVersion(args, node.ResolveLine))
 			finish()
 			if err != nil {
 				return err
@@ -334,16 +342,14 @@ func newInstallNodeCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	return cmd
 }
 
 func newInstallPythonCmd() *cobra.Command {
-	var transport string
 	cmd := &cobra.Command{
-		Use:   "python <minor-version>",
-		Short: "Install a portable Python runtime (python-build-standalone)",
-		Args:  cobra.ExactArgs(1),
+		Use:   "python [minor-version]",
+		Short: "Install a portable Python runtime (python-build-standalone); no version = the recommended line",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(cfgFile, sandboxID)
 			if err != nil {
@@ -352,14 +358,14 @@ func newInstallPythonCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
 			defer cancel()
 
-			sess, err := openSession(ctx, cfg, transport)
+			sess, err := openLockedSession(ctx, cfg, transport, "install")
 			if err != nil {
 				return err
 			}
 			defer sess.Close()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			res, err := newInstaller(sess, pr).Install(ctx, args[0])
+			res, err := newInstaller(sess, pr).Install(ctx, optionalVersion(args, python.ResolveLine))
 			finish()
 			if err != nil {
 				return err
@@ -373,12 +379,11 @@ func newInstallPythonCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	return cmd
 }
 
 func newInstallPipCmd() *cobra.Command {
-	var transport, pyVersion, tier string
+	var pyVersion, tier string
 	var pipArgs []string
 	cmd := &cobra.Command{
 		Use:   "pip <pkg>[==version]...",
@@ -392,7 +397,7 @@ func newInstallPipCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
 			defer cancel()
 
-			sess, err := openSession(ctx, cfg, transport)
+			sess, err := openLockedSession(ctx, cfg, transport, "install")
 			if err != nil {
 				return err
 			}
@@ -408,7 +413,6 @@ func newInstallPipCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVar(&pyVersion, "python", "", "target python minor version, e.g. 3.12 (required)")
 	cmd.Flags().StringVar(&tier, "tier", "auto", "resolution tier: auto|mirror|relay")
 	cmd.Flags().StringArrayVar(&pipArgs, "pip-arg", nil, "extra pip flag passed through (allowlisted), e.g. --pip-arg=--index-url --pip-arg=https://download.pytorch.org/whl/cpu (repeatable)")
@@ -417,7 +421,7 @@ func newInstallPipCmd() *cobra.Command {
 }
 
 func newInstallCondaCmd() *cobra.Command {
-	var transport, pyVersion, tier, file string
+	var pyVersion, tier, file string
 	var condaArgs []string
 	cmd := &cobra.Command{
 		Use:   "conda [<pkg>[==version]...]",
@@ -436,7 +440,7 @@ func newInstallCondaCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
 			defer cancel()
-			sess, err := openSession(ctx, cfg, transport)
+			sess, err := openLockedSession(ctx, cfg, transport, "install")
 			if err != nil {
 				return err
 			}
@@ -456,7 +460,6 @@ func newInstallCondaCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVar(&pyVersion, "python", "", "target python minor version, e.g. 3.12 (required unless --file)")
 	cmd.Flags().StringVar(&tier, "tier", "auto", "resolution tier: auto|mirror|relay")
 	cmd.Flags().StringVar(&file, "file", "", "sandbox path to an environment.yml — build the whole env from it instead of named packages")

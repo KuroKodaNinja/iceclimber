@@ -21,3 +21,6 @@
 /.agents
 /internal/popobin/bin/popo-*
 /iceclimber-glibc.yaml
+
+# Codebase-analysis scratch (operator insights, not shipped)
+/analysis/

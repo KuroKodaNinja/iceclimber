@@ -113,6 +113,16 @@ func (s *Sandbox) NewRoot(t *testing.T) string {
 // a network.allowed_domains block), into the test's temp dir.
 func (s *Sandbox) WriteConfig(t *testing.T, root, extraYAML string) string {
 	t.Helper()
+	// Each scenario is its own LOGICAL sandbox (its own remote root on the shared VM), so it
+	// gets its own sandbox_id derived from the unique root. That isolates the controller-side
+	// state (single-writer locks, activity logs, runtimes.json) per scenario — the language
+	// packages run in parallel, and under one shared id java's serve/ops locks would refuse
+	// node's and python's commands (and they'd silently share runtimes.json).
+	id := "scn-" + strings.TrimPrefix(filepath.Base(root), "iceclimber-scn-")
+	if home, err := os.UserHomeDir(); err == nil {
+		stateDir := filepath.Join(home, ".iceclimber", id)
+		t.Cleanup(func() { _ = os.RemoveAll(stateDir) })
+	}
 	// Scenarios exercise the language toolchains (install → build → run + Fetch), not the
 	// egress mode; pin relay so a one-shot `serve --once` fetch doesn't stand up (and contend
 	// on) the proxy reverse tunnel now that proxy is the default. Proxy egress has its own
@@ -126,7 +136,7 @@ ssh:
   known_hosts: %s
 remote_root: %s
 egress_mode: relay
-`, s.name, s.conn.Host, s.conn.Port, s.conn.User, s.conn.IdentityFile, s.conn.KnownHosts, root)
+`, id, s.conn.Host, s.conn.Port, s.conn.User, s.conn.IdentityFile, s.conn.KnownHosts, root)
 	if extraYAML != "" {
 		content += strings.TrimRight(extraYAML, "\n") + "\n"
 	}

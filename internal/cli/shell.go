@@ -18,7 +18,6 @@ import (
 // to the box's /bin/sh when bash isn't installed. `-c <cmd>` runs one command non-interactively
 // in that same environment (scriptable, no TTY needed).
 func newShellCmd() *cobra.Command {
-	var transport string
 	var command string
 	cmd := &cobra.Command{
 		Use:   "shell",
@@ -69,7 +68,6 @@ func newShellCmd() *cobra.Command {
 			return err
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVarP(&command, "command", "c", "", "run one command in the sandbox environment and exit (non-interactive)")
 	return cmd
 }

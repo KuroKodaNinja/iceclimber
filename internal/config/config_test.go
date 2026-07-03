@@ -45,6 +45,86 @@ remote_root: /home/agent/.iceclimber
 	}
 }
 
+// TestLoad_SandboxSelector: with the DEFAULT config path, --sandbox selects among the
+// per-sandbox conventions (iceclimber-<id>.yaml in cwd, ~/.iceclimber/<id>/config.yaml),
+// while an explicit --config keeps exact match-or-error semantics. Fleet selectors
+// (all / globs / lists) are reserved with a clear error. A missing default config yields
+// the `iceclimber init` hint.
+func TestLoad_SandboxSelector(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	boxYAML := func(id string) string {
+		return "sandbox_id: " + id + "\nssh:\n  host: h\n  user: u\n"
+	}
+	// Default path holds box-a; a per-sandbox file holds box-b; the home convention box-c.
+	if err := os.WriteFile("iceclimber.yaml", []byte(boxYAML("box-a")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("iceclimber-box-b.yaml", []byte(boxYAML("box-b")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cDir := filepath.Join(home, ".iceclimber", "box-c")
+	if err := os.MkdirAll(cDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cDir, "config.yaml"), []byte(boxYAML("box-c")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// No selector → the default file.
+	if cfg, err := Load(DefaultPath, ""); err != nil || cfg.SandboxID != "box-a" {
+		t.Fatalf("default load = %v, %v", cfg, err)
+	}
+	// Selector matching the default file → it.
+	if cfg, err := Load(DefaultPath, "box-a"); err != nil || cfg.SandboxID != "box-a" {
+		t.Fatalf("matching selector = %v, %v", cfg, err)
+	}
+	// Selector NOT matching the default → found via iceclimber-<id>.yaml.
+	if cfg, err := Load(DefaultPath, "box-b"); err != nil || cfg.SandboxID != "box-b" {
+		t.Fatalf("cwd convention = %+v, %v", cfg, err)
+	}
+	// …and via ~/.iceclimber/<id>/config.yaml.
+	if cfg, err := Load(DefaultPath, "box-c"); err != nil || cfg.SandboxID != "box-c" {
+		t.Fatalf("home convention = %+v, %v", cfg, err)
+	}
+	// Unknown sandbox → error naming every searched location (the default file exists but
+	// mismatches, and neither convention has it).
+	if _, err := Load(DefaultPath, "nope"); err == nil ||
+		!strings.Contains(err.Error(), "iceclimber-nope.yaml") {
+		t.Errorf("unknown sandbox should name the searched paths, got: %v", err)
+	}
+	// EXPLICIT --config: exact semantics — a mismatch errors, no search.
+	if _, err := Load(filepath.Join(dir, "iceclimber.yaml"), "box-b"); err == nil ||
+		!strings.Contains(err.Error(), "does not match") {
+		t.Errorf("explicit --config mismatch should hard-error, got: %v", err)
+	}
+	// Fleet selectors are reserved.
+	for _, sel := range []string{"all", "box-*", "a,b"} {
+		if _, err := Load(DefaultPath, sel); err == nil ||
+			!strings.Contains(err.Error(), "multi-sandbox") {
+			t.Errorf("selector %q should be reserved with a clear error, got: %v", sel, err)
+		}
+	}
+}
+
+// TestLoad_MissingDefaultHintsInit: a missing config at the default path tells the
+// operator the fixing command instead of a raw open error.
+func TestLoad_MissingDefaultHintsInit(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if _, err := Load(DefaultPath, ""); err == nil ||
+		!strings.Contains(err.Error(), "iceclimber init") {
+		t.Errorf("missing default config should hint `iceclimber init`, got: %v", err)
+	}
+	// An explicit path keeps the raw error (the operator named a file; don't second-guess).
+	if _, err := Load("/definitely/not/here.yaml", ""); err == nil ||
+		strings.Contains(err.Error(), "iceclimber init") {
+		t.Errorf("explicit missing path should not hint init, got: %v", err)
+	}
+}
+
 func TestLoad_MissingRequired(t *testing.T) {
 	path := writeTemp(t, "sandbox_id: box-1\n")
 	_, err := Load(path, "")

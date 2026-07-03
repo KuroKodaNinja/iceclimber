@@ -14,7 +14,7 @@ import (
 // interactive terminal it execs the agent clean (so its TUI keeps its tty); when
 // stdout is not a tty (headless/-p runs) it mirrors the stream to session.log so the
 // operator console can show it without a --agent-log flag. All paths are absolute.
-func renderRun(d Descriptor, dir, binPath, nanaPath, popoPath string) string {
+func renderRun(d Descriptor, dir, binPath, nanaPath, popoPath, root string) string {
 	var b strings.Builder
 	wired := "wired to NANA.md"
 	if d.SystemPromptFlag == "" {
@@ -25,7 +25,18 @@ func renderRun(d Descriptor, dir, binPath, nanaPath, popoPath string) string {
 	fmt.Fprintf(&b, "# `iceclimber agent install/wrap %s` — do not edit.\n", d.Name)
 	fmt.Fprintf(&b, "set -eu\n")
 	fmt.Fprintf(&b, "self=%s\n", remote.ShellQuote(dir))
+	fmt.Fprintf(&b, "root=%s\n", remote.ShellQuote(root))
+	// ICECLIMBER_HOME must be set BEFORE egress-env.sh (it dereferences it, and under
+	// set -u an unset reference kills the launcher — env.sh also sets it, but env.sh only
+	// exists when a token was configured, e.g. not for `agent wrap --skip-auth`).
+	fmt.Fprintf(&b, "export ICECLIMBER_HOME=\"$root\"\n")
 	fmt.Fprintf(&b, "[ -f \"$self/env.sh\" ] && . \"$self/env.sh\"\n")
+	// Proxy-mode egress env (HTTPS_PROXY + per-ecosystem CA trust) so the agent's native
+	// tools route through the gated proxy — the same env `popo shellenv` sources. Absent
+	// (relay mode / pre-proxy bootstrap) it's a no-op. `|| true` because a sourced file's
+	// status is its LAST command's — egress-env.sh ends in an existence guard, and a
+	// harmless false there must not kill the set -e launcher.
+	fmt.Fprintf(&b, "{ [ -f \"$root/egress-env.sh\" ] && . \"$root/egress-env.sh\"; } || true\n")
 	fmt.Fprintf(&b, "bin=%s\n", remote.ShellQuote(binPath))
 	fmt.Fprintf(&b, "popo=%s\n", remote.ShellQuote(popoPath))
 

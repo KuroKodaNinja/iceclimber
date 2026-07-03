@@ -54,7 +54,7 @@ func newAgentListCmd() *cobra.Command {
 }
 
 func newAgentInstallCmd() *cobra.Command {
-	var transport, tokenFile string
+	var tokenFile string
 	var skipAuth bool
 	cmd := &cobra.Command{
 		Use:   "install [name]",
@@ -93,7 +93,7 @@ func newAgentInstallCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
 			defer cancel()
 
-			sess, err := openSession(ctx, cfg, transport)
+			sess, err := openLockedSession(ctx, cfg, transport, "agent install")
 			if err != nil {
 				return err
 			}
@@ -117,14 +117,13 @@ func newAgentInstallCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "read the auth token from this file (a shell 'export VAR=...' line or a bare token)")
 	cmd.Flags().BoolVar(&skipAuth, "skip-auth", false, "install the agent CLI without configuring an auth token")
 	return cmd
 }
 
 func newAgentWrapCmd() *cobra.Command {
-	var transport, tokenFile, bin string
+	var tokenFile, bin string
 	var skipAuth bool
 	cmd := &cobra.Command{
 		Use:   "wrap [name]",
@@ -162,7 +161,7 @@ func newAgentWrapCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
 			defer cancel()
 
-			sess, err := openSession(ctx, cfg, transport)
+			sess, err := openLockedSession(ctx, cfg, transport, "agent install")
 			if err != nil {
 				return err
 			}
@@ -186,7 +185,6 @@ func newAgentWrapCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVar(&bin, "bin", "", "absolute path to the agent binary on the sandbox (default: found on PATH)")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "read the auth token from this file (a shell 'export VAR=...' line or a bare token)")
 	cmd.Flags().BoolVar(&skipAuth, "skip-auth", false, "wrap the agent without configuring an auth token")

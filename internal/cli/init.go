@@ -70,7 +70,10 @@ func newInitCmd() *cobra.Command {
 			if err := os.WriteFile(cfgFile, []byte(scaffoldYAML), 0o644); err != nil {
 				return fmt.Errorf("write %s: %w", cfgFile, err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "wrote %s — set ssh host/user/identity_file, then run `iceclimber probe`\n", cfgFile)
+			// The next-steps line must include `trust` — without a recorded host key,
+			// the suggested probe fails (unknown hosts are rejected by design).
+			fmt.Fprintf(cmd.OutOrStdout(),
+				"wrote %s — next:\n  1. edit it: set ssh host/user/identity_file\n  2. iceclimber trust    # record the sandbox's SSH host key\n  3. iceclimber probe    # verify the connection + fingerprint the box\n", cfgFile)
 			return nil
 		},
 	}

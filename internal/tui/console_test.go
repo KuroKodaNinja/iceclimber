@@ -574,11 +574,32 @@ func TestConsole_BootstrapDeclinedRunsNothing(t *testing.T) {
 	}
 }
 
-func TestConsole_RunningBlocksInput(t *testing.T) {
+// TestConsole_RunningBlocksOnlyMutatingInput: while an operator action is in flight the
+// MUTATING form keys are blocked (one op at a time), but read-only interaction — quit,
+// scroll, the status panel — stays available. The old behavior (ALL input swallowed, even
+// q) locked the operator out for the whole of a minutes-long install.
+func TestConsole_RunningBlocksOnlyMutatingInput(t *testing.T) {
 	c := NewConsole("sbx", make(chan tea.Msg), "", &fakeOps{})
 	c.running = "node.install"
-	_, cmd := c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
-	if cmd != nil {
-		t.Error("keys should be ignored while an operator action is in flight")
+
+	// Mutating: no form may open mid-op.
+	m, _ := c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	if m.(Console).form != nil {
+		t.Error("install form must not open while an operator action is in flight")
+	}
+
+	// Read-only: q still quits…
+	if _, cmd := c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}); cmd == nil {
+		t.Error("q must quit even while an operator action is in flight")
+	}
+	// …scroll still works…
+	m, _ = c.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m.(Console).scroll != 1 {
+		t.Error("scroll must work while an operator action is in flight")
+	}
+	// …and the status panel still opens.
+	m, cmd := c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if m.(Console).panel != "status" || cmd == nil {
+		t.Error("status panel must open while an operator action is in flight")
 	}
 }

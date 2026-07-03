@@ -21,7 +21,7 @@ func newWebCmd() *cobra.Command {
 }
 
 func newWebFetchCmd() *cobra.Command {
-	var transport, method, data string
+	var method, data string
 	var headers []string
 	cmd := &cobra.Command{
 		Use:   "fetch <url>",
@@ -71,7 +71,6 @@ func newWebFetchCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().StringVar(&method, "method", "GET", "HTTP method")
 	cmd.Flags().StringArrayVar(&headers, "header", nil, "request header 'Key: Value' (repeatable)")
 	cmd.Flags().StringVar(&data, "data", "", "request body")

@@ -366,12 +366,19 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if c.panel != "" {
 			return c.updatePanel(msg)
 		}
-		if c.running != "" {
-			return c, nil // ignore input while an operator action is in flight
-		}
+		// While an operator action is in flight only the MUTATING keys (the i/a/b forms —
+		// the executor runs one operator action at a time) are blocked below; read-only
+		// interaction — scrolling, the status/egress panels, quitting — stays available, so
+		// a minutes-long install never locks the operator out of their own console.
 		switch msg.String() {
-		case "q", "ctrl+c", "esc":
+		case "q", "ctrl+c":
 			return c, tea.Quit
+		case "esc":
+			// esc means "back" everywhere else (forms and panels close on it) — at the top
+			// level it snaps the feed back to following the newest output. It must NOT
+			// quit: a reflexive esc after closing a panel would lose the whole console.
+			c.scroll = 0
+			return c, nil
 		case "up", "k":
 			c.scroll++ // scroll back into history (windowRows clamps at the top)
 			return c, nil
@@ -392,15 +399,15 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			c.scroll = 0 // jump back to following the newest
 			return c, nil
 		case "i":
-			if c.ops != nil {
+			if c.ops != nil && c.running == "" {
 				return c.openForm("install")
 			}
 		case "a":
-			if c.ops != nil {
+			if c.ops != nil && c.running == "" {
 				return c.openForm("agent")
 			}
 		case "b":
-			if c.ops != nil {
+			if c.ops != nil && c.running == "" {
 				return c.openForm("bootstrap")
 			}
 		case "s":

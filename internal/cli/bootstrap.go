@@ -17,7 +17,6 @@ import (
 )
 
 func newBootstrapCmd() *cobra.Command {
-	var transport string
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
@@ -35,7 +34,7 @@ func newBootstrapCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
 			defer cancel()
 
-			sess, err := openSession(ctx, cfg, transport)
+			sess, err := openLockedSession(ctx, cfg, transport, "bootstrap")
 			if err != nil {
 				return err
 			}
@@ -81,7 +80,6 @@ func newBootstrapCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().BoolVar(&force, "force", false, "destructive reset: wipe the sandbox tree (incl. installed runtimes) and reprovision fresh")
 	return cmd
 }
@@ -117,7 +115,9 @@ func provision(ctx context.Context, sess *session) error {
 	if err := writePipConf(ctx, sess); err != nil {
 		return fmt.Errorf("write pip.conf: %w", err)
 	}
-	if err := sess.fs.WriteFile(ctx, sess.tree.SkillFile(), []byte(skill.NanaMD)); err != nil {
+	// NANA.md is rendered for this sandbox's egress mode (proxy documents native-tool
+	// egress through the gated proxy; relay forbids native network tools outright).
+	if err := sess.fs.WriteFile(ctx, sess.tree.SkillFile(), []byte(skill.NanaMD(sess.egressProxy))); err != nil {
 		return fmt.Errorf("write NANA.md: %w", err)
 	}
 	if err := sess.fs.WriteFile(ctx, sess.tree.ProtocolFile(), []byte(skill.ProtocolMD)); err != nil {

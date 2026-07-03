@@ -50,6 +50,9 @@ type session struct {
 	// effect immediately for installs and the serve loop, without a reconnect.
 	runtimeStore  *runtimes.Store
 	runtimeConfig runtimes.Sources // operator-config overlay (immutable for the session)
+	// lock is the per-sandbox single-writer lock when this session was opened via
+	// openLockedSession (mutating one-shots); nil otherwise. Released by Close.
+	lock *sandboxLock
 }
 
 // runtimeSourcesNow resolves the per-language runtime source at the moment of use:
@@ -128,7 +131,9 @@ func (s *session) Close() error {
 	if s.sftp != nil {
 		_ = s.sftp.Close()
 	}
-	return s.runner.Close()
+	err := s.runner.Close()
+	s.lock.Release() // nil-safe; last, so the sandbox stays "in use" until fully closed
+	return err
 }
 
 // openSession dials the sandbox, resolves the install root, and selects a
@@ -155,6 +160,30 @@ func dialConfig(cfg *config.Config) remote.DialConfig {
 
 func openSession(ctx context.Context, cfg *config.Config, transport string) (*session, error) {
 	return openSessionWith(ctx, cfg, transport, nil)
+}
+
+// openLockedSession is openSession for MUTATING one-shot commands (install, bootstrap,
+// agent install/wrap, maven build): it first takes the per-sandbox ops lock — failing
+// fast, before any dial, when another mutating command holds it — and attaches the lock
+// to the session so the command's existing `defer sess.Close()` releases it. An ACTIVE
+// SERVING process does not block (proxy-mode flows require the coexistence — lock.go);
+// it is surfaced as a stderr notice instead. Serving processes hold the separate serve
+// lock at the command layer for their whole run, spanning reconnects.
+func openLockedSession(ctx context.Context, cfg *config.Config, transport, mode string) (*session, error) {
+	lk, notice, err := acquireOpsLock(cfg, mode)
+	if err != nil {
+		return nil, err
+	}
+	if notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
+	}
+	sess, err := openSession(ctx, cfg, transport)
+	if err != nil {
+		lk.Release()
+		return nil, err
+	}
+	sess.lock = lk
+	return sess, nil
 }
 
 // openSessionWith is openSession with an explicit interactive-auth prompter. The

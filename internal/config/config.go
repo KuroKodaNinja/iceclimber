@@ -5,7 +5,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -228,10 +230,49 @@ type SSH struct {
 	KeepAliveInterval int `yaml:"keepalive_interval"`
 }
 
-// Load reads, parses, and validates the config at path. When selectSandbox is
-// non-empty it must match the configured sandbox_id — a guard against acting on
-// the wrong sandbox. Fleet selection across multiple configs is future work (§8).
+// DefaultPath is the conventional config filename the CLI defaults --config to. Only
+// this default engages the --sandbox search path below; an explicit --config never does.
+const DefaultPath = "iceclimber.yaml"
+
+// Load reads, parses, and validates the config at path. When selectSandbox is non-empty
+// it must match the configured sandbox_id — a guard against acting on the wrong sandbox.
+//
+// --sandbox is also a SELECTOR: when path is the default and doesn't yield sandbox X,
+// Load searches the per-sandbox conventions `iceclimber-<X>.yaml` (cwd) and
+// `~/.iceclimber/<X>/config.yaml`, so one directory (or the home state dir) can hold a
+// config per sandbox and every command addresses any of them by id. Reserved for the
+// fleet phase (rejected with a clear error today): "all", comma lists, and glob patterns.
 func Load(path, selectSandbox string) (*Config, error) {
+	if isFleetSelector(selectSandbox) {
+		return nil, fmt.Errorf("--sandbox %q: fleet selection (all / lists / globs) arrives with multi-sandbox support — name a single sandbox for now", selectSandbox)
+	}
+	c, err := loadOne(path, selectSandbox)
+	if err == nil {
+		return c, nil
+	}
+	if path != DefaultPath {
+		return nil, err // explicit --config: exact semantics, no search
+	}
+	if selectSandbox != "" {
+		for _, cand := range sandboxSearchPaths(selectSandbox) {
+			if c2, err2 := loadOne(cand, selectSandbox); err2 == nil {
+				return c2, nil
+			}
+		}
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("no config for sandbox %q — looked at %s, %s; run `iceclimber init` to scaffold one, or pass --config",
+				selectSandbox, DefaultPath, strings.Join(sandboxSearchPaths(selectSandbox), ", "))
+		}
+		return nil, fmt.Errorf("%w (also looked for %s)", err, strings.Join(sandboxSearchPaths(selectSandbox), ", "))
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("no config at %s — run `iceclimber init` to scaffold one, or pass --config", path)
+	}
+	return nil, err
+}
+
+// loadOne reads, parses, and validates a single config file.
+func loadOne(path, selectSandbox string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
@@ -253,6 +294,22 @@ func Load(path, selectSandbox string) (*Config, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// sandboxSearchPaths are the per-sandbox config conventions --sandbox selects from when
+// the default path doesn't yield the requested sandbox.
+func sandboxSearchPaths(id string) []string {
+	paths := []string{"iceclimber-" + id + ".yaml"}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, ".iceclimber", id, "config.yaml"))
+	}
+	return paths
+}
+
+// isFleetSelector reports whether a --sandbox value names more than one sandbox — the
+// namespace is reserved now so the fleet phase can give it meaning without a breaking change.
+func isFleetSelector(s string) bool {
+	return s == "all" || strings.ContainsAny(s, "*?[,")
 }
 
 func (c *Config) validate(selectSandbox string) error {

@@ -22,7 +22,6 @@ import (
 
 func newServeCmd() *cobra.Command {
 	var once bool
-	var transport string
 	var interval time.Duration
 	var deny []string
 	var yes bool
@@ -36,6 +35,14 @@ func newServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Single-writer: one serving process per sandbox, held for the whole run
+			// (spanning reconnects). A second serve/console — or a concurrent mutating
+			// one-shot — fails fast naming this holder.
+			lk, err := acquireServeLock(cfg, "serve")
+			if err != nil {
+				return err
+			}
+			defer lk.Release()
 
 			out := cmd.OutOrStdout()
 			if once {
@@ -64,7 +71,6 @@ func newServeCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&once, "once", false, "run a single dispatch cycle and exit")
-	cmd.Flags().StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "poll interval for the watch loop")
 	cmd.Flags().StringArrayVar(&deny, "deny", nil, "disable a verb, e.g. --deny web.fetch (repeatable)")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "auto-approve every operation (skip the interactive prompt)")
@@ -82,6 +88,11 @@ func isTerminal(f *os.File) bool {
 // terminal for the console TUI: the same unattended serve loop `iceclimber serve`
 // runs. Keeps the headless mode fully functional with a TUI present.
 func runHeadless(ctx context.Context, cfg *config.Config, transport string, out io.Writer) error {
+	lk, err := acquireServeLock(cfg, "serve (headless)")
+	if err != nil {
+		return err
+	}
+	defer lk.Release()
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	fmt.Fprintf(out, "serving sandbox %s (headless); Ctrl-C to stop\n", cfg.SandboxID)

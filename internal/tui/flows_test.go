@@ -748,6 +748,39 @@ func TestFlow_RunningIndicator(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 }
 
+// TestFlow_ReadOnlyKeysWhileRunning: a running operator action must not lock the operator
+// out — the status panel opens (and closes on esc) mid-op, while the mutating install form
+// stays blocked. Regression guard for the "all input swallowed during a long install" trap.
+func TestFlow_ReadOnlyKeysWhileRunning(t *testing.T) {
+	ops := &gateOps{release: make(chan struct{})}
+	tm := startConsole(t, ops)
+	press(tm, "i")
+	waitText(t, tm, "language")
+	send(tm, tea.KeyEnter)
+	waitText(t, tm, "requests / figlet")
+	send(tm, tea.KeyEnter)
+	waitText(t, tm, "3.12 / 24")
+	send(tm, tea.KeyEnter) // submit ⇒ RunInstall blocks (running stays visible)
+	waitText(t, tm, "Python install")
+
+	// Read-only: the status panel opens while the op is still running…
+	press(tm, "s")
+	waitText(t, tm, "Status")
+	// …and esc closes it (back), returning to the live view with the op still in flight.
+	send(tm, tea.KeyEsc)
+	waitText(t, tm, "Python install")
+
+	// Mutating: a second form must NOT open while an op runs. The key event is queued
+	// before the release, so it is processed while running is still set.
+	press(tm, "i")
+	close(ops.release)
+	waitText(t, tm, "i install") // idle footer returns once the op resolves
+	c := finalConsole(t, tm)
+	if c.form != nil {
+		t.Error("install form opened while an operator action was running")
+	}
+}
+
 // --- Quit -------------------------------------------------------------------
 
 func TestFlow_QuitKey(t *testing.T) {
@@ -755,6 +788,29 @@ func TestFlow_QuitKey(t *testing.T) {
 	waitText(t, tm, "q quit")
 	press(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+}
+
+// TestFlow_EscDoesNotQuit: esc at the top level must NOT exit the console (it means "back"
+// in every panel/form; a reflexive esc after closing a panel losing the whole console was
+// the bug). It snaps the scrollback to following instead; q still quits. Liveness is probed
+// by opening the status panel AFTER the esc — a quit program would never render it.
+func TestFlow_EscDoesNotQuit(t *testing.T) {
+	ops := newRecordOps()
+	ops.status = StatusSnapshot{Sandbox: "sbx", Heartbeat: "seq 7 · ~1s ago"}
+	tm := startConsole(t, ops)
+	waitText(t, tm, "i install")
+	send(tm, tea.KeyUp)  // scroll back a step…
+	send(tm, tea.KeyEsc) // …esc: back-to-following, NOT quit
+	press(tm, "s")       // still alive → the status panel opens
+	waitText(t, tm, "Status")
+	send(tm, tea.KeyEsc) // esc-as-back closes the panel (unchanged semantics)
+	c := finalConsole(t, tm)
+	if c.scroll != 0 {
+		t.Errorf("esc should snap scroll back to following; scroll=%d", c.scroll)
+	}
+	if c.panel != "" {
+		t.Errorf("esc should have closed the status panel; panel=%q", c.panel)
+	}
 }
 
 func TestFlow_QuitCtrlC(t *testing.T) {

@@ -68,11 +68,7 @@ needn't wait in line — issue requests concurrently (background `popo` calls / 
 `npm.install` rather than firing many at the same runtime), while different runtimes and quick
 calls run in parallel. Exact contract: `$ICECLIMBER_HOME/skill/PROTOCOL.md` "Concurrency".
 
-## Popo is your only way out — be patient
-
-You have **no internet**. Everything comes through Popo. **Never** reach the network
-yourself (no `curl`/`wget`/`pip`/`npm`/`git`) or route around Popo, even when it's slow or
-down — there is **no fallback**; such attempts just fail.
+<!-- network-access -->
 
 **Be patient:** fetching a runtime or package can take **minutes** (Popo may be pulling
 large artifacts over a slow network). `popo` blocks while Popo works — keep waiting, don't
