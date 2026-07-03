@@ -1,20 +1,19 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/conda"
-	"github.com/KuroKodaNinja/iceclimber/internal/java"
-	"github.com/KuroKodaNinja/iceclimber/internal/node"
-	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/maven"
+	"github.com/KuroKodaNinja/iceclimber/internal/node"
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
+	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
 	"github.com/spf13/cobra"
 )
@@ -40,7 +39,6 @@ func newInstallCmd() *cobra.Command {
 	return cmd
 }
 
-
 // optionalVersion resolves an optional runtime-version arg: omitted (or "latest")
 // becomes the language's recommended line via resolve — the same affordance popo and
 // the console already have (decision #83), so the CLI stops being the one surface that
@@ -61,18 +59,11 @@ func newInstallShellCmd() *cobra.Command {
 		Short: "Install a portable interactive shell (bash) for `iceclimber shell`",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(cfgFile, sandboxID)
+			ctx, _, sess, done, err := openCommandSession(cmd, 10*time.Minute, "install")
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
-			defer cancel()
-
-			sess, err := openLockedSession(ctx, cfg, transport, "install")
-			if err != nil {
-				return err
-			}
-			defer sess.Close()
+			defer done()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
 			res, err := newShellInstaller(sess, pr).Install(ctx)
@@ -137,22 +128,15 @@ func newInstallMavenCmd() *cobra.Command {
 		Short: "Resolve JVM dependencies (Maven coordinates) into a classpath via Coursier",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cfgFile, sandboxID)
-			if err != nil {
-				return err
-			}
 			specs, err := parseCoords(args)
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
-			defer cancel()
-
-			sess, err := openLockedSession(ctx, cfg, transport, "install")
+			ctx, _, sess, done, err := openCommandSession(cmd, 15*time.Minute, "install")
 			if err != nil {
 				return err
 			}
-			defer sess.Close()
+			defer done()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
 			deps := mavenDeps(sess, pr)
@@ -203,18 +187,11 @@ func newInstallJavaCmd() *cobra.Command {
 		Short: "Install a portable Temurin JDK (javac bundled); no version = the recommended line",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cfgFile, sandboxID)
+			ctx, _, sess, done, err := openCommandSession(cmd, 15*time.Minute, "install")
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
-			defer cancel()
-
-			sess, err := openLockedSession(ctx, cfg, transport, "install")
-			if err != nil {
-				return err
-			}
-			defer sess.Close()
+			defer done()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
 			res, err := newJavaInstaller(sess, pr).Install(ctx, optionalVersion(args, java.ResolveLine))
@@ -251,18 +228,11 @@ func newInstallNpmCmd() *cobra.Command {
 			if project != "" && len(args) > 0 {
 				return fmt.Errorf("--project installs a package.json; don't also pass package names")
 			}
-			cfg, err := config.Load(cfgFile, sandboxID)
+			ctx, _, sess, done, err := openCommandSession(cmd, 10*time.Minute, "install")
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
-			defer cancel()
-
-			sess, err := openLockedSession(ctx, cfg, transport, "install")
-			if err != nil {
-				return err
-			}
-			defer sess.Close()
+			defer done()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
 			var out npm.Result
@@ -314,18 +284,11 @@ func newInstallNodeCmd() *cobra.Command {
 		Short: "Install a portable Node.js runtime (npm bundled); no version = the recommended line",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cfgFile, sandboxID)
+			ctx, _, sess, done, err := openCommandSession(cmd, 10*time.Minute, "install")
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
-			defer cancel()
-
-			sess, err := openLockedSession(ctx, cfg, transport, "install")
-			if err != nil {
-				return err
-			}
-			defer sess.Close()
+			defer done()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
 			res, err := newNodeInstaller(sess, pr).Install(ctx, optionalVersion(args, node.ResolveLine))
@@ -351,18 +314,11 @@ func newInstallPythonCmd() *cobra.Command {
 		Short: "Install a portable Python runtime (python-build-standalone); no version = the recommended line",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cfgFile, sandboxID)
+			ctx, _, sess, done, err := openCommandSession(cmd, 10*time.Minute, "install")
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
-			defer cancel()
-
-			sess, err := openLockedSession(ctx, cfg, transport, "install")
-			if err != nil {
-				return err
-			}
-			defer sess.Close()
+			defer done()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
 			res, err := newInstaller(sess, pr).Install(ctx, optionalVersion(args, python.ResolveLine))
@@ -390,18 +346,11 @@ func newInstallPipCmd() *cobra.Command {
 		Short: "Install pip packages into an installed runtime (Tier 0 mirror / Tier 1 relay)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cfgFile, sandboxID)
+			ctx, _, sess, done, err := openCommandSession(cmd, 10*time.Minute, "install")
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
-			defer cancel()
-
-			sess, err := openLockedSession(ctx, cfg, transport, "install")
-			if err != nil {
-				return err
-			}
-			defer sess.Close()
+			defer done()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
 			out, err := pip.Run(ctx, pipDeps(sess, pr), pyVersion, parseSpecs(args), tier, pipArgs)
@@ -434,17 +383,11 @@ func newInstallCondaCmd() *cobra.Command {
 			if file != "" && (len(args) > 0 || pyVersion != "" || len(condaArgs) > 0) {
 				return fmt.Errorf("--file builds a whole environment.yml (its own channels); don't also pass --python, --conda-arg, or package names")
 			}
-			cfg, err := config.Load(cfgFile, sandboxID)
+			ctx, _, sess, done, err := openCommandSession(cmd, 15*time.Minute, "install")
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
-			defer cancel()
-			sess, err := openLockedSession(ctx, cfg, transport, "install")
-			if err != nil {
-				return err
-			}
-			defer sess.Close()
+			defer done()
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
 			var out pkg.Outcome
 			if file != "" {

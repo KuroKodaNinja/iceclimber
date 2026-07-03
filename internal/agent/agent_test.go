@@ -96,7 +96,7 @@ func TestRenderRun(t *testing.T) {
 		`nana='/r/skill/NANA.md'`, // references NANA.md
 		`set -- '--append-system-prompt' "$(cat "$nana")" "$@"`, // NANA as system context, then passthrough
 		`bin='/r/agent/claude/claude'`,
-		`popo='/r/popo'`,                                    // capping-tee binary
+		`popo='/r/popo'`,                                     // capping-tee binary
 		`[ -t 1 ] || headless=1`,                             // capture when not a tty…
 		`case "$a" in -p|--print) headless=1; printrun=1 ;;`, // …or a print flag is present
 		`if [ "$headless" = 1 ]; then`,
@@ -105,10 +105,10 @@ func TestRenderRun(t *testing.T) {
 		`if [ "$printrun" = 1 ]; then`,
 		`--output-format|--output-format=*) have_fmt=1 ;;`,
 		`[ "$have_fmt" = 0 ] && set -- '--output-format' 'stream-json' '--verbose' "$@"`,
-		`if [ -x "$popo" ]; then`,          // headless: capping tee via popo log…
-		`| "$popo" log "$log"`,             // …rotating, reopen-safe
-		`| tee -a "$log"`,                  // fallback when popo is absent
-		`exec "$bin" "$@"`,                 // interactive: clean tty
+		`if [ -x "$popo" ]; then`, // headless: capping tee via popo log…
+		`| "$popo" log "$log"`,    // …rotating, reopen-safe
+		`| tee -a "$log"`,         // fallback when popo is absent
+		`exec "$bin" "$@"`,        // interactive: clean tty
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("run script missing %q:\n%s", want, got)

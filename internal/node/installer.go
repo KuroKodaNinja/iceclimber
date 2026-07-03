@@ -100,4 +100,3 @@ func (i *Installer) fetch(ctx context.Context, r resolved) (string, error) {
 func (i *Installer) verify(ctx context.Context, bin string) error {
 	return relay.VerifyRun(ctx, i.cfg.Runner, remote.ShellQuote(bin)+" --version")
 }
-

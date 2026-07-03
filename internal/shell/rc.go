@@ -4,10 +4,10 @@ import "github.com/KuroKodaNinja/iceclimber/internal/remote"
 
 // Layout under the install root.
 const (
-	dirName    = "shell"           // <root>/shell
-	binName    = "bash"            // <root>/shell/bash
-	rcName     = "bashrc"          // <root>/shell/bashrc
-	histName   = ".bash_history"   // <root>/shell/.bash_history
+	dirName  = "shell"         // <root>/shell
+	binName  = "bash"          // <root>/shell/bash
+	rcName   = "bashrc"        // <root>/shell/bashrc
+	histName = ".bash_history" // <root>/shell/.bash_history
 )
 
 // BinPath / RCPath are the sandbox paths for the installed bash and its rc file. They are

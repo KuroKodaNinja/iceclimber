@@ -18,6 +18,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
 	"github.com/KuroKodaNinja/iceclimber/internal/webfetch"
 	"github.com/pkg/sftp"
+	"github.com/spf13/cobra"
 )
 
 // session bundles an open SSH connection, the chosen transport's FS, the
@@ -160,6 +161,29 @@ func dialConfig(cfg *config.Config) remote.DialConfig {
 
 func openSession(ctx context.Context, cfg *config.Config, transport string) (*session, error) {
 	return openSessionWith(ctx, cfg, transport, nil)
+}
+
+// openCommandSession is the shared prelude of every MUTATING one-shot command (install,
+// bootstrap, agent install/wrap, maven build): load the config, bound the run with a
+// timeout, take the per-sandbox ops lock, and open the session. done() releases
+// everything (context + session/lock). Kills the 12-way copy of the same block and gives
+// future commands (e.g. the setup wizard) one correct prelude to call.
+func openCommandSession(cmd *cobra.Command, timeout time.Duration, mode string) (context.Context, *config.Config, *session, func(), error) {
+	cfg, err := config.Load(cfgFile, sandboxID)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+	sess, err := openLockedSession(ctx, cfg, transport, mode)
+	if err != nil {
+		cancel()
+		return nil, nil, nil, nil, err
+	}
+	done := func() {
+		_ = sess.Close()
+		cancel()
+	}
+	return ctx, cfg, sess, done, nil
 }
 
 // openLockedSession is openSession for MUTATING one-shot commands (install, bootstrap,

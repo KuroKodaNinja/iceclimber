@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/popobin"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
@@ -27,18 +26,11 @@ func newBootstrapCmd() *cobra.Command {
 			"install` (or the console's install form) after bootstrapping.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(cfgFile, sandboxID)
+			ctx, cfg, sess, done, err := openCommandSession(cmd, 2*time.Minute, "bootstrap")
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
-			defer cancel()
-
-			sess, err := openLockedSession(ctx, cfg, transport, "bootstrap")
-			if err != nil {
-				return err
-			}
-			defer sess.Close()
+			defer done()
 
 			// Re-bootstrap is safe by default — the tree is created with mkdir -p and only
 			// generated files are overwritten, so installed runtimes under <root>/runtimes

@@ -46,7 +46,7 @@ func TestRenderRC_And_EnvPreamble(t *testing.T) {
 		"export ICECLIMBER_HOME='/srv/ice'",
 		`"$ICECLIMBER_HOME"/runtimes/*/*/bin`,           // installed runtimes on PATH
 		`$ICECLIMBER_HOME/shell:$ICECLIMBER_HOME:$PATH`, // bash + popo/nana on PATH
-		"egress-env.sh",                                 // proxy/CA trust when serving
+		"egress-env.sh", // proxy/CA trust when serving
 		`HISTFILE="$ICECLIMBER_HOME/shell/.bash_history"`,
 		"completion-ignore-case on",
 		`PS1='[iceclimber \w]\$ '`,

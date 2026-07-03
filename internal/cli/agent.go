@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/agent"
-	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -86,18 +85,11 @@ func newAgentInstallCmd() *cobra.Command {
 				token = t
 			}
 
-			cfg, err := config.Load(cfgFile, sandboxID)
+			ctx, _, sess, done, err := openCommandSession(cmd, 15*time.Minute, "agent install")
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
-			defer cancel()
-
-			sess, err := openLockedSession(ctx, cfg, transport, "agent install")
-			if err != nil {
-				return err
-			}
-			defer sess.Close()
+			defer done()
 
 			res, err := newAgentInstaller(sess).Install(ctx, d, token)
 			if err != nil {
@@ -154,18 +146,11 @@ func newAgentWrapCmd() *cobra.Command {
 				token = t
 			}
 
-			cfg, err := config.Load(cfgFile, sandboxID)
+			ctx, _, sess, done, err := openCommandSession(cmd, 5*time.Minute, "agent install")
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
-			defer cancel()
-
-			sess, err := openLockedSession(ctx, cfg, transport, "agent install")
-			if err != nil {
-				return err
-			}
-			defer sess.Close()
+			defer done()
 
 			res, err := newAgentInstaller(sess).Wrap(ctx, d, token, bin)
 			if err != nil {

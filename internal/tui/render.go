@@ -284,7 +284,7 @@ func windowRows(rows []string, n, scroll int) []string {
 }
 
 // modalView renders a centred approval modal over a blank screen.
-func modalView(w, h int, req *ApprovalRequest) string {
+func modalView(w, h int, req *ApprovalRequest, queued int) string {
 	border := cWarn
 	hdr := "Approve operation"
 	if req.Kind == "egress" {
@@ -301,6 +301,10 @@ func modalView(w, h int, req *ApprovalRequest) string {
 		fmt.Fprintf(&b, "\n%s\n", warnStyle.Render(req.Note))
 	}
 	fmt.Fprintf(&b, "\n%s\n", dimStyle.Render(fmt.Sprintf("[y] approve   [a] %s   [n] deny   [d] deny+remember", req.RememberLabel)))
+	// More approvals waiting behind this one (fleet: N sandboxes can each hold one).
+	if queued > 0 {
+		fmt.Fprintf(&b, "%s\n", warnStyle.Render(fmt.Sprintf("(+%d more approval(s) queued)", queued)))
+	}
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

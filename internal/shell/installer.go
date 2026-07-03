@@ -105,7 +105,6 @@ func (i *Installer) Install(ctx context.Context) (Result, error) {
 	return Result{Version: r.Version, Path: bin, RC: rc, AlreadyInstalled: false}, nil
 }
 
-
 // fetch downloads the resolved asset through the shared relay cache (per-asset flock;
 // sha256 verified on cache hits and downloads alike).
 func (i *Installer) fetch(ctx context.Context, r resolved) (string, error) {
@@ -117,4 +116,3 @@ func (i *Installer) fetch(ctx context.Context, r resolved) (string, error) {
 func (i *Installer) verify(ctx context.Context, bin string) error {
 	return relay.VerifyRun(ctx, i.cfg.Runner, remote.ShellQuote(bin)+" --version")
 }
-

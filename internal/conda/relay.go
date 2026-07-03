@@ -17,8 +17,8 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
 	"github.com/KuroKodaNinja/iceclimber/internal/progress"
-	"github.com/KuroKodaNinja/iceclimber/internal/relay"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
+	"github.com/KuroKodaNinja/iceclimber/internal/relay"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 )
 

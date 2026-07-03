@@ -445,8 +445,8 @@ func TestConsole_ApprovalModal(t *testing.T) {
 
 	updated, _ := c.Update(req)
 	c2 := updated.(Console)
-	if c2.modal == nil {
-		t.Fatal("modal should be set on ApprovalRequest")
+	if len(c2.modals) == 0 {
+		t.Fatal("modal should be queued on ApprovalRequest")
 	}
 	if v := c2.View(); !strings.Contains(v, "web.fetch GET") || !strings.Contains(v, "Approve egress") {
 		t.Errorf("modal view missing content:\n%s", v)
@@ -455,7 +455,7 @@ func TestConsole_ApprovalModal(t *testing.T) {
 	// Answer 'a' (approve + remember).
 	updated2, _ := c2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 	c3 := updated2.(Console)
-	if c3.modal != nil {
+	if len(c3.modals) != 0 {
 		t.Error("modal should clear after the operator answers")
 	}
 	select {
@@ -468,11 +468,57 @@ func TestConsole_ApprovalModal(t *testing.T) {
 	}
 }
 
+// TestConsole_ApprovalQueue: a second ApprovalRequest arriving while one is displayed
+// QUEUES behind it (never overwrites — an overwrite would orphan the first's Reply and
+// deadlock its dispatcher worker). The head shows a "+N queued" badge; answering the head
+// reveals the next; both Replies are answered in order.
+func TestConsole_ApprovalQueue(t *testing.T) {
+	c := NewConsole("sbx", make(chan tea.Msg, 4), "", nil)
+	r1, r2 := make(chan int, 1), make(chan int, 1)
+	u, _ := c.Update(&ApprovalRequest{Sandbox: "sbx-a", Title: "first ask", Reply: r1})
+	u, _ = u.Update(&ApprovalRequest{Sandbox: "sbx-b", Title: "second ask", Reply: r2})
+	c2 := u.(Console)
+	if len(c2.modals) != 2 {
+		t.Fatalf("modals=%d, want 2 queued", len(c2.modals))
+	}
+	if v := c2.View(); !strings.Contains(v, "first ask") || !strings.Contains(v, "+1 more") {
+		t.Errorf("head + queued badge missing:\n%s", v)
+	}
+	// Answer the head → r1 answered, second promoted.
+	u, _ = c2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	c3 := u.(Console)
+	if got := <-r1; got != Approve {
+		t.Errorf("first reply = %d, want Approve", got)
+	}
+	if len(c3.modals) != 1 || !strings.Contains(c3.View(), "second ask") {
+		t.Fatalf("second approval should be promoted; modals=%d", len(c3.modals))
+	}
+	u, _ = c3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if got := <-r2; got != Deny {
+		t.Errorf("second reply = %d, want Deny", got)
+	}
+	if len(u.(Console).modals) != 0 {
+		t.Error("queue should drain to empty")
+	}
+}
+
+// TestConsole_SandboxMsgUnwraps: a worker-tagged message behaves exactly like its
+// payload (the fleet shell routes by ID; a single-sandbox console just unwraps).
+func TestConsole_SandboxMsgUnwraps(t *testing.T) {
+	c := NewConsole("sbx", make(chan tea.Msg, 4), "", nil)
+	u, _ := c.Update(SandboxMsg{ID: "sbx", Msg: activity.Event{
+		TS: "2026-06-28T18:00:01Z", Kind: activity.KindServiced, Type: "ping", Status: "ok",
+	}})
+	if got := u.(Console).served; got != 1 {
+		t.Errorf("tagged event should count like an untagged one; served=%d", got)
+	}
+}
+
 func TestConsole_ModalIgnoresNonChoiceKeys(t *testing.T) {
 	c := NewConsole("sbx", make(chan tea.Msg, 1), "", nil)
-	c.modal = &ApprovalRequest{Reply: make(chan int, 1)}
+	c.modals = []*ApprovalRequest{{Reply: make(chan int, 1)}}
 	updated, cmd := c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
-	if updated.(Console).modal == nil {
+	if len(updated.(Console).modals) == 0 {
 		t.Error("a held operation must stay until answered (q should not dismiss it)")
 	}
 	if cmd != nil {

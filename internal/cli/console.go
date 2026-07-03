@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"path"
 	"strings"
 	"sync/atomic"
@@ -14,8 +13,8 @@ import (
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/agent"
-	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/audit"
+	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/egress"
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/logfile"
@@ -803,147 +802,20 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 		return err
 	}
 	defer lk.Release()
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
-	events := make(chan tea.Msg, 64)
 
-	// The initial connect (and host-key trust prompt) runs before the alt-screen TUI, so its
-	// prompt uses the tty (uiReady=false); once the program is live it flips to true and
-	// reconnect prompts route to the masked modal instead of corrupting the screen. A single
-	// CachingPrompter is reused for reconnects so a password typed now is remembered (and a
-	// single-prompt PAM challenge is reused silently — see kbdAnswers).
-	var uiReady atomic.Bool
-	prompter := remote.NewCachingPrompter(&tuiPasswordPrompter{
-		events: events, done: ctx.Done(), ready: &uiReady, tty: remote.TTYPrompter(),
-	})
-	sess, err := openSessionWith(parent, cfg, transport, prompter)
-	if hke := (*remote.HostKeyError)(nil); errors.As(err, &hke) {
-		// First contact with an untrusted (often ephemeral) sandbox: offer to
-		// record the host key from within the console, then reconnect once.
-		if tErr := trustHostInteractive(parent, cfg, hke); tErr != nil {
-			return tErr
-		}
-		sess, err = openSessionWith(parent, cfg, transport, prompter)
-	}
+	// All of the per-sandbox machinery — dial (with in-console trust), prompter, activity
+	// logger, agent-log bridge, reconnect supervisor, ops — lives in the sandboxWorker
+	// (the fleet unit; the multi-sandbox console will run N of these into one program).
+	w, err := startSandboxWorker(parent, cfg, transport, agentLog)
 	if err != nil {
 		return err
 	}
-	prompter.Commit()   // the startup dial authenticated — remember the password for reconnects
-	uiReady.Store(true) // from here every dial is a reconnect → route its prompt to the modal, never /dev/tty
+	defer w.stop()
 
-	act := activity.NewSized(activityPath(cfg), cfg.LogMaxBytes, cfg.LogKeep)
-	defer act.Close() // flush the counts snapshot + release the rotating log fd
-	// bootstrapped nudges the serve cycle to re-check + start serving the instant the operator
-	// bootstraps in-place (below), instead of waiting on the reconnect backoff.
-	bootstrapped := make(chan struct{}, 1)
-
-	// The supervisor owns the session: it swaps the holder on each (re)connect and
-	// closes each session when its serve cycle ends. Close the current one on return
-	// as a backstop (Close is idempotent if the supervisor already closed it).
-	holder := &sessionHolder{}
-	holder.Set(sess)
-	defer func() {
-		if s := holder.Get(); s != nil {
-			_ = s.Close()
-		}
-	}()
-
-	emit := func(m tea.Msg) {
-		select {
-		case events <- m:
-		default: // never stall the supervisor on a slow/closed UI
-		}
-	}
-
-	// With no explicit --agent-log, default to the controller-side agent.log and bridge the
-	// sandbox's agent stream into it, so [NANA] populates with no flag. The bridge seeds each
-	// session.log to its current EOF (streams only NEW output — no re-dump of a prior run) and
-	// writes through a rotating logfile.Writer, so we no longer truncate-reset (which would
-	// clobber a concurrent writer). The bridge reads the live session via the holder, so it
-	// follows reconnects.
-	logPath := agentLog
-	if logPath == "" {
-		logPath = agentLogPath(cfg)
-		go bridgeAgentLog(ctx, holder, logPath, cfg.LogMaxBytes, cfg.LogKeep)
-	}
-
-	// Seed the header counters + the "last action" time from the durable activity log
-	// (authoritative, cumulative per sandbox) — read NOW, before the serve goroutine appends
-	// anything, so a just-serviced event isn't counted twice (seed + the live event on the
-	// channel). The seed makes "last action" coherent with the cumulative counters on restart
-	// (e.g. "serviced 47 · … · last action 2d ago") instead of "—" or a startup countdown.
-	// O(1) seed from the counts snapshot (backfills once from the log if absent); this keeps
-	// startup fast regardless of lifetime activity and keeps the counters monotonic across log
-	// rotation (the snapshot, not a log re-read, is authoritative).
-	snap := activity.SeedCounts(activityPath(cfg))
-	seedServed, seedApproved, seedDenied := snap.Served, snap.Approved, snap.Denied
-	seedLast := snap.LastAction
-
-	// Serve in the background with auto-reconnect. The first cycle serves the already
-	// open session; on a drop the supervisor reconnects (capped backoff, forever) and
-	// the header reflects the connection state.
-	go func() {
-		seeded := sess
-		cycle := func(ctx context.Context, attempt int) (authenticated, served bool, err error) {
-			s := seeded
-			seeded = nil
-			if s == nil {
-				var derr error
-				if s, derr = openSessionWith(ctx, cfg, transport, prompter); derr != nil {
-					return false, false, derr
-				}
-			}
-			holder.Set(s)
-			emit(tui.ConnStateMsg{State: tui.ConnConnected})
-			if attempt > 0 {
-				emit(activity.Event{
-					TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindOperated,
-					Type: "serve", Status: "ok", Detail: "reconnected to sandbox",
-				})
-			}
-			// Don't serve/tunnel an unprovisioned sandbox — that spun the reconnect loop and
-			// stormed the password prompt. Surface a clear state and WAIT (no spin) for an
-			// in-place bootstrap (the operator presses `b`), which nudges `bootstrapped`.
-			if err := awaitBootstrapped(ctx, s.isBootstrapped, bootstrapped, emit); err != nil {
-				_ = s.Close()
-				return true, false, err
-			}
-			disp := buildConsoleDispatcher(ctx, s, cfg, act, events)
-			// In proxy egress mode, bring up the reverse-tunneled MITM proxy for this
-			// connection so the sandbox's tools egress through it, gated by the console's
-			// interactive approver (set by buildConsoleDispatcher above).
-			stopProxy, perr := startEgressProxy(ctx, s, cfg, io.Discard)
-			if perr != nil {
-				// Don't kill the healthy session when the proxy tunnel can't bind (that looped
-				// forever); surface a readable warning and serve without it — relay verbs still work.
-				emit(activity.Event{
-					TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindOperated,
-					Type: "egress", Status: "failed",
-					Detail: "egress proxy unavailable — native-tool egress disabled this session: " + perr.Error(),
-				})
-				stopProxy = func() {}
-			}
-			serveErr := disp.Serve(ctx, 2*time.Second)
-			stopProxy()
-			_ = s.Close()
-			return true, true, serveErr
-		}
-		onDown := func(err error, attempt int, backoff time.Duration) {
-			emit(tui.ConnStateMsg{State: tui.ConnReconnecting})
-			emit(activity.Event{
-				TS: time.Now().UTC().Format(time.RFC3339), Kind: activity.KindOperated,
-				Type: "serve", Status: "failed",
-				Detail: fmt.Sprintf("connection lost: %v — reconnecting in %s (attempt %d)", err, backoff.Round(time.Second), attempt),
-			})
-		}
-		_ = runSupervisor(ctx, prompter, cycle, onDown, sleepCtx)
-	}()
-
-	ops := &consoleOps{ctx: ctx, holder: holder, act: act, events: events, bootstrapped: bootstrapped}
-	model := tui.NewConsole(cfg.SandboxID, events, logPath, ops).
-		WithSeedCounts(seedServed, seedApproved, seedDenied, seedLast)
+	model := tui.NewConsole(cfg.SandboxID, w.events, w.agentLogPath, w.ops).
+		WithSeedCounts(w.seed.Served, w.seed.Approved, w.seed.Denied, w.seed.LastAction)
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
-	cancel() // stop serving; any pending approval fails safe via done
+	w.stop() // stop serving now (defer is the backstop); a pending approval fails safe via done
 	return err
 }
 

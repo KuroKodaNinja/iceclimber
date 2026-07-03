@@ -170,6 +170,16 @@ const (
 // claiming "serving".
 type ConnStateMsg struct{ State ConnState }
 
+// SandboxMsg tags a UI-bound message with the sandbox it came from. Every sandboxWorker
+// wraps its emissions in one, which is what makes a FLEET console possible: N workers
+// fan into one program and the shell routes each message to its sandbox's view by ID.
+// The single-sandbox Console simply unwraps (the ID is implicit). Untagged messages
+// remain valid (tests, ops-layer sends) — both paths are handled.
+type SandboxMsg struct {
+	ID  string
+	Msg tea.Msg
+}
+
 // ClearServingMsg clears the in-progress "serving" indicator for one request without a
 // serviced event — used when a request is denied by the gate (which produces no serviced event
 // and whose denial is logged durably, not pushed live), so the indicator never sticks. ID names
@@ -226,9 +236,13 @@ type Console struct {
 	approved  int
 	denied    int
 	lastTS    time.Time
-	modal     *ApprovalRequest
-	pwReq     *PasswordRequest // active no-echo password modal ("" = none)
-	pwInput   string           // typed secret so far (rendered masked)
+	// modals is the FIFO of held operations awaiting the operator (head is displayed;
+	// the rest wait, badged). A queue — not a single pointer — because at fleet scale N
+	// sandboxes' approvers can each have one outstanding ask; overwriting would orphan a
+	// Reply channel and deadlock that sandbox's dispatcher worker.
+	modals    []*ApprovalRequest
+	pwReqs    []*PasswordRequest // FIFO of no-echo password modals (same reasoning)
+	pwInput   string             // typed secret so far, for the head request (rendered masked)
 	form      *huh.Form
 	formKind  string // "install" | "bootstrap" while a form is open
 	running   string // label of an in-flight operator action ("" = idle)
@@ -329,14 +343,14 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// A password prompt (a reconnect re-auth) preempts everything and is answered by
 		// typing into a masked field — so it never writes to /dev/tty and corrupts the screen.
-		if c.pwReq != nil {
+		if len(c.pwReqs) > 0 {
 			switch msg.String() {
 			case "enter":
-				c.pwReq.Reply <- c.pwInput
-				c.pwReq, c.pwInput = nil, ""
+				c.pwReqs[0].Reply <- c.pwInput
+				c.pwReqs, c.pwInput = c.pwReqs[1:], ""
 			case "esc", "ctrl+c":
-				c.pwReq.Reply <- "" // cancel — the dial fails and the supervisor backs off
-				c.pwReq, c.pwInput = nil, ""
+				c.pwReqs[0].Reply <- "" // cancel — the dial fails and the supervisor backs off
+				c.pwReqs, c.pwInput = c.pwReqs[1:], ""
 			case "backspace":
 				if r := []rune(c.pwInput); len(r) > 0 {
 					c.pwInput = string(r[:len(r)-1])
@@ -352,11 +366,12 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// a held operation (the dispatcher blocked, waiting) is urgent, so it must be
 		// answered before a form/panel resumes. A modal can arrive over an open form
 		// or panel; answering it returns control to that form/panel unchanged.
-		if c.modal != nil {
-			// A held operation must be answered — only y/a/n/d apply.
+		if len(c.modals) > 0 {
+			// A held operation must be answered — only y/a/n/d apply. Answering the head
+			// reveals the next queued approval (if any) immediately.
 			if ch, ok := modalKey(msg.String()); ok {
-				c.modal.Reply <- ch
-				c.modal = nil
+				c.modals[0].Reply <- ch
+				c.modals = c.modals[1:]
 			}
 			return c, nil
 		}
@@ -421,6 +436,10 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return c, nil
 			}
 		}
+	case SandboxMsg:
+		// A worker-tagged message: the single-sandbox console just unwraps and dispatches
+		// (the ID matters to the fleet shell, which routes by it — see SandboxMsg).
+		return c.Update(msg.Msg)
 	case StatusMsg:
 		s := StatusSnapshot(msg)
 		c.status = &s
@@ -434,10 +453,13 @@ func (c Console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return c, c.waitEvent()
 	case *ApprovalRequest:
-		c.modal = msg
+		c.modals = append(c.modals, msg)
 		return c, c.waitEvent()
 	case *PasswordRequest:
-		c.pwReq, c.pwInput = msg, ""
+		if len(c.pwReqs) == 0 {
+			c.pwInput = ""
+		}
+		c.pwReqs = append(c.pwReqs, msg)
 		return c, c.waitEvent()
 	case ConnStateMsg:
 		c.connState = msg.State
@@ -587,11 +609,11 @@ func (c *Console) clampCursor() {
 }
 
 func (c Console) View() string {
-	if c.pwReq != nil {
-		return passwordView(c.width, c.height, c.pwReq.Label, len([]rune(c.pwInput)))
+	if len(c.pwReqs) > 0 {
+		return passwordView(c.width, c.height, c.pwReqs[0].Label, len([]rune(c.pwInput)))
 	}
-	if c.modal != nil {
-		return modalView(c.width, c.height, c.modal)
+	if len(c.modals) > 0 {
+		return modalView(c.width, c.height, c.modals[0], len(c.modals)-1)
 	}
 	switch c.panel {
 	case "status":

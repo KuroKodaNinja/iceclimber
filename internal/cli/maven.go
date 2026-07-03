@@ -1,13 +1,11 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/maven"
 )
 
@@ -32,17 +30,11 @@ func newMavenBuildCmd() *cobra.Command {
 			if project == "" || javaVersion == "" {
 				return fmt.Errorf("--project <dir> (a sandbox dir with pom.xml) and --java <feature> are required")
 			}
-			cfg, err := config.Load(cfgFile, sandboxID)
+			ctx, _, sess, done, err := openCommandSession(cmd, 20*time.Minute, "maven build")
 			if err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 20*time.Minute)
-			defer cancel()
-			sess, err := openLockedSession(ctx, cfg, transport, "maven build")
-			if err != nil {
-				return err
-			}
-			defer sess.Close()
+			defer done()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
 			res, err := maven.Build(ctx, mavenBuildDeps(sess, pr), project, javaVersion, mavenVersion, args)

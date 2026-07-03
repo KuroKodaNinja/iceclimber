@@ -41,9 +41,9 @@ type Asset struct {
 
 // Fetcher downloads assets into a shared, cross-process-safe cache.
 type Fetcher struct {
-	CacheDir string          // "" → os.TempDir()/iceclimber-cache (the installers' long-standing default)
-	Client   *http.Client    // nil → http.DefaultClient
-	Progress progress.Func   // nil-safe (progress.Func is)
+	CacheDir string        // "" → os.TempDir()/iceclimber-cache (the installers' long-standing default)
+	Client   *http.Client  // nil → http.DefaultClient
+	Progress progress.Func // nil-safe (progress.Func is)
 }
 
 // Fetch returns the local path of the verified asset, downloading it on a cache miss.

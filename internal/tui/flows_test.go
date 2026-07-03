@@ -281,7 +281,7 @@ func TestFlow_EgressModalApprove(t *testing.T) {
 		t.Errorf("reply = %d, want ApproveAll", got)
 	}
 	c := finalConsole(t, tm)
-	if c.modal != nil {
+	if len(c.modals) != 0 {
 		t.Error("modal should clear after answering")
 	}
 }
