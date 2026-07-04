@@ -30,7 +30,7 @@ func (m *Manager) RelayInstallProject(ctx context.Context, projectDir string) (p
 		cnpm = "npm"
 	}
 	if out, err := exec.CommandContext(ctx, cnpm, "--version").CombinedOutput(); err != nil {
-		return pkg.Outcome{}, fmt.Errorf("Tier 1 relay needs npm on the controller (set controller_npm): %v: %s", err, lastLines(out, 3))
+		return pkg.Outcome{}, fmt.Errorf("Tier 1 relay needs npm on the controller (set controller_npm): %v: %s", err, pkg.LastLines(out, 3))
 	}
 
 	// 1. Read the manifest (and any lockfile) from the sandbox project.
@@ -72,7 +72,7 @@ func (m *Manager) RelayInstallProject(ctx context.Context, projectDir string) (p
 	cmd := exec.CommandContext(ctx, cnpm, args...)
 	cmd.Dir = stage
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return pkg.Outcome{}, fmt.Errorf("controller npm %s failed (a dep may need a native build — Node Tier 2 is future work): %s", verb, lastLines(out, 6))
+		return pkg.Outcome{}, fmt.Errorf("controller npm %s failed (a dep may need a native build — Node Tier 2 is future work): %s", verb, pkg.LastLines(out, 6))
 	}
 
 	stageModules := filepath.Join(stage, "node_modules")
@@ -122,7 +122,7 @@ func (m *Manager) InstallProject(ctx context.Context, projectDir string) (pkg.Ou
 		return pkg.Outcome{}, fmt.Errorf("run npm install in %s: %w", projectDir, err)
 	}
 	if res.ExitCode != 0 {
-		return pkg.Outcome{}, fmt.Errorf("npm install in %s failed: %s", projectDir, lastLines(res.Stderr, 4))
+		return pkg.Outcome{}, fmt.Errorf("npm install in %s failed: %s", projectDir, pkg.LastLines(res.Stderr, 4))
 	}
 	var out pkg.Outcome
 	for _, name := range deps {

@@ -43,7 +43,7 @@ func (m *Manager) RelayInstall(ctx context.Context, specs []pkg.Spec) (pkg.Outco
 		args = append(args, ref(s))
 	}
 	if out, err := exec.CommandContext(ctx, cnpm, args...).CombinedOutput(); err != nil {
-		return pkg.Outcome{}, fmt.Errorf("controller npm install failed (a package may need a native build — Node Tier 2 is future work): %s", lastLines(out, 5))
+		return pkg.Outcome{}, fmt.Errorf("controller npm install failed (a package may need a native build — Node Tier 2 is future work): %s", pkg.LastLines(out, 5))
 	}
 
 	stageModules := filepath.Join(stage, "lib", "node_modules")

@@ -72,12 +72,12 @@ func (m *Manager) resultOutcome(res remote.Result, specs []pkg.Spec, tier string
 	cr, perr := parseCondaJSON(res.Stdout)
 	if perr != nil {
 		if res.ExitCode != 0 {
-			return pkg.Outcome{}, fmt.Errorf("conda failed: %s", lastLines(res.Stderr, 4))
+			return pkg.Outcome{}, fmt.Errorf("conda failed: %s", pkg.LastLines(res.Stderr, 4))
 		}
 		return pkg.Outcome{}, fmt.Errorf("parse conda --json output: %w", perr)
 	}
 	if res.ExitCode != 0 || !cr.Success {
-		msg := firstNonEmpty(cr.Message, cr.Error, lastLines(res.Stderr, 4), "conda install failed")
+		msg := pkg.FirstNonEmpty(cr.Message, cr.Error, pkg.LastLines(res.Stderr, 4), "conda install failed")
 		var out pkg.Outcome
 		for _, s := range specs {
 			out.Failed = append(out.Failed, pkg.Failure{Name: s.Name, Version: s.Version, Error: msg})
@@ -174,22 +174,4 @@ func trimToJSON(b []byte) []byte {
 		s = s[i:]
 	}
 	return []byte(s)
-}
-
-func firstNonEmpty(ss ...string) string {
-	for _, s := range ss {
-		if strings.TrimSpace(s) != "" {
-			return s
-		}
-	}
-	return ""
-}
-
-// lastLines returns the trailing n non-empty-trimmed lines of b.
-func lastLines(b []byte, n int) string {
-	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
 }

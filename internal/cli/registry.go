@@ -12,13 +12,12 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/maven"
-	"github.com/KuroKodaNinja/iceclimber/internal/node"
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
 	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
-	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/relay"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 	"github.com/KuroKodaNinja/iceclimber/internal/shell"
 	"github.com/KuroKodaNinja/iceclimber/internal/webfetch"
 )
@@ -50,10 +49,13 @@ func pinAssetName(url string) string {
 	return "pin-" + url
 }
 
-// newInstaller builds the Python installer from an open session. pr (may be nil)
-// receives operator-facing progress events.
-func newInstaller(sess *session, pr progress.Func) *python.Installer {
-	return python.NewInstaller(python.Config{
+// runtimeInstaller builds the shared install engine for a registered managed language (its
+// Spec drives the subdir/bin/verify/resolve). pr (may be nil) receives operator-facing progress.
+// A caller that names an unregistered language gets a zero Spec (Install fails clearly), which
+// can't happen for the wired verbs — the registry is the single source of language names.
+func runtimeInstaller(sess *session, pr progress.Func, lang string) *runtime.Installer {
+	spec, _ := managedLangSpec(lang)
+	return runtime.New(spec, runtime.Config{
 		FS:       sess.fs,
 		Runner:   sess.runner,
 		Root:     sess.tree.Root,
@@ -62,8 +64,14 @@ func newInstaller(sess *session, pr progress.Func) *python.Installer {
 		Libc:     sess.fp.Libc.Family,
 		CacheDir: sess.cacheDir,
 		Progress: pr,
-		Pin:      runtimePinFor(sess, "python"),
+		Pin:      runtimePinFor(sess, lang),
 	})
+}
+
+// newInstaller/newNodeInstaller/newJavaInstaller are the named constructors the CLI install
+// commands use; each is the generic engine bound to its language's Spec.
+func newInstaller(sess *session, pr progress.Func) *runtime.Installer {
+	return runtimeInstaller(sess, pr, "python")
 }
 
 // loadCatalog builds the tool catalog for a session: embedded defaults + the
@@ -117,18 +125,8 @@ func installShell(ctx context.Context, sess *session, pr progress.Func) (catalog
 }
 
 // newNodeInstaller builds the Node installer from an open session.
-func newNodeInstaller(sess *session, pr progress.Func) *node.Installer {
-	return node.NewInstaller(node.Config{
-		FS:       sess.fs,
-		Runner:   sess.runner,
-		Root:     sess.tree.Root,
-		OS:       sess.fp.OS,
-		Arch:     sess.fp.Arch,
-		Libc:     sess.fp.Libc.Family,
-		CacheDir: sess.cacheDir,
-		Progress: pr,
-		Pin:      runtimePinFor(sess, "node"),
-	})
+func newNodeInstaller(sess *session, pr progress.Func) *runtime.Installer {
+	return runtimeInstaller(sess, pr, "node")
 }
 
 // newAgentInstaller builds the agent installer (Claude Code, …) from an open
@@ -148,18 +146,8 @@ func newAgentInstaller(sess *session) *agent.Installer {
 }
 
 // newJavaInstaller builds the JDK installer from an open session.
-func newJavaInstaller(sess *session, pr progress.Func) *java.Installer {
-	return java.NewInstaller(java.Config{
-		FS:       sess.fs,
-		Runner:   sess.runner,
-		Root:     sess.tree.Root,
-		OS:       sess.fp.OS,
-		Arch:     sess.fp.Arch,
-		Libc:     sess.fp.Libc.Family,
-		CacheDir: sess.cacheDir,
-		Progress: pr,
-		Pin:      runtimePinFor(sess, "java"),
-	})
+func newJavaInstaller(sess *session, pr progress.Func) *runtime.Installer {
+	return runtimeInstaller(sess, pr, "java")
 }
 
 // mavenDeps builds the maven.install dependency bundle from an open session.
@@ -260,19 +248,28 @@ func webfetchDeps(sess *session) webfetch.Deps {
 // transfer lights up the in-flight indicator (#3); headless serve / the bootstrap smoke
 // test pass nil (no render surface).
 func buildRegistry(sess *session, pr progress.Func) protocol.Registry {
-	return protocol.Registry{
-		"ping":           protocol.PingHandler(version, sess.dispatchConcur),
-		"python.install": python.Handler(newInstaller(sess, pr)),
-		"pip.install":    pip.Handler(pipDeps(sess, pr)),
-		"node.install":   node.Handler(newNodeInstaller(sess, pr)),
-		"npm.install":    npm.Handler(npmDeps(sess, pr)),
-		"java.install":   javaInstallHandler(sess, pr),
-		"maven.install":  maven.Handler(mavenDeps(sess, pr)),
-		"maven.build":    maven.BuildHandler(mavenBuildDeps(sess, pr)),
-		"conda.install":  conda.Handler(condaDeps(sess, pr)),
-		"tool.install":   catalog.Handler(func() (*catalog.Catalog, error) { return loadCatalog(sess) }, toolInstallDeps(sess, pr)),
-		"web.fetch":      webfetch.Handler(webfetchDeps(sess)),
+	reg := protocol.Registry{
+		"ping":          protocol.PingHandler(version, sess.dispatchConcur),
+		"pip.install":   pip.Handler(pipDeps(sess, pr)),
+		"npm.install":   npm.Handler(npmDeps(sess, pr)),
+		"maven.install": maven.Handler(mavenDeps(sess, pr)),
+		"maven.build":   maven.BuildHandler(mavenBuildDeps(sess, pr)),
+		"conda.install": conda.Handler(condaDeps(sess, pr)),
+		"tool.install":  catalog.Handler(func() (*catalog.Catalog, error) { return loadCatalog(sess) }, toolInstallDeps(sess, pr)),
+		"web.fetch":     webfetch.Handler(webfetchDeps(sess)),
 	}
+	// The <lang>.install handlers come from the language registry, so a new managed language is
+	// served automatically once it registers a Spec. java is the one special case: in proxy mode
+	// it also builds the JVM egress truststore after install (javaInstallHandler).
+	for _, spec := range managedLangs() {
+		verb := spec.Lang + ".install"
+		if spec.Lang == "java" {
+			reg[verb] = javaInstallHandler(sess, pr)
+			continue
+		}
+		reg[verb] = runtime.Handler(runtimeInstaller(sess, pr, spec.Lang))
+	}
+	return reg
 }
 
 // javaInstallHandler is the java.install handler, extended in proxy mode to build the JVM
@@ -280,7 +277,7 @@ func buildRegistry(sess *session, pr progress.Func) protocol.Registry {
 // `install java`) so a Nana-installed JDK trusts the proxy's leaves. In relay mode it's the
 // plain installer handler.
 func javaInstallHandler(sess *session, pr progress.Func) protocol.Handler {
-	base := java.Handler(newJavaInstaller(sess, pr))
+	base := runtime.Handler(newJavaInstaller(sess, pr))
 	if !sess.egressProxy {
 		return base
 	}

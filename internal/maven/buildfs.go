@@ -16,13 +16,6 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 )
 
-func firstNonEmptyStr(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
-}
-
 // expectedSHA512 fetches the Apache-published `<url>.sha512` sidecar and returns the
 // hex digest (the file is the digest, optionally followed by whitespace/filename).
 func expectedSHA512(ctx context.Context, url string) (string, error) {

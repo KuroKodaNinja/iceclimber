@@ -37,7 +37,7 @@ func (m *Manager) RelayInstall(ctx context.Context, specs []pkg.Spec, minor stri
 	if minor == "" {
 		return pkg.Outcome{}, fmt.Errorf("conda relay requires a python_version (e.g. 3.12)")
 	}
-	conda := firstNonEmpty(m.cfg.ControllerConda, "conda")
+	conda := pkg.FirstNonEmpty(m.cfg.ControllerConda, "conda")
 	if out, err := exec.CommandContext(ctx, conda, "--version").CombinedOutput(); err != nil {
 		return pkg.Outcome{}, fmt.Errorf("conda relay needs conda on the controller (set controller_conda): %v: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -121,14 +121,14 @@ func (m *Manager) controllerSolve(ctx context.Context, conda, subdir, minor stri
 
 	sv, perr := parseSolveJSON(out)
 	if perr != nil {
-		return nil, fmt.Errorf("controller conda solve failed: %s", lastLines(out, 6))
+		return nil, fmt.Errorf("controller conda solve failed: %s", pkg.LastLines(out, 6))
 	}
 	if !sv.Success {
-		msg := firstNonEmpty(sv.Message, sv.Error, lastLines(out, 6), "conda solve failed")
+		msg := pkg.FirstNonEmpty(sv.Message, sv.Error, pkg.LastLines(out, 6), "conda solve failed")
 		return nil, fmt.Errorf("controller conda solve failed: %s", msg)
 	}
 	if runErr != nil && len(sv.Actions.Link) == 0 {
-		return nil, fmt.Errorf("controller conda solve failed: %s", lastLines(out, 6))
+		return nil, fmt.Errorf("controller conda solve failed: %s", pkg.LastLines(out, 6))
 	}
 	return mergeRecords(sv.Actions.Link, sv.Actions.Fetch), nil
 }
@@ -147,7 +147,7 @@ func (m *Manager) downloadChannel(ctx context.Context, localChan string, recs []
 			return nil, fmt.Errorf("solve record %s-%s has no download URL", r.Name, r.Version)
 		}
 		if !strings.HasPrefix(url, "https://") {
-			return nil, fmt.Errorf("refusing non-https package URL for %s: %s", fn, firstNonEmpty(schemeOf(url), "(none)"))
+			return nil, fmt.Errorf("refusing non-https package URL for %s: %s", fn, pkg.FirstNonEmpty(schemeOf(url), "(none)"))
 		}
 		if err := safePathComponent(fn); err != nil {
 			return nil, err

@@ -138,16 +138,15 @@ func listCount(ctx context.Context, fs remotefs.FS, dir string) int {
 }
 
 // runtimeRuns reports whether the installed runtime at runtimes/<lang>/<dir> actually
-// executes (its version probe exits 0) — the real "did the install succeed" signal.
+// executes (its version probe exits 0) — the real "did the install succeed" signal. The bin
+// name + probe command come from the language registry (the Spec's BinName/Verify), so a new
+// language is covered without editing this switch.
 func runtimeRuns(ctx context.Context, runner remote.Runner, tree protocol.Tree, lang, dir string) bool {
-	exe, arg := "bin/python3", "--version"
-	switch lang {
-	case "node":
-		exe, arg = "bin/node", "--version"
-	case "java":
-		exe, arg = "bin/java", "-version"
+	spec, ok := managedLangSpec(lang)
+	if !ok {
+		return false
 	}
-	bin := path.Join(tree.Root, "runtimes", lang, dir, exe)
-	res, err := runner.Run(ctx, remote.ShellQuote(bin)+" "+arg+" 2>&1", nil)
+	bin := path.Join(tree.Root, "runtimes", lang, dir, "bin", spec.BinName)
+	res, err := runner.Run(ctx, spec.Verify(bin)+" 2>&1", nil)
 	return err == nil && res.ExitCode == 0
 }

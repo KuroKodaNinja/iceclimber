@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/relay"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
 // Node distribution sources. glibc builds come from nodejs.org/dist; musl builds
@@ -19,49 +21,35 @@ const (
 	distBaseMusl  = "https://unofficial-builds.nodejs.org/download/release"
 )
 
-// resolved is the exact Node asset to install.
-type resolved struct {
-	FullVersion string // "20.11.1" (no leading v)
-	AssetName   string // "node-v20.11.1-linux-arm64-musl.tar.gz"
-	URL         string
-	SHA256      string
-}
-
 // indexEntry is one record from index.json.
 type indexEntry struct {
 	Version string   `json:"version"` // "v20.11.1"
 	Files   []string `json:"files"`   // platform tags, e.g. "linux-arm64-musl"
 }
 
-// resolve maps a requested version line ("20" / "20.11") to an exact Node asset
-// for this sandbox's platform, with its checksum.
-func (i *Installer) resolve(ctx context.Context, requested string) (resolved, error) {
-	// An operator pin short-circuits the live resolver (skips all upstream metadata
-	// calls — the air-gapped-mirror path, §17). A miss falls through to the resolve below.
-	if i.cfg.Pin != nil {
-		if p, ok := i.cfg.Pin(requested); ok {
-			return resolved{FullVersion: p.FullVersion, AssetName: p.AssetName, URL: p.URL, SHA256: p.SHA256}, nil
-		}
-	}
-	base, fileTag, err := nodePlatform(i.cfg.OS, i.cfg.Arch, i.cfg.Libc)
+// Resolve maps a requested version line ("20" / "20.11") to an exact Node asset for this
+// sandbox's platform, with its checksum. It's the Spec's live upstream resolver: the engine
+// handles the operator-pin short-circuit before this is ever called.
+func Resolve(ctx context.Context, fp runtime.Fingerprint, client *http.Client, requested string) (relay.Pin, error) {
+	base, fileTag, err := nodePlatform(fp.OS, fp.Arch, fp.Libc)
 	if err != nil {
-		return resolved{}, err
+		return relay.Pin{}, err
 	}
-	idx, err := i.fetchIndex(ctx, base+"/index.json")
+	idx, err := fetchIndex(ctx, client, base+"/index.json")
 	if err != nil {
-		return resolved{}, err
+		return relay.Pin{}, err
 	}
 	full, err := pickVersion(idx, requested, fileTag)
 	if err != nil {
-		return resolved{}, err
+		return relay.Pin{}, err
 	}
 	asset := fmt.Sprintf("node-%s-%s.tar.gz", full, fileTag) // full is "v20.11.1"
 	url := base + "/" + full + "/" + asset
-	sha, err := i.fetchSHA(ctx, base+"/"+full+"/SHASUMS256.txt", asset)
+	sha, err := fetchSHA(ctx, client, base+"/"+full+"/SHASUMS256.txt", asset)
 	if err != nil {
-		return resolved{}, err
+		return relay.Pin{}, err
 	}
-	return resolved{FullVersion: strings.TrimPrefix(full, "v"), AssetName: asset, URL: url, SHA256: sha}, nil
+	return relay.Pin{FullVersion: strings.TrimPrefix(full, "v"), AssetName: asset, URL: url, SHA256: sha}, nil
 }
 
 // nodePlatform selects the distribution base + the platform "file tag" used in
@@ -89,8 +77,8 @@ func nodePlatform(goos, arch, libc string) (base, fileTag string, err error) {
 	}
 }
 
-func (i *Installer) fetchIndex(ctx context.Context, url string) ([]indexEntry, error) {
-	body, _, err := relay.HTTPGet(ctx, i.cfg.HTTPClient, url)
+func fetchIndex(ctx context.Context, client *http.Client, url string) ([]indexEntry, error) {
+	body, _, err := relay.HTTPGet(ctx, client, url)
 	if err != nil {
 		return nil, fmt.Errorf("fetch node index: %w", err)
 	}
@@ -104,8 +92,8 @@ func (i *Installer) fetchIndex(ctx context.Context, url string) ([]indexEntry, e
 
 // fetchSHA reads a SHASUMS256.txt body and returns the hash for asset. Lines are
 // "<64-hex-hash>  <filename>".
-func (i *Installer) fetchSHA(ctx context.Context, url, asset string) (string, error) {
-	body, _, err := relay.HTTPGet(ctx, i.cfg.HTTPClient, url)
+func fetchSHA(ctx context.Context, client *http.Client, url, asset string) (string, error) {
+	body, _, err := relay.HTTPGet(ctx, client, url)
 	if err != nil {
 		return "", fmt.Errorf("fetch SHASUMS256: %w", err)
 	}

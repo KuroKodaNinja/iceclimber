@@ -68,7 +68,7 @@ func (m *Manager) Resolve(ctx context.Context, specs []pkg.Spec) (pkg.Plan, erro
 		return pkg.Plan{}, fmt.Errorf("run pip resolve: %w", err)
 	}
 	if res.ExitCode != 0 {
-		return pkg.Plan{}, fmt.Errorf("pip could not resolve the request: %s", lastLines(res.Stderr, 4))
+		return pkg.Plan{}, fmt.Errorf("pip could not resolve the request: %s", pkg.LastLines(res.Stderr, 4))
 	}
 	data, err := m.cfg.FS.ReadFile(ctx, reportPath)
 	if err != nil {
@@ -88,7 +88,7 @@ func (m *Manager) Install(ctx context.Context, plan pkg.Plan) (pkg.Outcome, erro
 		case err != nil:
 			out.Failed = append(out.Failed, pkg.Failure{Name: p.Name, Version: p.Version, Error: err.Error()})
 		case res.ExitCode != 0:
-			out.Failed = append(out.Failed, pkg.Failure{Name: p.Name, Version: p.Version, Error: lastLines(res.Stderr, 3)})
+			out.Failed = append(out.Failed, pkg.Failure{Name: p.Name, Version: p.Version, Error: pkg.LastLines(res.Stderr, 3)})
 		default:
 			out.Installed = append(out.Installed, pkg.Installed{
 				Name: p.Name, Version: p.Version, Tier: pkg.TierMirror, SHA256: p.SHA256,
@@ -192,14 +192,4 @@ func parseReport(data []byte) (pkg.Plan, error) {
 		})
 	}
 	return plan, nil
-}
-
-// lastLines returns the trailing n non-empty-trimmed lines of b — enough error
-// context without the full pip log.
-func lastLines(b []byte, n int) string {
-	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
 }

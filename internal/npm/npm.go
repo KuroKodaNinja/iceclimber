@@ -52,7 +52,7 @@ func (m *Manager) Install(ctx context.Context, specs []pkg.Spec) (pkg.Outcome, e
 		case err != nil:
 			out.Failed = append(out.Failed, pkg.Failure{Name: s.Name, Version: s.Version, Error: err.Error()})
 		case res.ExitCode != 0:
-			out.Failed = append(out.Failed, pkg.Failure{Name: s.Name, Version: s.Version, Error: lastLines(res.Stderr, 3)})
+			out.Failed = append(out.Failed, pkg.Failure{Name: s.Name, Version: s.Version, Error: pkg.LastLines(res.Stderr, 3)})
 		default:
 			ver, _ := m.installedVersion(ctx, s.Name)
 			if ver == "" {
@@ -108,12 +108,4 @@ func ref(s pkg.Spec) string {
 		return s.Name
 	}
 	return s.Name + "@" + s.Version
-}
-
-func lastLines(b []byte, n int) string {
-	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
 }

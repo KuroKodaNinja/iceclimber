@@ -711,21 +711,17 @@ func firstLine(s string) string {
 }
 
 // defaultVersion supplies a sane runtime version when the operator left it blank, resolving to
-// the SAME recommended line the agent's `popo <lang>.install` (no version / "latest") uses — one
-// source of truth per runtime (node/python/java.RecommendedLine) so the console, the CLI, the
-// agent, and NANA.md never drift.
+// the SAME recommended line the agent's `popo <lang>.install` (no version / "latest") uses —
+// read from the language registry (each Spec's Recommended) so the console, the CLI, the agent,
+// and NANA.md share one source of truth and can't drift.
 func defaultVersion(lang, v string) string {
 	if s := strings.TrimSpace(v); s != "" {
 		return s
 	}
-	switch lang {
-	case "javascript":
-		return node.RecommendedLine
-	case "java":
-		return java.RecommendedLine
-	default:
-		return python.RecommendedLine
+	if spec, ok := managedLangSpec(canonicalLang(lang)); ok {
+		return spec.Recommended
 	}
+	return python.RecommendedLine
 }
 
 // record appends the operator action to the activity log and pushes it to the

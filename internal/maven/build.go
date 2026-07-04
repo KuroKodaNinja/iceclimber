@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
+	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
 	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
@@ -84,10 +85,10 @@ func Build(ctx context.Context, d BuildDeps, projectDir, javaVersion, mavenVersi
 		// plugins, transitive + plugin resolution, download-during-build) with no bespoke Go.
 		return d.buildOnlineProxy(ctx, projectDir, javaVersion, mavenVersion, goals)
 	}
-	cmvn := firstNonEmptyStr(d.ControllerMvn, "mvn")
+	cmvn := pkg.FirstNonEmpty(d.ControllerMvn, "mvn")
 	vout, err := exec.CommandContext(ctx, cmvn, "-v").CombinedOutput()
 	if err != nil {
-		return BuildResult{}, fmt.Errorf("maven.build needs Maven + a JDK on the controller (set controller_mvn): %v: %s", err, lastLines(vout, 3))
+		return BuildResult{}, fmt.Errorf("maven.build needs Maven + a JDK on the controller (set controller_mvn): %v: %s", err, pkg.LastLines(vout, 3))
 	}
 	// Relay the controller's EXACT Maven version so the sandbox build sees the same
 	// super-pom plugin defaults the controller primed — no version drift, no missing
@@ -133,7 +134,7 @@ func Build(ctx context.Context, d BuildDeps, projectDir, javaVersion, mavenVersi
 	stageRepo := filepath.Join(stage, "m2repo")
 	primeArgs := []string{"-B", "-ntp", "-Dmaven.repo.local=" + stageRepo, "-f", stagePom, "dependency:go-offline"}
 	if out, err := exec.CommandContext(ctx, cmvn, primeArgs...).CombinedOutput(); err != nil {
-		return BuildResult{}, fmt.Errorf("controller repo prime (dependency:go-offline) failed — a pinned plugin/dep may be unresolvable: %s", lastLines(out, 8))
+		return BuildResult{}, fmt.Errorf("controller repo prime (dependency:go-offline) failed — a pinned plugin/dep may be unresolvable: %s", pkg.LastLines(out, 8))
 	}
 
 	// 3. Relay the Maven tool (once) and the primed repo into the sandbox.
@@ -163,7 +164,7 @@ func Build(ctx context.Context, d BuildDeps, projectDir, javaVersion, mavenVersi
 		return BuildResult{}, fmt.Errorf("run offline mvn: %w", err)
 	}
 	if res.ExitCode != 0 {
-		return BuildResult{}, fmt.Errorf("offline mvn build failed: %s", lastLines(res.Stderr, 8))
+		return BuildResult{}, fmt.Errorf("offline mvn build failed: %s", pkg.LastLines(res.Stderr, 8))
 	}
 
 	// 5. Collect the built artifacts (target/*.jar).
@@ -219,9 +220,9 @@ func (d BuildDeps) buildOnlineProxy(ctx context.Context, projectDir, javaVersion
 		// mvn logs to stdout (with -B), so combine both streams for the tail.
 		combined := string(res.Stdout) + string(res.Stderr)
 		if looksLikeProxyDown(combined) {
-			return BuildResult{}, fmt.Errorf("online mvn build failed — the egress proxy is not reachable: proxy-mode `maven build` needs an active `iceclimber serve` (the proxy only listens during a serve session), or use egress_mode: relay for a one-shot build:\n%s", lastLines([]byte(combined), 8))
+			return BuildResult{}, fmt.Errorf("online mvn build failed — the egress proxy is not reachable: proxy-mode `maven build` needs an active `iceclimber serve` (the proxy only listens during a serve session), or use egress_mode: relay for a one-shot build:\n%s", pkg.LastLines([]byte(combined), 8))
 		}
-		return BuildResult{}, fmt.Errorf("online mvn build failed: %s", lastLines([]byte(combined), 8))
+		return BuildResult{}, fmt.Errorf("online mvn build failed: %s", pkg.LastLines([]byte(combined), 8))
 	}
 	return BuildResult{Artifacts: d.collectArtifacts(ctx, projectDir), Tier: "proxy"}, nil
 }

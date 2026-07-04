@@ -1,11 +1,8 @@
 package java
 
 import (
-	"context"
-	"encoding/json"
-	"strings"
-
-	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
+	"github.com/KuroKodaNinja/iceclimber/internal/remote"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
 // RecommendedLine is the JDK feature version iceclimber installs when the caller doesn't ask
@@ -14,32 +11,20 @@ import (
 const RecommendedLine = "21"
 
 // ResolveLine maps a caller's version request to a concrete feature version: an empty value or
-// "latest" (case-insensitive) becomes RecommendedLine; anything else is used verbatim.
-func ResolveLine(v string) string {
-	s := strings.TrimSpace(v)
-	if s == "" || strings.EqualFold(s, "latest") {
-		return RecommendedLine
-	}
-	return s
-}
+// "latest" (case-insensitive) becomes RecommendedLine; anything else is used verbatim. External
+// callers (the CLI, the console) share this so a blank/"latest" request lands on RecommendedLine.
+func ResolveLine(v string) string { return runtime.ResolveLine(RecommendedLine, v) }
 
-type installParams struct {
-	Version string `json:"version"` // feature version, e.g. "21" or "17"; "" / "latest" → RecommendedLine
-}
-
-// Handler adapts the JDK installer into the java.install protocol handler.
-func Handler(inst *Installer) protocol.Handler {
-	return func(ctx context.Context, req protocol.Request) protocol.Response {
-		var p installParams
-		if len(req.Params) > 0 {
-			if err := json.Unmarshal(req.Params, &p); err != nil {
-				return protocol.Errf(req.ID, "malformed_params", "parse params: %v", err)
-			}
-		}
-		res, err := inst.Install(ctx, ResolveLine(p.Version))
-		if err != nil {
-			return protocol.Errf(req.ID, "install_failed", "%v", err)
-		}
-		return protocol.OK(req.ID, res)
+// Spec binds the JDK into the shared install engine: its runtimes/<lang> subdir, its bin, its
+// recommended line, how to prove it runs, and its live upstream resolver (Resolve).
+func Spec() runtime.Spec {
+	return runtime.Spec{
+		Lang:        "java",
+		BinName:     "java",
+		Recommended: RecommendedLine,
+		Verify: func(bin string) string {
+			return remote.ShellQuote(bin) + " -version"
+		},
+		Resolve: Resolve,
 	}
 }

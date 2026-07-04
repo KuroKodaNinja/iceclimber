@@ -1,11 +1,8 @@
 package python
 
 import (
-	"context"
-	"encoding/json"
-	"strings"
-
-	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
+	"github.com/KuroKodaNinja/iceclimber/internal/remote"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
 // RecommendedLine is the Python minor version iceclimber installs when the caller doesn't ask
@@ -14,33 +11,20 @@ import (
 const RecommendedLine = "3.12"
 
 // ResolveLine maps a caller's version request to a concrete minor: an empty value or "latest"
-// (case-insensitive) becomes RecommendedLine; anything else is used verbatim.
-func ResolveLine(v string) string {
-	s := strings.TrimSpace(v)
-	if s == "" || strings.EqualFold(s, "latest") {
-		return RecommendedLine
-	}
-	return s
-}
+// (case-insensitive) becomes RecommendedLine; anything else is used verbatim. External callers
+// (the CLI, the console) share this so a blank/"latest" request always lands on RecommendedLine.
+func ResolveLine(v string) string { return runtime.ResolveLine(RecommendedLine, v) }
 
-// installParams is the python.install request body (plan §4.2).
-type installParams struct {
-	Version string `json:"version"` // minor version, e.g. "3.12"; "" / "latest" → RecommendedLine
-}
-
-// Handler adapts an Installer into the python.install protocol handler.
-func Handler(inst *Installer) protocol.Handler {
-	return func(ctx context.Context, req protocol.Request) protocol.Response {
-		var p installParams
-		if len(req.Params) > 0 {
-			if err := json.Unmarshal(req.Params, &p); err != nil {
-				return protocol.Errf(req.ID, "malformed_params", "parse params: %v", err)
-			}
-		}
-		res, err := inst.Install(ctx, ResolveLine(p.Version))
-		if err != nil {
-			return protocol.Errf(req.ID, "install_failed", "%v", err)
-		}
-		return protocol.OK(req.ID, res)
+// Spec binds Python into the shared install engine: its runtimes/<lang> subdir, its bin, its
+// recommended line, how to prove it runs, and its live upstream resolver (Resolve).
+func Spec() runtime.Spec {
+	return runtime.Spec{
+		Lang:        "python",
+		BinName:     "python3",
+		Recommended: RecommendedLine,
+		Verify: func(bin string) string {
+			return remote.ShellQuote(bin) + " -c " + remote.ShellQuote("import sys; print(sys.version)")
+		},
+		Resolve: Resolve,
 	}
 }

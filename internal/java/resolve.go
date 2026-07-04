@@ -4,23 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/relay"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
 // Adoptium (Eclipse Temurin) publishes a queryable assets API with per-build
 // SHA256 checksums — the analog of Python's PBS metadata. musl builds are the
 // "alpine-linux" os; glibc builds are "linux".
 const adoptiumAPI = "https://api.adoptium.net/v3"
-
-// resolved is the exact JDK asset to install.
-type resolved struct {
-	FullVersion string // semver, e.g. "21.0.11+10"
-	AssetName   string // "OpenJDK21U-jdk_aarch64_alpine-linux_hotspot_21.0.11_10.tar.gz"
-	URL         string
-	SHA256      string
-}
 
 // adoptiumAsset is one element of the /v3/assets/latest response.
 type adoptiumAsset struct {
@@ -39,43 +33,37 @@ type adoptiumAsset struct {
 	} `json:"version"`
 }
 
-// resolve maps a requested feature version ("21" / "17") to the latest Temurin JDK
-// asset for this sandbox's platform, with its checksum, via the Adoptium API.
-func (i *Installer) resolve(ctx context.Context, feature string) (resolved, error) {
-	// An operator pin short-circuits the live resolver (skips all upstream metadata
-	// calls — the air-gapped-mirror path, §17). A miss falls through to the resolve below.
-	if i.cfg.Pin != nil {
-		if p, ok := i.cfg.Pin(feature); ok {
-			return resolved{FullVersion: p.FullVersion, AssetName: p.AssetName, URL: p.URL, SHA256: p.SHA256}, nil
-		}
-	}
-	arch, apiOS, err := adoptiumPlatform(i.cfg.OS, i.cfg.Arch, i.cfg.Libc)
+// Resolve maps a requested feature version ("21" / "17") to the latest Temurin JDK asset for
+// this sandbox's platform, with its checksum, via the Adoptium API. It's the Spec's live
+// upstream resolver: the engine handles the operator-pin short-circuit before this is called.
+func Resolve(ctx context.Context, fp runtime.Fingerprint, client *http.Client, feature string) (relay.Pin, error) {
+	arch, apiOS, err := adoptiumPlatform(fp.OS, fp.Arch, fp.Libc)
 	if err != nil {
-		return resolved{}, err
+		return relay.Pin{}, err
 	}
 	feature = strings.TrimSpace(feature)
 	url := fmt.Sprintf("%s/assets/latest/%s/hotspot?architecture=%s&image_type=jdk&os=%s",
 		adoptiumAPI, feature, arch, apiOS)
-	body, _, err := relay.HTTPGet(ctx, i.cfg.HTTPClient, url)
+	body, _, err := relay.HTTPGet(ctx, client, url)
 	if err != nil {
-		return resolved{}, fmt.Errorf("query Adoptium API: %w", err)
+		return relay.Pin{}, fmt.Errorf("query Adoptium API: %w", err)
 	}
 	defer body.Close()
 
 	var assets []adoptiumAsset
 	if err := json.NewDecoder(body).Decode(&assets); err != nil {
-		return resolved{}, fmt.Errorf("parse Adoptium response: %w", err)
+		return relay.Pin{}, fmt.Errorf("parse Adoptium response: %w", err)
 	}
 	r, err := selectAsset(assets, arch, apiOS)
 	if err != nil {
-		return resolved{}, fmt.Errorf("Temurin JDK %s for %s/%s (%s): %w", feature, i.cfg.Arch, i.cfg.Libc, apiOS, err)
+		return relay.Pin{}, fmt.Errorf("Temurin JDK %s for %s/%s (%s): %w", feature, fp.Arch, fp.Libc, apiOS, err)
 	}
 	return r, nil
 }
 
 // selectAsset picks the matching JDK .tar.gz (with a checksum) from an Adoptium
 // response. Pure so it can be unit-tested without the network.
-func selectAsset(assets []adoptiumAsset, arch, apiOS string) (resolved, error) {
+func selectAsset(assets []adoptiumAsset, arch, apiOS string) (relay.Pin, error) {
 	for _, a := range assets {
 		if a.Binary.ImageType != "jdk" || a.Binary.Architecture != arch || a.Binary.OS != apiOS {
 			continue
@@ -84,16 +72,16 @@ func selectAsset(assets []adoptiumAsset, arch, apiOS string) (resolved, error) {
 			continue
 		}
 		if a.Binary.Package.Checksum == "" {
-			return resolved{}, fmt.Errorf("asset %s lacks a checksum", a.Binary.Package.Name)
+			return relay.Pin{}, fmt.Errorf("asset %s lacks a checksum", a.Binary.Package.Name)
 		}
-		return resolved{
+		return relay.Pin{
 			FullVersion: a.Version.Semver,
 			AssetName:   a.Binary.Package.Name,
 			URL:         a.Binary.Package.Link,
 			SHA256:      a.Binary.Package.Checksum,
 		}, nil
 	}
-	return resolved{}, fmt.Errorf("no matching .tar.gz build")
+	return relay.Pin{}, fmt.Errorf("no matching .tar.gz build")
 }
 
 // adoptiumPlatform maps the probe fingerprint to Adoptium's architecture + os

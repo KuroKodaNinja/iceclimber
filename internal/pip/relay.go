@@ -44,7 +44,7 @@ func (m *Manager) RelayInstall(ctx context.Context, specs []pkg.Spec, minor stri
 	//    so they steer the download too, not just a Tier-0 in-sandbox install.
 	dl := exec.CommandContext(ctx, cpy, downloadArgs(specs, minor, m.cfg.Arch, m.cfg.Libc, idx, localDir, m.cfg.ExtraArgs)...)
 	if out, err := dl.CombinedOutput(); err != nil {
-		return pkg.Outcome{}, fmt.Errorf("controller wheel download failed (a package may lack a %s wheel — Tier 2 build is future work): %s", m.cfg.Libc, lastLines(out, 5))
+		return pkg.Outcome{}, fmt.Errorf("controller wheel download failed (a package may lack a %s wheel — Tier 2 build is future work): %s", m.cfg.Libc, pkg.LastLines(out, 5))
 	}
 	wheels, err := filepath.Glob(filepath.Join(localDir, "*.whl"))
 	if err != nil {
@@ -85,7 +85,7 @@ func (m *Manager) RelayInstall(ctx context.Context, specs []pkg.Spec, minor stri
 		return pkg.Outcome{}, fmt.Errorf("run offline install: %w", err)
 	}
 	if res.ExitCode != 0 {
-		return pkg.Outcome{}, fmt.Errorf("offline install failed: %s", lastLines(res.Stderr, 4))
+		return pkg.Outcome{}, fmt.Errorf("offline install failed: %s", pkg.LastLines(res.Stderr, 4))
 	}
 	data, err := m.cfg.FS.ReadFile(ctx, reportPath)
 	if err != nil {

@@ -86,7 +86,7 @@ func (m *Manager) Resolve(ctx context.Context, specs []pkg.Spec) (pkg.Outcome, s
 		return pkg.Outcome{}, "", err
 	}
 	if res.ExitCode != 0 {
-		return failed(specs, lastLines(res.Stderr, 4)), "", nil
+		return failed(specs, pkg.LastLines(res.Stderr, 4)), "", nil
 	}
 	return resolvedOutcome(specs, pkg.TierMirror), lastNonEmpty(string(res.Stdout)), nil
 }
@@ -128,7 +128,7 @@ func (m *Manager) RelayResolve(ctx context.Context, specs []pkg.Spec) (pkg.Outco
 	if err != nil {
 		msg := err.Error()
 		if ee, ok := err.(*exec.ExitError); ok {
-			msg = lastLines(ee.Stderr, 4)
+			msg = pkg.LastLines(ee.Stderr, 4)
 		}
 		return failed(specs, msg), "", nil
 	}
@@ -280,12 +280,4 @@ func lastNonEmpty(s string) string {
 		}
 	}
 	return ""
-}
-
-func lastLines(b []byte, n int) string {
-	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
 }

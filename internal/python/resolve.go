@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/relay"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
 // pbsManifestURL publishes metadata about PBS's latest release (tag +
@@ -20,50 +22,36 @@ type manifest struct {
 	AssetURLPrefix string `json:"asset_url_prefix"`
 }
 
-// resolved is the exact PBS asset to install.
-type resolved struct {
-	FullVersion string // "3.12.13"
-	AssetName   string // cpython-3.12.13+20260623-aarch64-unknown-linux-musl-install_only.tar.gz
-	URL         string
-	SHA256      string
-}
-
-// resolve maps a requested minor (e.g. "3.12") to an exact PBS asset for this
-// sandbox's platform, with its checksum.
-func (i *Installer) resolve(ctx context.Context, minor string) (resolved, error) {
-	// An operator pin short-circuits the live resolver (skips all upstream metadata
-	// calls — the air-gapped-mirror path, §17). A miss falls through to the resolve below.
-	if i.cfg.Pin != nil {
-		if p, ok := i.cfg.Pin(minor); ok {
-			return resolved{FullVersion: p.FullVersion, AssetName: p.AssetName, URL: p.URL, SHA256: p.SHA256}, nil
-		}
-	}
-	tr, err := triple(i.cfg.OS, i.cfg.Arch, i.cfg.Libc)
+// Resolve maps a requested minor (e.g. "3.12") to an exact PBS asset for this
+// sandbox's platform, with its checksum. It's the Spec's live upstream resolver:
+// the engine handles the operator-pin short-circuit before this is ever called.
+func Resolve(ctx context.Context, fp runtime.Fingerprint, client *http.Client, minor string) (relay.Pin, error) {
+	tr, err := triple(fp.OS, fp.Arch, fp.Libc)
 	if err != nil {
-		return resolved{}, err
+		return relay.Pin{}, err
 	}
-	m, err := i.fetchManifest(ctx)
+	m, err := fetchManifest(ctx, client)
 	if err != nil {
-		return resolved{}, err
+		return relay.Pin{}, err
 	}
-	body, _, err := relay.HTTPGet(ctx, i.cfg.HTTPClient, m.AssetURLPrefix+"/SHA256SUMS")
+	body, _, err := relay.HTTPGet(ctx, client, m.AssetURLPrefix+"/SHA256SUMS")
 	if err != nil {
-		return resolved{}, fmt.Errorf("fetch SHA256SUMS: %w", err)
+		return relay.Pin{}, fmt.Errorf("fetch SHA256SUMS: %w", err)
 	}
 	defer body.Close()
 	sums, err := io.ReadAll(body)
 	if err != nil {
-		return resolved{}, err
+		return relay.Pin{}, err
 	}
 	name, sha, full, err := pickAsset(string(sums), minor, m.Tag, tr)
 	if err != nil {
-		return resolved{}, err
+		return relay.Pin{}, err
 	}
-	return resolved{FullVersion: full, AssetName: name, URL: m.AssetURLPrefix + "/" + name, SHA256: sha}, nil
+	return relay.Pin{FullVersion: full, AssetName: name, URL: m.AssetURLPrefix + "/" + name, SHA256: sha}, nil
 }
 
-func (i *Installer) fetchManifest(ctx context.Context) (manifest, error) {
-	body, _, err := relay.HTTPGet(ctx, i.cfg.HTTPClient, pbsManifestURL)
+func fetchManifest(ctx context.Context, client *http.Client) (manifest, error) {
+	body, _, err := relay.HTTPGet(ctx, client, pbsManifestURL)
 	if err != nil {
 		return manifest{}, fmt.Errorf("fetch PBS manifest: %w", err)
 	}
