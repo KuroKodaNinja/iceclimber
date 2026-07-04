@@ -92,8 +92,9 @@ iceclimber sandbox rm dev            # tear the VM + registry entry down
 `sandbox` is the **multi-sandbox management surface**, not a VM manager — `create` is a thin
 Lima wrapper; `list`/`status`/`shell`/`rm` work over **remote** sandboxes too (any config in the
 registry). A created box is a real iceclimber sandbox: **air-gapped by default** — direct egress
-is firewalled off (only its inbound SSH + the reverse-tunnel proxy carry traffic), and the agent
-runs as a non-sudo user so it can't lift the lockdown. Config + state live in the registry at
+is firewalled off *except* 443 to the agent's own LLM API (so a Claude agent in the box reaches
+its model directly; Popo bridges everything else — packages, web, runtimes). The agent runs as a
+non-sudo user so it can't lift the lockdown. Config + state live in the registry at
 `$XDG_CONFIG_HOME/iceclimber/<id>/` (default `~/.config/iceclimber/<id>/`); `--sandbox <id>`
 selects any of them. If you already have a box, skip to step 1.
 

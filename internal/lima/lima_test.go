@@ -65,9 +65,17 @@ func TestEmbeddedAssets(t *testing.T) {
 			t.Errorf("airgap.sh missing %q", want)
 		}
 	}
-	// The iceclimber air-gap must NOT allow any Anthropic/public range (egress rides the
-	// reverse tunnel only) — guard against copy-paste from the demo firewall.
-	if strings.Contains(scr, "160.79.104") || strings.Contains(scr, "2607:6bc0") {
-		t.Error("airgap.sh must not allow Anthropic public ranges; egress rides the SSH reverse tunnel")
+	// The air-gap MUST allow 443 to the agent's LLM API (Anthropic's ranges) — a Claude agent
+	// running in the box reaches its model directly (Popo bridges everything ELSE). Without this
+	// the box can't run an agent at all.
+	for _, want := range []string{"160.79.104.0/23", "2607:6bc0::/48", "--dport 443"} {
+		if !strings.Contains(scr, want) {
+			t.Errorf("airgap.sh must allow the agent's LLM API (%q missing)", want)
+		}
+	}
+	// ...but ONLY the API on 443 — no blanket internet: the default policy is DROP and there's
+	// no ACCEPT for arbitrary destinations.
+	if !strings.Contains(scr, "OUTPUT DROP") {
+		t.Error("airgap.sh must default-drop egress")
 	}
 }

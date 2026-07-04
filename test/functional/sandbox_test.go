@@ -45,6 +45,13 @@ func TestSandboxLifecycle(t *testing.T) {
 	if s := limaShOn(t, instance, "nslookup example.com >/dev/null 2>&1 && echo dnsok || echo dnsblocked"); !strings.Contains(s, "dnsok") {
 		t.Errorf("DNS should still resolve under the air-gap: %q", strings.TrimSpace(s))
 	}
+	// The agent's LLM API IS reachable — a Claude agent in the box must reach its model directly
+	// (Popo bridges everything else). A TCP connect to the Anthropic API host on 443 must succeed
+	// even though general egress is blocked. curl returning ANY HTTP status (e.g. 401/404) proves
+	// the connection + TLS completed; a firewall block yields "Connection timed out".
+	if s := limaShOn(t, instance, "curl -sS -o /dev/null -w '%{http_code}' -m 12 https://api.anthropic.com/v1/messages 2>/dev/null || echo BLOCKED"); strings.Contains(s, "BLOCKED") || strings.TrimSpace(s) == "000" {
+		t.Errorf("the agent's LLM API (api.anthropic.com:443) must be reachable through the air-gap, got %q", strings.TrimSpace(s))
+	}
 	// The nana workload user has no sudo — so it can't flush the firewall (the seam's v1 bar).
 	if s := limaShOn(t, instance, "sudo -u agent sudo -n true 2>/dev/null && echo HASSUDO || echo nosudo"); !strings.Contains(s, "nosudo") {
 		t.Errorf("the agent user should not have sudo: %q", strings.TrimSpace(s))
