@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/xdg"
 	"github.com/spf13/cobra"
 )
 
@@ -32,6 +33,15 @@ func newRootCmd() *cobra.Command {
 		// approve). Subcommands stay for scripting/CI; `iceclimber serve` is the
 		// headless path.
 		Args: cobra.NoArgs,
+		// One-time, best-effort migration of a legacy ~/.iceclimber state dir to the XDG
+		// config root (~/.config/iceclimber). Runs before every command; never fails it —
+		// a non-empty notice is printed to stderr and we continue.
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if notice := xdg.Migrate(); notice != "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), notice)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load(cfgFile, sandboxID)
 			if err != nil {
@@ -53,7 +63,7 @@ func newRootCmd() *cobra.Command {
 	}
 	pf := root.PersistentFlags()
 	pf.StringVar(&cfgFile, "config", "iceclimber.yaml", "path to the controller config")
-	pf.StringVar(&sandboxID, "sandbox", "", "sandbox id — a guard against the wrong box, and a selector: with the default --config it also finds iceclimber-<id>.yaml or ~/.iceclimber/<id>/config.yaml")
+	pf.StringVar(&sandboxID, "sandbox", "", "sandbox id — a guard against the wrong box, and a selector: with the default --config it also finds iceclimber-<id>.yaml or ~/.config/iceclimber/<id>/config.yaml")
 	pf.BoolVar(&jsonOutput, "json", false, "machine-readable JSON output where supported")
 	pf.BoolVarP(&verbose, "verbose", "v", false, "verbose logging")
 	pf.StringVar(&transport, "transport", "auto", "remote FS transport: auto|sftp|exec")

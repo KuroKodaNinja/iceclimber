@@ -17,6 +17,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
 	"github.com/KuroKodaNinja/iceclimber/internal/webfetch"
+	"github.com/KuroKodaNinja/iceclimber/internal/xdg"
 	"github.com/pkg/sftp"
 	"github.com/spf13/cobra"
 )
@@ -271,11 +272,7 @@ func openSessionWith(ctx context.Context, cfg *config.Config, transport string, 
 func egressStore(cfg *config.Config) *egress.Store {
 	base := cfg.ApprovalsFile
 	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			home = "."
-		}
-		base = filepath.Join(home, ".iceclimber", cfg.SandboxID, "approvals.json")
+		base = filepath.Join(xdg.SandboxDir(cfg.SandboxID), "approvals.json")
 	}
 	return egress.NewStore(base, filepath.Join(filepath.Dir(base), "pending.json"))
 }
@@ -294,40 +291,28 @@ func buildPolicy(cfg *config.Config) *egress.Policy {
 }
 
 // auditPath returns the configured web.fetch audit log path, or the default
-// ~/.iceclimber/audit/<sandbox_id>.jsonl.
+// ~/.config/iceclimber/audit/<sandbox_id>.jsonl.
 func auditPath(cfg *config.Config) string {
 	if cfg.AuditLog != "" {
 		return cfg.AuditLog
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".iceclimber", "audit", cfg.SandboxID+".jsonl")
+	return filepath.Join(xdg.Config(), "audit", cfg.SandboxID+".jsonl")
 }
 
 // activityPath returns the configured activity log path, or the default
-// ~/.iceclimber/<sandbox_id>/activity.jsonl (alongside approvals/pending).
+// ~/.config/iceclimber/<sandbox_id>/activity.jsonl (alongside approvals/pending).
 func activityPath(cfg *config.Config) string {
 	if cfg.ActivityLog != "" {
 		return cfg.ActivityLog
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".iceclimber", cfg.SandboxID, "activity.jsonl")
+	return filepath.Join(xdg.SandboxDir(cfg.SandboxID), "activity.jsonl")
 }
 
 // runtimesStore is the controller-side store of the operator's per-language
-// runtime-source choice (~/.iceclimber/<sandbox_id>/runtimes.json), written at
+// runtime-source choice (~/.config/iceclimber/<sandbox_id>/runtimes.json), written at
 // bootstrap and read by install/serve to pick the env strategy.
 func runtimesStore(cfg *config.Config) *runtimes.Store {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
-	return runtimes.NewStore(filepath.Join(home, ".iceclimber", cfg.SandboxID, "runtimes.json"))
+	return runtimes.NewStore(filepath.Join(xdg.SandboxDir(cfg.SandboxID), "runtimes.json"))
 }
 
 // configRuntimeSources converts the operator config's runtimes block into the
@@ -347,12 +332,8 @@ func configRuntimeSources(rc config.RuntimesConfig) runtimes.Sources {
 }
 
 // agentLogPath is the controller-side file the serve loop bridges the sandbox agent
-// stream into (~/.iceclimber/<sandbox_id>/agent.log) — the default --agent-log for
+// stream into (~/.config/iceclimber/<sandbox_id>/agent.log) — the default --agent-log for
 // the console, `tui`, and `logs`, so the [NANA] pane shows the agent with no flag.
 func agentLogPath(cfg *config.Config) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".iceclimber", cfg.SandboxID, "agent.log")
+	return filepath.Join(xdg.SandboxDir(cfg.SandboxID), "agent.log")
 }

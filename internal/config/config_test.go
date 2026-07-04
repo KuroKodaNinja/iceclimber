@@ -46,7 +46,7 @@ remote_root: /home/agent/.iceclimber
 }
 
 // TestLoad_SandboxSelector: with the DEFAULT config path, --sandbox selects among the
-// per-sandbox conventions (iceclimber-<id>.yaml in cwd, ~/.iceclimber/<id>/config.yaml),
+// per-sandbox conventions (iceclimber-<id>.yaml in cwd, ~/.config/iceclimber/<id>/config.yaml),
 // while an explicit --config keeps exact match-or-error semantics. Fleet selectors
 // (all / globs / lists) are reserved with a clear error. A missing default config yields
 // the `iceclimber init` hint.
@@ -55,6 +55,7 @@ func TestLoad_SandboxSelector(t *testing.T) {
 	t.Chdir(dir)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "") // force the ~/.config/iceclimber fallback for the home convention
 
 	boxYAML := func(id string) string {
 		return "sandbox_id: " + id + "\nssh:\n  host: h\n  user: u\n"
@@ -66,7 +67,7 @@ func TestLoad_SandboxSelector(t *testing.T) {
 	if err := os.WriteFile("iceclimber-box-b.yaml", []byte(boxYAML("box-b")), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cDir := filepath.Join(home, ".iceclimber", "box-c")
+	cDir := filepath.Join(home, ".config", "iceclimber", "box-c")
 	if err := os.MkdirAll(cDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func TestLoad_SandboxSelector(t *testing.T) {
 	if cfg, err := Load(DefaultPath, "box-b"); err != nil || cfg.SandboxID != "box-b" {
 		t.Fatalf("cwd convention = %+v, %v", cfg, err)
 	}
-	// …and via ~/.iceclimber/<id>/config.yaml.
+	// …and via ~/.config/iceclimber/<id>/config.yaml.
 	if cfg, err := Load(DefaultPath, "box-c"); err != nil || cfg.SandboxID != "box-c" {
 		t.Fatalf("home convention = %+v, %v", cfg, err)
 	}

@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -19,17 +18,14 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/proxy"
 	"github.com/KuroKodaNinja/iceclimber/internal/webfetch"
+	"github.com/KuroKodaNinja/iceclimber/internal/xdg"
 )
 
 // egressCAPaths are the controller-side CA cert/key for the proxy egress mode, persisted
 // per sandbox (alongside approvals/activity) so the sandbox's installed trust survives
 // controller restarts.
 func egressCAPaths(cfg *config.Config) (certPath, keyPath string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
-	dir := filepath.Join(home, ".iceclimber", cfg.SandboxID)
+	dir := xdg.SandboxDir(cfg.SandboxID)
 	return filepath.Join(dir, "egress-ca.pem"), filepath.Join(dir, "egress-ca.key")
 }
 

@@ -45,7 +45,7 @@ ssh:
 remote_root: ""
 
 # Local wheel/runtime cache, shared across sandboxes by platform fingerprint.
-cache_dir: ~/.iceclimber-cache
+cache_dir: ~/.cache/iceclimber
 
 # Where each language runtime comes from. Omitted = iceclimber installs a managed
 # build (the default). Set source: system to use a runtime already on the sandbox
@@ -106,9 +106,9 @@ cache_dir: ~/.iceclimber-cache
 # dispatch_concurrency: 4         # how many requests Popo services at once (0 = default 4)
 # log_max_bytes: 8388608          # per-generation cap for the rotating log sinks (0 = 8 MiB)
 # log_keep: 4                     # rotated generations kept (0 = 4)
-# audit_log: ""                   # web.fetch audit JSONL (default ~/.iceclimber/audit/<id>.jsonl)
-# activity_log: ""                # request/operator activity JSONL (default ~/.iceclimber/<id>/activity.jsonl)
-# approvals_file: ""              # operator allow/deny rules (default ~/.iceclimber/<id>/approvals.json)
+# audit_log: ""                   # web.fetch audit JSONL (default ~/.config/iceclimber/audit/<id>.jsonl)
+# activity_log: ""                # request/operator activity JSONL (default ~/.config/iceclimber/<id>/activity.jsonl)
+# approvals_file: ""              # operator allow/deny rules (default ~/.config/iceclimber/<id>/approvals.json)
 `
 
 func newInitCmd() *cobra.Command {

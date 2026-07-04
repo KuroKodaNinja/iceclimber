@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/xdg"
 )
 
 // Single-writer enforcement (plan §9's `.popo.lock` model, revised for proxy egress) —
-// two controller-side advisory flocks per sandbox, under ~/.iceclimber/<sandbox_id>/:
+// two controller-side advisory flocks per sandbox, under ~/.config/iceclimber/<sandbox_id>/:
 //
 //   - serve.lock — exclusive among SERVING processes (serve / console / headless serve),
 //     held for the whole run (spanning reconnects). Two dispatchers on one maildir would
@@ -38,11 +39,7 @@ func serveLockPath(cfg *config.Config) string { return lockFile(cfg, "serve.lock
 func opsLockPath(cfg *config.Config) string   { return lockFile(cfg, "ops.lock") }
 
 func lockFile(cfg *config.Config, name string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".iceclimber", cfg.SandboxID, name)
+	return filepath.Join(xdg.SandboxDir(cfg.SandboxID), name)
 }
 
 // sandboxLock is a held lock; Release is idempotent and nil-safe.

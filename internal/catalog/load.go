@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/xdg"
 	"gopkg.in/yaml.v3"
 )
 
@@ -118,11 +119,7 @@ func expandCatalogPaths(paths []string) []string {
 	return out
 }
 
-// DefaultOverlayDir is the conventional operator catalog directory (~/.iceclimber/catalog).
+// DefaultOverlayDir is the conventional operator catalog directory (~/.config/iceclimber/catalog).
 func DefaultOverlayDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".iceclimber", "catalog")
+	return filepath.Join(xdg.Config(), "catalog")
 }

@@ -120,7 +120,7 @@ func (s *Sandbox) WriteConfig(t *testing.T, root, extraYAML string) string {
 	// node's and python's commands (and they'd silently share runtimes.json).
 	id := "scn-" + strings.TrimPrefix(filepath.Base(root), "iceclimber-scn-")
 	if home, err := os.UserHomeDir(); err == nil {
-		stateDir := filepath.Join(home, ".iceclimber", id)
+		stateDir := filepath.Join(home, ".config", "iceclimber", id)
 		t.Cleanup(func() { _ = os.RemoveAll(stateDir) })
 	}
 	// Scenarios exercise the language toolchains (install → build → run + Fetch), not the

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/egress"
+	"github.com/KuroKodaNinja/iceclimber/internal/xdg"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,7 +25,7 @@ type Config struct {
 	RemoteRoot string `yaml:"remote_root"` // optional; chosen during bootstrap if empty
 	CacheDir   string `yaml:"cache_dir"`
 	// Catalog lists extra tool-catalog files/dirs (YAML) layered over the embedded
-	// defaults + the ~/.iceclimber/catalog convention; later entries override by name.
+	// defaults + the ~/.config/iceclimber/catalog convention; later entries override by name.
 	Catalog []string `yaml:"catalog"`
 	Pip     Pip      `yaml:"pip"`
 	// ControllerPython is the operator's python on the controller, used for
@@ -53,18 +54,18 @@ type Config struct {
 	// --offline`). Defaults to "cargo" at use; the relay tier errors clearly if absent.
 	ControllerCargo string `yaml:"controller_cargo"`
 	// AuditLog is the controller-side web.fetch audit JSONL path. Empty means
-	// the default ~/.iceclimber/audit/<sandbox_id>.jsonl.
+	// the default ~/.config/iceclimber/audit/<sandbox_id>.jsonl.
 	AuditLog string `yaml:"audit_log"`
 	// ActivityLog is the controller-side request/operator activity JSONL path
 	// (what `serve` records and `iceclimber logs` tails). Empty means the default
-	// ~/.iceclimber/<sandbox_id>/activity.jsonl.
+	// ~/.config/iceclimber/<sandbox_id>/activity.jsonl.
 	ActivityLog string `yaml:"activity_log"`
 	// Network governs web.fetch venue routing + egress gating (§6.1).
 	Network Network `yaml:"network"`
 	// Rewrites redirect/re-venue fetch URLs before gating (§6.1).
 	Rewrites []Rewrite `yaml:"fetch_rewrites"`
 	// ApprovalsFile is the operator-owned allow/deny rule file (never Nana-writable).
-	// Empty means ~/.iceclimber/<sandbox_id>/approvals.json; pending lives alongside.
+	// Empty means ~/.config/iceclimber/<sandbox_id>/approvals.json; pending lives alongside.
 	ApprovalsFile string `yaml:"approvals_file"`
 	// Runtimes optionally pins where each language runtime comes from (managed vs a
 	// pre-existing system runtime). An explicit override of the bootstrap choice;
@@ -292,7 +293,7 @@ const DefaultPath = "iceclimber.yaml"
 //
 // --sandbox is also a SELECTOR: when path is the default and doesn't yield sandbox X,
 // Load searches the per-sandbox conventions `iceclimber-<X>.yaml` (cwd) and
-// `~/.iceclimber/<X>/config.yaml`, so one directory (or the home state dir) can hold a
+// `~/.config/iceclimber/<X>/config.yaml`, so one directory (or the home state dir) can hold a
 // config per sandbox and every command addresses any of them by id. Reserved for the
 // fleet phase (rejected with a clear error today): "all", comma lists, and glob patterns.
 func Load(path, selectSandbox string) (*Config, error) {
@@ -343,6 +344,9 @@ func loadOne(path, selectSandbox string) (*Config, error) {
 	c.CacheDir = expandHome(c.CacheDir)
 	c.AuditLog = expandHome(c.AuditLog)
 	c.ActivityLog = expandHome(c.ActivityLog)
+	if c.CacheDir == "" {
+		c.CacheDir = xdg.Cache()
+	}
 	if err := c.validate(selectSandbox); err != nil {
 		return nil, err
 	}
@@ -352,11 +356,10 @@ func loadOne(path, selectSandbox string) (*Config, error) {
 // sandboxSearchPaths are the per-sandbox config conventions --sandbox selects from when
 // the default path doesn't yield the requested sandbox.
 func sandboxSearchPaths(id string) []string {
-	paths := []string{"iceclimber-" + id + ".yaml"}
-	if home, err := os.UserHomeDir(); err == nil {
-		paths = append(paths, filepath.Join(home, ".iceclimber", id, "config.yaml"))
+	return []string{
+		"iceclimber-" + id + ".yaml",
+		filepath.Join(xdg.SandboxDir(id), "config.yaml"),
 	}
-	return paths
 }
 
 // isFleetSelector reports whether a --sandbox value names more than one sandbox — the

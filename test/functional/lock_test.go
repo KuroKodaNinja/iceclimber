@@ -16,7 +16,7 @@ import (
 // a second serving process fails fast naming the first (the fleet-critical double-dispatch
 // guard), while a mutating one-shot during an active serve is ALLOWED with a notice —
 // proxy-mode flows (maven build --tier proxy) depend on that coexistence. Both processes
-// share one private HOME, since the locks live under ~/.iceclimber/<sandbox>/.
+// share one private HOME, since the locks live under ~/.config/iceclimber/<sandbox>/.
 func TestSingleWriterLocks(t *testing.T) {
 	sb := requireSandbox(t)
 	root := "/tmp/iceclimber-lock-" + protocol.NewID()

@@ -66,7 +66,7 @@ func TestInstallRuntimeSourceFlag(t *testing.T) {
 		t.Fatalf("install: %v\n%s", err, out.String())
 	}
 
-	data, err := os.ReadFile(filepath.Join(home, ".iceclimber", sb.Name, "runtimes.json"))
+	data, err := os.ReadFile(filepath.Join(home, ".config", "iceclimber", sb.Name, "runtimes.json"))
 	if err != nil {
 		t.Fatalf("runtimes.json not persisted: %v", err)
 	}

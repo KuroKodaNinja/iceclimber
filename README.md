@@ -367,7 +367,7 @@ operation the agent requests, with context, and you approve inline:
 
 Global flags on every command: `--config` (default `iceclimber.yaml`), `--sandbox`
 (a guard **and a selector** — with the default `--config` it also finds
-`iceclimber-<id>.yaml` in the cwd or `~/.iceclimber/<id>/config.yaml`, so one directory
+`iceclimber-<id>.yaml` in the cwd or `~/.config/iceclimber/<id>/config.yaml`, so one directory
 can drive several sandboxes; `all`/globs are reserved for the fleet phase),
 `--transport auto|sftp|exec`, and `--json` (where supported). Tab completion for your
 shell: `iceclimber completion bash|zsh|fish --help` has install instructions.
@@ -387,7 +387,7 @@ shell: `iceclimber completion bash|zsh|fish --help` has install instructions.
 | `install maven <group:artifact:version> --java <version>` | Resolve JVM deps into a classpath (Coursier) |
 | `install rust [version]` | Provision a portable Rust toolchain (rustc + cargo + std); no version = the current stable. The component-split upstream is assembled into one prefix on the controller before relay |
 | `install shell` | Relay a portable static **bash** into the sandbox (readline history + tab-completion) for a comfortable `iceclimber shell` |
-| `install tool <name>` · `catalog list` | Install a **utility** from the data-driven tool catalog — a checksum-verified static binary onto the sandbox PATH. The embedded set ships **bash, jq, fd** (run `catalog list` to see all); operators add more via overlay files (`~/.iceclimber/catalog/*.yaml`) — e.g. ripgrep, which isn't embedded because it has no upstream musl build. Adding a tool is editing YAML, not code. Agents can request one too via `popo tool.install <name>` (approval-gated) |
+| `install tool <name>` · `catalog list` | Install a **utility** from the data-driven tool catalog — a checksum-verified static binary onto the sandbox PATH. The embedded set ships **bash, jq, fd** (run `catalog list` to see all); operators add more via overlay files (`~/.config/iceclimber/catalog/*.yaml`) — e.g. ripgrep, which isn't embedded because it has no upstream musl build. Adding a tool is editing YAML, not code. Agents can request one too via `popo tool.install <name>` (approval-gated) |
 | `shell` | Open an **interactive shell** in the sandbox over iceclimber's own SSH transport (bastion/password/host-key handling included), with the environment set up: `ICECLIMBER_HOME`, `popo`/`nana` + installed runtimes on `PATH`, egress proxy/CA trust. Drops into the installed bash (falls back to `/bin/sh`). `-c '<cmd>'` runs one command non-interactively (scriptable) |
 | `agent install [claude]` · `agent list` | Relay a coding agent (Claude Code) into the sandbox + configure its subscription token; drops a `$ICECLIMBER_HOME/nana` launcher to start it (auth + NANA.md wired in) |
 | `agent wrap [claude] [--bin <path>]` | Wrap an agent binary **already on the sandbox** (pre-baked image / out-of-band install) with the same `nana`/auth/NANA.md launcher — **no relay**. Binary found on PATH by default, or pass `--bin` |
@@ -452,7 +452,7 @@ context. To learn the protocol by hand, see [`test/PLAYGROUND.md`](test/PLAYGROU
 - **Non-configurable SSRF floor.** Private, loopback, link-local, and cloud-metadata
   addresses are refused for both venues, enforced at dial time (rebinding-resistant).
 - **Audit log.** Every fetch appends to a controller-side JSONL audit
-  (`~/.iceclimber/audit/<sandbox_id>.jsonl`), surfaced in `iceclimber logs` as `[EGRESS]`
+  (`~/.config/iceclimber/audit/<sandbox_id>.jsonl`), surfaced in `iceclimber logs` as `[EGRESS]`
   and in the console's Egress panel (recent fetches).
 - **Secure transport.** SSH host keys are verified against `known_hosts`.
 

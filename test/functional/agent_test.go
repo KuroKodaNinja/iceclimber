@@ -33,7 +33,7 @@ func startServeTransport(t *testing.T, cfg, transport string) (*exec.Cmd, string
 		t.Fatalf("start serve: %v", err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
-	return cmd, filepath.Join(home, ".iceclimber", sandboxName, "agent.log")
+	return cmd, filepath.Join(home, ".config", "iceclimber", sandboxName, "agent.log")
 }
 
 // TestAgentInstallClaude installs the Claude Code agent into the sandbox via the

@@ -99,7 +99,7 @@ func waitResponses(t *testing.T, ctx context.Context, fs remotefs.FS, tree proto
 // just after the response is delivered.
 func intervals(t *testing.T, ctx context.Context, fs remotefs.FS, tree protocol.Tree, home, sandboxID string, ids []string) map[string]ivl {
 	t.Helper()
-	actPath := filepath.Join(home, ".iceclimber", sandboxID, "activity.jsonl")
+	actPath := filepath.Join(home, ".config", "iceclimber", sandboxID, "activity.jsonl")
 	dur := map[string]int64{}
 	typ := map[string]string{}
 	deadline := time.Now().Add(20 * time.Second)
@@ -319,7 +319,7 @@ func TestConcurrent_DedupUnderLoad(t *testing.T) {
 	waitResponses(t, ctx, fs, tree, []string{id}, time.Minute)
 	// After servicing settles, exactly one serviced event for this id in the activity log.
 	time.Sleep(1 * time.Second)
-	evs, _ := activity.Read(filepath.Join(home, ".iceclimber", sb.Name, "activity.jsonl"))
+	evs, _ := activity.Read(filepath.Join(home, ".config", "iceclimber", sb.Name, "activity.jsonl"))
 	n := 0
 	for _, e := range evs {
 		if e.Kind == activity.KindServiced && e.ID == id {

@@ -93,7 +93,7 @@ func newCatalogListCmd() *cobra.Command {
 				}
 				fmt.Fprintf(w, "%-12s %-8s %s%s\n", e.Name, e.Version, e.Description, src)
 			}
-			fmt.Fprintln(w, "\ninstall with `iceclimber install tool <name>`; extend via ~/.iceclimber/catalog/*.yaml")
+			fmt.Fprintln(w, "\ninstall with `iceclimber install tool <name>`; extend via ~/.config/iceclimber/catalog/*.yaml")
 			return nil
 		},
 	}
