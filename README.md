@@ -77,6 +77,26 @@ make gh-release VERSION=v0.2.0     # builds, then `gh release create` uploads di
 
 ## Popo side (the controller — you)
 
+### 0. (Optional) spin up a local sandbox
+
+Don't have a box yet? On macOS with [Lima](https://lima-vm.io) installed, one command
+provisions a local one, registers it, air-gaps it, and bootstraps it:
+
+```sh
+iceclimber sandbox create dev        # → a local Ubuntu VM, air-gapped + bootstrapped
+iceclimber sandbox shell dev         # jump in (auto-starts serve so egress works)
+iceclimber sandbox list              # every sandbox you have (local + remote)
+iceclimber sandbox rm dev            # tear the VM + registry entry down
+```
+
+`sandbox` is the **multi-sandbox management surface**, not a VM manager — `create` is a thin
+Lima wrapper; `list`/`status`/`shell`/`rm` work over **remote** sandboxes too (any config in the
+registry). A created box is a real iceclimber sandbox: **air-gapped by default** — direct egress
+is firewalled off (only its inbound SSH + the reverse-tunnel proxy carry traffic), and the agent
+runs as a non-sudo user so it can't lift the lockdown. Config + state live in the registry at
+`$XDG_CONFIG_HOME/iceclimber/<id>/` (default `~/.config/iceclimber/<id>/`); `--sandbox <id>`
+selects any of them. If you already have a box, skip to step 1.
+
 ### 1. Point at the sandbox
 
 Write an `iceclimber.yaml` describing the SSH connection (or run `iceclimber init`

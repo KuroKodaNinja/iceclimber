@@ -100,6 +100,19 @@ type Config struct {
 	// defaults (see internal/logfile: 8 MiB × 4). Applies to the sandbox session.log too.
 	LogMaxBytes int64 `yaml:"log_max_bytes"`
 	LogKeep     int   `yaml:"log_keep"`
+	// Provider records how an iceclimber-managed LOCAL sandbox was provisioned (§18), so
+	// `sandbox status`/`rm` can manage the underlying VM. Present ⇒ iceclimber created this box
+	// (rm may destroy it); absent ⇒ a remote/unmanaged box (rm only forgets the registry entry).
+	// Written by `sandbox create`; never needed for a hand-authored remote config.
+	Provider *Provider `yaml:"provider,omitempty"`
+}
+
+// Provider is the provisioning metadata for a managed local sandbox (§18).
+type Provider struct {
+	Type     string `yaml:"type"`     // "lima" (the only backend today)
+	Instance string `yaml:"instance"` // the Lima instance name, e.g. "iceclimber-<id>"
+	Distro   string `yaml:"distro"`   // "ubuntu" | "alpine"
+	Arch     string `yaml:"arch"`     // "aarch64" | "x86_64"
 }
 
 // DefaultDispatchConcurrency is the worker-pool size applied when dispatch_concurrency is unset.

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -58,18 +59,25 @@ func newShellCmd() *cobra.Command {
 			}
 
 			// Interactive: needs a local terminal on both ends for a PTY.
-			if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
-				return fmt.Errorf("`iceclimber shell` needs a terminal; use `iceclimber shell -c '<command>'` to run a command non-interactively")
-			}
-			_, err = sess.runner.Shell(ctx, remote.ShellOpts{
-				Command: interactiveLoginCommand(root),
-				Term:    os.Getenv("TERM"),
-			})
-			return err
+			return interactiveLogin(ctx, sess, root)
 		},
 	}
 	cmd.Flags().StringVarP(&command, "command", "c", "", "run one command in the sandbox environment and exit (non-interactive)")
 	return cmd
+}
+
+// interactiveLogin drops the operator into a PTY login shell on the sandbox (the shared
+// interactive branch of `iceclimber shell` and `sandbox shell`'s auto-serve jump-in). It
+// needs a local terminal on both ends for the PTY.
+func interactiveLogin(ctx context.Context, sess *session, root string) error {
+	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+		return fmt.Errorf("`iceclimber shell` needs a terminal; use `iceclimber shell -c '<command>'` to run a command non-interactively")
+	}
+	_, err := sess.runner.Shell(ctx, remote.ShellOpts{
+		Command: interactiveLoginCommand(root),
+		Term:    os.Getenv("TERM"),
+	})
+	return err
 }
 
 // interactiveLoginCommand is the POSIX-sh script the PTY session execs: prefer the installed

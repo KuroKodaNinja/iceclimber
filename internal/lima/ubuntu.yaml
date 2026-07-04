@@ -1,0 +1,42 @@
+# Embedded Lima template for an iceclimber-managed sandbox (§18).
+#
+# A minimal Ubuntu (glibc) box on Apple Virtualization.framework, provisioned only
+# far enough to be a clean jump-in target: SSH is on, and a NON-SUDO `agent` user is
+# created (the nana workload runs as `agent`; the default lima user keeps sudo so the
+# egress firewall can be applied at bootstrap time — the workload-external air-gap seam,
+# §18.3). NO language toolchain is preinstalled — runtimes are a separate `iceclimber
+# install` concern — so this stays a thin, self-contained provisioning template.
+minimumLimaVersion: 2.0.0
+
+base:
+- template:_images/ubuntu-24.04
+
+# Apple Virtualization.framework — fast on Apple Silicon.
+vmType: vz
+
+# Sized by `sandbox create` flags (--cpus/--memory/--disk) via limactl overrides;
+# these are the template defaults (2 CPU / 4 GiB / 20 GiB, §18.2).
+cpus: 2
+memory: 4GiB
+disk: 20GiB
+
+containerd:
+  system: false
+  user: false
+
+mounts: []
+
+provision:
+- mode: system
+  script: |
+    #!/bin/sh
+    # Create the non-sudo `agent` user the nana workload runs as. It gets a home and a
+    # login shell but NO sudo — so a compromised workload can't flush the egress firewall
+    # the (sudo-capable) default lima user applies at bootstrap. Idempotent.
+    set -eu
+    if ! id agent >/dev/null 2>&1; then
+      useradd --create-home --shell /bin/bash agent
+    fi
+    # Explicitly ensure `agent` is NOT in any sudo/admin group.
+    deluser agent sudo  >/dev/null 2>&1 || true
+    deluser agent admin >/dev/null 2>&1 || true
