@@ -39,6 +39,17 @@ type Asset struct {
 	SHA256 string // hex. Empty = unpinned: the asset is downloaded fresh and NOT cached (a cache hit can't be validated).
 }
 
+// Pin is an operator-pinned exact runtime asset (config runtime_pins, plan §17): a full
+// version for the install dir plus a checksum-verified URL. A runtime installer's resolve()
+// returns this directly when a pin matches — skipping ALL upstream metadata calls (the
+// air-gapped-mirror path). The four fields map 1:1 onto each installer's private resolved.
+type Pin struct {
+	FullVersion string // the exact version, for the install dir (e.g. "3.12.13")
+	AssetName   string // cache key (typically the URL basename)
+	URL         string
+	SHA256      string
+}
+
 // Fetcher downloads assets into a shared, cross-process-safe cache.
 type Fetcher struct {
 	CacheDir string        // "" → os.TempDir()/iceclimber-cache (the installers' long-standing default)

@@ -26,7 +26,11 @@ type Config struct {
 	Libc       string        // "musl" | "glibc"
 	CacheDir   string        // controller-side wheel/runtime cache
 	HTTPClient *http.Client
-	Progress   progress.Func // optional operator-facing progress (nil = silent)
+	Progress   progress.Func
+	// Pin (optional) short-circuits resolve() with an operator-pinned exact asset for a
+	// requested version, skipping upstream metadata calls; nil or a false return falls
+	// through to the live resolver. Built from config runtime_pins (§17).
+	Pin func(version string) (relay.Pin, bool)
 }
 
 // Installer installs Python runtimes into one sandbox.

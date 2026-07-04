@@ -66,6 +66,12 @@ type Config struct {
 	// pre-existing system runtime). An explicit override of the bootstrap choice;
 	// unset languages default to managed. (§ pre-existing runtimes)
 	Runtimes RuntimesConfig `yaml:"runtimes"`
+	// RuntimePins optionally pins exact managed-runtime assets (url + sha256 per
+	// platform), keyed lang → requested-version → pin. A pin bypasses the live upstream
+	// resolver for that language/version/platform (the air-gapped-mirror path, §17); an
+	// uncovered box falls through to the normal resolve. Consulted by the python/node/java
+	// installers before any network metadata call.
+	RuntimePins map[string]map[string]RuntimePin `yaml:"runtime_pins"`
 	// MaildirRetention is how long a delivered-but-uncollected response may sit in
 	// inbox/new before GC reaps it (with its request). A Go duration string ("1h",
 	// "30m"); empty = the 1h default; "0" disables the retention sweep (collected pairs
@@ -142,6 +148,46 @@ func (c *Config) EgressPort() int {
 		return c.EgressProxyPort
 	}
 	return DefaultEgressProxyPort
+}
+
+// RuntimePin is one operator-pinned runtime version: an optional exact full version (for
+// the install dir; defaults to the requested key) and a per-platform asset table keyed by
+// "os/arch/libc" (the same fingerprint keys the tool catalog uses).
+type RuntimePin struct {
+	Full      string                     `yaml:"full"`
+	Platforms map[string]RuntimePinAsset `yaml:"platforms"`
+}
+
+// RuntimePinAsset is a pinned download: a URL and its sha256 (mandatory — an unverifiable
+// pin is rejected at load, the same air-gap floor as the tool catalog).
+type RuntimePinAsset struct {
+	URL    string `yaml:"url"`
+	SHA256 string `yaml:"sha256"`
+}
+
+// LookupRuntimePin resolves the pin for (lang, requested version) on a platform from a
+// runtime_pins table: the asset URL + sha256 and the full version for the install dir.
+// ok=false means no pin covers this box — the caller falls through to the live resolver.
+// full defaults to the requested version. Standalone (not a *Config method) so callers
+// holding just the table — the CLI session — can resolve without a Config value.
+func LookupRuntimePin(pins map[string]map[string]RuntimePin, lang, version, os, arch, libc string) (url, sha256, full string, ok bool) {
+	byVer, ok := pins[lang]
+	if !ok {
+		return "", "", "", false
+	}
+	pin, ok := byVer[version]
+	if !ok {
+		return "", "", "", false
+	}
+	a, ok := pin.Platforms[os+"/"+arch+"/"+libc]
+	if !ok {
+		return "", "", "", false
+	}
+	full = pin.Full
+	if full == "" {
+		full = version
+	}
+	return a.URL, a.SHA256, full, true
 }
 
 // RuntimesConfig is the operator's per-language runtime-source override.
@@ -377,6 +423,21 @@ func (c *Config) validate(selectSandbox string) error {
 	for i, d := range c.Network.AllowedDomains {
 		if err := egress.ValidateHostPattern(d.Pattern); err != nil {
 			return fmt.Errorf("network.allowed_domains[%d]: %w", i, err)
+		}
+	}
+	// Runtime pins: every pinned asset must carry a url + sha256 (an unverifiable pin is
+	// rejected — the air-gap supply-chain floor), and platform keys must be os/arch/libc.
+	for lang, byVer := range c.RuntimePins {
+		for ver, pin := range byVer {
+			for key, a := range pin.Platforms {
+				where := fmt.Sprintf("runtime_pins.%s.%q.%s", lang, ver, key)
+				if len(strings.Split(key, "/")) != 3 {
+					return fmt.Errorf("%s: platform key must be os/arch/libc (e.g. linux/aarch64/musl)", where)
+				}
+				if a.URL == "" || a.SHA256 == "" {
+					return fmt.Errorf("%s: needs both url and sha256 (an unverifiable pin is rejected)", where)
+				}
+			}
 		}
 	}
 	return nil

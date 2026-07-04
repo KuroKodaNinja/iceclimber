@@ -31,7 +31,8 @@ type session struct {
 	transport        string // "sftp" or "exec" (the one actually selected)
 	fp               *probe.Fingerprint
 	cacheDir         string
-	catalogPaths     []string // extra tool-catalog files/dirs (config `catalog:`)
+	catalogPaths     []string                                // extra tool-catalog files/dirs (config `catalog:`)
+	runtimePins      map[string]map[string]config.RuntimePin // operator runtime pins (config runtime_pins)
 	pip              config.Pip
 	npm              config.Npm
 	maven            config.Maven
@@ -240,7 +241,7 @@ func openSessionWith(ctx context.Context, cfg *config.Config, transport string, 
 		}
 	}
 
-	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, catalogPaths: cfg.Catalog, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, controllerConda: cfg.ControllerConda, controllerMvn: cfg.ControllerMvn, auditPath: auditPath(cfg), auditLogger: audit.NewSized(auditPath(cfg), cfg.LogMaxBytes, cfg.LogKeep), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID, egressProxy: cfg.EgressProxy(), dispatchConcur: cfg.Concurrency(), runtimeStore: runtimesStore(cfg), runtimeConfig: configRuntimeSources(cfg.Runtimes)}
+	s := &session{runner: r, tree: protocol.Tree{Root: root}, fp: fp, cacheDir: cfg.CacheDir, catalogPaths: cfg.Catalog, runtimePins: cfg.RuntimePins, pip: cfg.Pip, npm: cfg.Npm, maven: cfg.Maven, controllerPython: cfg.ControllerPython, controllerNpm: cfg.ControllerNpm, controllerJava: cfg.ControllerJava, controllerConda: cfg.ControllerConda, controllerMvn: cfg.ControllerMvn, auditPath: auditPath(cfg), auditLogger: audit.NewSized(auditPath(cfg), cfg.LogMaxBytes, cfg.LogKeep), policy: buildPolicy(cfg), sandboxID: cfg.SandboxID, egressProxy: cfg.EgressProxy(), dispatchConcur: cfg.Concurrency(), runtimeStore: runtimesStore(cfg), runtimeConfig: configRuntimeSources(cfg.Runtimes)}
 	switch transport {
 	case "exec":
 		s.fs, s.transport = remotefs.NewExecFS(r), "exec"

@@ -9,6 +9,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/agent"
 	"github.com/KuroKodaNinja/iceclimber/internal/catalog"
 	"github.com/KuroKodaNinja/iceclimber/internal/conda"
+	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/maven"
 	"github.com/KuroKodaNinja/iceclimber/internal/node"
@@ -17,9 +18,37 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
+	"github.com/KuroKodaNinja/iceclimber/internal/relay"
 	"github.com/KuroKodaNinja/iceclimber/internal/shell"
 	"github.com/KuroKodaNinja/iceclimber/internal/webfetch"
 )
+
+// runtimePinFor builds the installer pin closure for a language from the session's config
+// runtime_pins + this box's fingerprint: a hit returns the operator-pinned exact asset (so
+// the installer skips the live upstream resolve — §17), a miss returns false (fall through).
+// nil when the language has no pins (zero overhead).
+func runtimePinFor(sess *session, lang string) func(string) (relay.Pin, bool) {
+	if len(sess.runtimePins[lang]) == 0 {
+		return nil
+	}
+	return func(version string) (relay.Pin, bool) {
+		url, sha, full, ok := config.LookupRuntimePin(sess.runtimePins,
+			lang, version, sess.fp.OS, sess.fp.Arch, sess.fp.Libc.Family)
+		if !ok {
+			return relay.Pin{}, false
+		}
+		return relay.Pin{FullVersion: full, AssetName: pinAssetName(url), URL: url, SHA256: sha}, true
+	}
+}
+
+// pinAssetName is the cache key for a pinned asset — its URL basename (namespaced by the
+// pin's own full version via the URL, which mirror layouts encode).
+func pinAssetName(url string) string {
+	if i := strings.LastIndexByte(url, '/'); i >= 0 && i+1 < len(url) {
+		return "pin-" + url[i+1:]
+	}
+	return "pin-" + url
+}
 
 // newInstaller builds the Python installer from an open session. pr (may be nil)
 // receives operator-facing progress events.
@@ -33,6 +62,7 @@ func newInstaller(sess *session, pr progress.Func) *python.Installer {
 		Libc:     sess.fp.Libc.Family,
 		CacheDir: sess.cacheDir,
 		Progress: pr,
+		Pin:      runtimePinFor(sess, "python"),
 	})
 }
 
@@ -97,6 +127,7 @@ func newNodeInstaller(sess *session, pr progress.Func) *node.Installer {
 		Libc:     sess.fp.Libc.Family,
 		CacheDir: sess.cacheDir,
 		Progress: pr,
+		Pin:      runtimePinFor(sess, "node"),
 	})
 }
 
@@ -127,6 +158,7 @@ func newJavaInstaller(sess *session, pr progress.Func) *java.Installer {
 		Libc:     sess.fp.Libc.Family,
 		CacheDir: sess.cacheDir,
 		Progress: pr,
+		Pin:      runtimePinFor(sess, "java"),
 	})
 }
 

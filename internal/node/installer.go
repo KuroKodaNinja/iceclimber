@@ -29,6 +29,10 @@ type Config struct {
 	CacheDir   string
 	HTTPClient *http.Client
 	Progress   progress.Func
+	// Pin (optional) short-circuits resolve() with an operator-pinned exact asset for a
+	// requested version, skipping upstream metadata calls; nil or a false return falls
+	// through to the live resolver. Built from config runtime_pins (§17).
+	Pin func(version string) (relay.Pin, bool)
 }
 
 // Installer installs Node runtimes into one sandbox.

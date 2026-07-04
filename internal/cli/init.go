@@ -55,6 +55,19 @@ cache_dir: ~/.iceclimber-cache
 #   python:
 #     source: system        # managed | system
 #     env_manager: venv     # venv | conda
+
+# Pin managed-runtime downloads to an exact mirrored asset (url + sha256 per platform),
+# bypassing the live upstream resolver — the air-gapped/compliance path. Keyed
+# lang -> requested-version -> platform (os/arch/libc). Pins augment: anything not pinned
+# still resolves live. sha256 is required (an unverifiable pin is rejected).
+# runtime_pins:
+#   python:
+#     "3.11":
+#       full: 3.11.13         # optional exact patch for the install dir (defaults to the key)
+#       platforms:
+#         linux/aarch64/musl:
+#           url: https://mirror.internal/cpython-3.11.13-musl.tar.gz
+#           sha256: <hex>
 `
 
 func newInitCmd() *cobra.Command {

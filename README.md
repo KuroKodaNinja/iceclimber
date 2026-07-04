@@ -240,6 +240,30 @@ for air-gapped boxes — via the **relay**: the operator's controller conda (con
 sandbox-platform packages, synthesizes a self-contained local channel, and the sandbox
 installs from it **offline**. `pip.install` also works into a conda env.
 
+#### Pinning managed runtimes to a mirror (`runtime_pins`)
+
+For a compliance / air-gapped setup you can pin the **exact download** a managed runtime install
+uses — its URL and sha256 per platform — so the install never calls the upstream resolver (PBS,
+nodejs, Adoptium) and pulls only from your mirror:
+
+```yaml
+runtime_pins:
+  python:
+    "3.11":                       # the version the agent/operator asks for
+      full: 3.11.13               # optional exact patch for the install dir (defaults to the key)
+      platforms:
+        linux/aarch64/musl:       # os/arch/libc
+          url: https://mirror.internal/cpython-3.11.13-musl.tar.gz
+          sha256: 5169d922…       # required — an unverifiable pin is rejected at load
+```
+
+Pins **augment** the resolver: a request that matches a pin uses it (zero upstream calls); anything
+not pinned resolves live as usual — so you pin only the versions/platforms you mirror and adopt it
+incrementally, no all-or-nothing air-gap switch. The pinned asset is checksum-verified and cached
+through the same relay as a resolved one. Pins are operator-owned config (agents can't extend them),
+and every install surface — CLI, the `popo *.install` agent verbs, the console form — honors them
+with no extra flags.
+
 ### Egress: proxy (default) or relay
 
 There are two ways the sandbox gets packages, both keeping it off the open internet:

@@ -36,6 +36,13 @@ type indexEntry struct {
 // resolve maps a requested version line ("20" / "20.11") to an exact Node asset
 // for this sandbox's platform, with its checksum.
 func (i *Installer) resolve(ctx context.Context, requested string) (resolved, error) {
+	// An operator pin short-circuits the live resolver (skips all upstream metadata
+	// calls — the air-gapped-mirror path, §17). A miss falls through to the resolve below.
+	if i.cfg.Pin != nil {
+		if p, ok := i.cfg.Pin(requested); ok {
+			return resolved{FullVersion: p.FullVersion, AssetName: p.AssetName, URL: p.URL, SHA256: p.SHA256}, nil
+		}
+	}
 	base, fileTag, err := nodePlatform(i.cfg.OS, i.cfg.Arch, i.cfg.Libc)
 	if err != nil {
 		return resolved{}, err

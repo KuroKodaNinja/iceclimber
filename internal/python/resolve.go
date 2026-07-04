@@ -31,6 +31,13 @@ type resolved struct {
 // resolve maps a requested minor (e.g. "3.12") to an exact PBS asset for this
 // sandbox's platform, with its checksum.
 func (i *Installer) resolve(ctx context.Context, minor string) (resolved, error) {
+	// An operator pin short-circuits the live resolver (skips all upstream metadata
+	// calls — the air-gapped-mirror path, §17). A miss falls through to the resolve below.
+	if i.cfg.Pin != nil {
+		if p, ok := i.cfg.Pin(minor); ok {
+			return resolved{FullVersion: p.FullVersion, AssetName: p.AssetName, URL: p.URL, SHA256: p.SHA256}, nil
+		}
+	}
 	tr, err := triple(i.cfg.OS, i.cfg.Arch, i.cfg.Libc)
 	if err != nil {
 		return resolved{}, err

@@ -42,6 +42,13 @@ type adoptiumAsset struct {
 // resolve maps a requested feature version ("21" / "17") to the latest Temurin JDK
 // asset for this sandbox's platform, with its checksum, via the Adoptium API.
 func (i *Installer) resolve(ctx context.Context, feature string) (resolved, error) {
+	// An operator pin short-circuits the live resolver (skips all upstream metadata
+	// calls — the air-gapped-mirror path, §17). A miss falls through to the resolve below.
+	if i.cfg.Pin != nil {
+		if p, ok := i.cfg.Pin(feature); ok {
+			return resolved{FullVersion: p.FullVersion, AssetName: p.AssetName, URL: p.URL, SHA256: p.SHA256}, nil
+		}
+	}
 	arch, apiOS, err := adoptiumPlatform(i.cfg.OS, i.cfg.Arch, i.cfg.Libc)
 	if err != nil {
 		return resolved{}, err
