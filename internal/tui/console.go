@@ -860,17 +860,39 @@ func (c Console) renderServing() string {
 // iceclimber-owned runtime) vs system (the detected binary, packages/envs still isolated
 // under $ICECLIMBER_HOME); a system python additionally picks venv vs conda when the box has
 // conda. This is the post-bootstrap home for the source choice — bootstrap no longer asks.
+// RuntimeLanguage is one managed-runtime option the install form offers. Value is the form
+// value the CLI layer maps to a runtime (note "javascript" is the node runtime's label — see
+// the canonical mapping in the cli layer); Label is the human option text.
+type RuntimeLanguage struct{ Value, Label string }
+
+// RuntimeInstallLanguages are the managed-runtime options the install form offers, in display
+// order. It's exported (and the source the form iterates) so a parity test can assert that every
+// managed runtime the controller can install has a console path — the mandatory TUI/cmdline
+// parity rule turned into an enforced check rather than a convention someone must remember.
+func RuntimeInstallLanguages() []RuntimeLanguage {
+	return []RuntimeLanguage{
+		{"python", "Python"},
+		{"javascript", "JavaScript"},
+		{"java", "Java"},
+		{"rust", "Rust"},
+	}
+}
+
 func (c *Console) installForm() *huh.Form {
 	c.st = &formState{lang: "python", rtSource: map[string]*string{}}
+	// The managed-runtime options come from RuntimeInstallLanguages so a parity test can assert
+	// every language the controller can install has a console path (TUI/cmdline parity), then the
+	// non-runtime entries (shell, catalog tool) are appended.
+	langOpts := make([]huh.Option[string], 0, len(RuntimeInstallLanguages())+2)
+	for _, rl := range RuntimeInstallLanguages() {
+		langOpts = append(langOpts, huh.NewOption(rl.Label, rl.Value))
+	}
+	langOpts = append(langOpts,
+		huh.NewOption("Shell (bash — for `iceclimber shell`)", "shell"),
+		huh.NewOption("Tool (a catalog utility: jq, fd, …)", "tool"),
+	)
 	groups := []*huh.Group{huh.NewGroup(
-		huh.NewSelect[string]().Title("language").Value(&c.st.lang).Options(
-			huh.NewOption("Python", "python"),
-			huh.NewOption("JavaScript", "javascript"),
-			huh.NewOption("Java", "java"),
-			huh.NewOption("Rust", "rust"),
-			huh.NewOption("Shell (bash — for `iceclimber shell`)", "shell"),
-			huh.NewOption("Tool (a catalog utility: jq, fd, ripgrep, …)", "tool"),
-		),
+		huh.NewSelect[string]().Title("language").Value(&c.st.lang).Options(langOpts...),
 	)}
 	// Tool picker — shown only for the "tool" language; a Select over the catalog so the
 	// operator installs a utility the same way the CLI's `install tool` + agent's

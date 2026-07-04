@@ -18,6 +18,18 @@ func managedLangs() []runtime.Spec {
 	return []runtime.Spec{python.Spec(), node.Spec(), java.Spec(), rust.Spec()}
 }
 
+// ManagedLanguageNames is the canonical names of the managed runtimes ("python", "node", …).
+// Exported so cross-surface parity tests (e.g. the popo verb map in cmd/popo) can assert every
+// managed language is reachable from every surface without hard-coding the list twice.
+func ManagedLanguageNames() []string {
+	specs := managedLangs()
+	names := make([]string, len(specs))
+	for i, s := range specs {
+		names[i] = s.Lang
+	}
+	return names
+}
+
 // managedLangSpec looks up a registered language's Spec by its canonical name ("python",
 // "node", "java", …). ok=false for an unknown/unmanaged name.
 func managedLangSpec(name string) (runtime.Spec, bool) {
