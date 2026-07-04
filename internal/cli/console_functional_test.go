@@ -401,6 +401,8 @@ func TestConsoleTUI_FullInstall(t *testing.T) {
 	waitOut(t, tm, "six")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // advance to version
 	waitOut(t, tm, "3.12 / 24")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // advance to project (left blank)
+	waitOut(t, tm, "project (optional)")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // submit ⇒ real install runs in the sandbox
 
 	// The sandbox echo renders in [NANA] once the real install completes (up to 2m).

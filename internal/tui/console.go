@@ -72,13 +72,16 @@ type PasswordRequest struct {
 
 // InstallRequest is an operator-initiated install (not an agent maildir request),
 // filled from the console's install form and handed to the OpRunner. The operator
-// picks a language (Python / JavaScript) and the packages to install; the cli layer
-// ensures the runtime exists (installing it at Version, or the recommended default
-// when blank) and derives the package manager (pip / npm) and resolution tier.
+// picks a language (Python / JavaScript / Java / Rust) and the packages to install; the
+// cli layer ensures the runtime exists (installing it at Version, or the recommended
+// default when blank) and derives the package manager (pip / npm) and resolution tier.
+// When Project is set the cli layer instead builds that sandbox project (Maven / npm /
+// Cargo / conda env) and the Pkgs field is ignored.
 type InstallRequest struct {
-	Lang    string // "python" | "javascript" | "java" | "shell" | "tool"
+	Lang    string // "python" | "javascript" | "java" | "rust" | "shell" | "tool"
 	Version string // runtime version to ensure/target (blank = recommended default)
-	Pkgs    string // space/comma-separated package specs
+	Pkgs    string // space/comma-separated package specs (ignored when Project is set)
+	Project string // build this sandbox project dir instead of installing packages (pom.xml/package.json/Cargo.toml/environment.yml)
 	Tool    string // lang=="tool": the catalog tool name to install
 }
 
@@ -308,6 +311,7 @@ type formState struct {
 	// bootstrap form: "provision" (safe, default) | "reset" (destructive — wipe runtimes + state).
 	bootstrapAction string
 	tool            string // install form: selected catalog tool (lang=="tool")
+	project         string // install form: build this project dir instead of installing packages
 }
 
 // NewConsole builds a console reading events (and, optionally, the agent stream).
@@ -723,7 +727,7 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 		}
 		// Batch the spinner tick so the in-flight footer animates while the op runs.
 		return c, tea.Batch(c.ops.RunInstall(InstallRequest{
-			Lang: c.st.lang, Version: c.st.version, Pkgs: c.st.pkgs, Tool: c.st.tool,
+			Lang: c.st.lang, Version: c.st.version, Pkgs: c.st.pkgs, Project: c.st.project, Tool: c.st.tool,
 		}), c.tickSpinner())
 	case "agent":
 		if c.st.agentName == "" {
@@ -863,6 +867,7 @@ func (c *Console) installForm() *huh.Form {
 			huh.NewOption("Python", "python"),
 			huh.NewOption("JavaScript", "javascript"),
 			huh.NewOption("Java", "java"),
+			huh.NewOption("Rust", "rust"),
 			huh.NewOption("Shell (bash — for `iceclimber shell`)", "shell"),
 			huh.NewOption("Tool (a catalog utility: jq, fd, ripgrep, …)", "tool"),
 		),
@@ -918,12 +923,15 @@ func (c *Console) installForm() *huh.Form {
 	// shell, which is a single bare binary (no version, no packages).
 	groups = append(groups, huh.NewGroup(
 		huh.NewInput().Title("packages (optional)").
-			Description("Blank installs just the runtime — the agent installs packages as it needs them.").
+			Description("Blank installs just the runtime — the agent installs packages as it needs them. Ignored when a project is set.").
 			Placeholder("e.g. requests / figlet cli-table3 / com.google.guava:guava:33.0.0-jre").
 			Value(&c.st.pkgs),
 		huh.NewInput().Title("version (optional)").
-			Description("Blank uses the recommended default — Python 3.12 · JavaScript 24 · Java 21.").
-			Placeholder("3.12 / 24 / 21").Value(&c.st.version),
+			Description("Blank uses the recommended default — Python 3.12 · JavaScript 24 · Java 21 · Rust stable.").
+			Placeholder("3.12 / 24 / 21 / stable").Value(&c.st.version),
+		huh.NewInput().Title("project (optional)").
+			Description("Build a project in this dir instead of installing packages — pom.xml (Java), package.json (JavaScript), Cargo.toml (Rust), or environment.yml (Python, conda env_manager). When set, the packages field is ignored.").
+			Placeholder("e.g. /home/iceclimber/proj").Value(&c.st.project),
 	).WithHideFunc(func() bool { return c.st.lang == "shell" || c.st.lang == "tool" }))
 	return huh.NewForm(groups...)
 }
@@ -945,6 +953,8 @@ func installLabel(lang string) string {
 		return "JavaScript install"
 	case "java":
 		return "Java install"
+	case "rust":
+		return "Rust install"
 	case "shell":
 		return "shell install"
 	case "tool":

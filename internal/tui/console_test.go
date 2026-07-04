@@ -634,6 +634,27 @@ func TestConsole_SubmitToolInstall(t *testing.T) {
 	}
 }
 
+// TestConsole_SubmitRustProjectInstall: the install form's Rust option with a project path
+// routes to RunInstall with Lang="rust" and Project set (TUI parity for `cargo build --project`).
+// When Project is set the Pkgs field is ignored by the cli layer.
+func TestConsole_SubmitRustProjectInstall(t *testing.T) {
+	ops := &fakeOps{}
+	c := NewConsole("sbx", make(chan tea.Msg), "", ops)
+	c.formKind = "install"
+	c.st = &formState{lang: "rust", project: "/home/iceclimber/proj"}
+
+	updated, cmd := c.submitForm("install")
+	if c2 := updated.(Console); c2.running != "Rust install" {
+		t.Fatalf("running = %q, want Rust install", c2.running)
+	}
+	if cmd == nil {
+		t.Fatal("submit should return the op command")
+	}
+	if ops.install == nil || ops.install.Lang != "rust" || ops.install.Project != "/home/iceclimber/proj" {
+		t.Errorf("RunInstall got %+v, want Lang=rust Project=/home/iceclimber/proj", ops.install)
+	}
+}
+
 // TestInstallForm_ToolPickerShown: the form offers a Tool option + a picker when the
 // catalog has entries.
 func TestInstallForm_ToolPickerShown(t *testing.T) {

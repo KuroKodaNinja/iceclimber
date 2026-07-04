@@ -81,7 +81,7 @@ func (d Deps) buildOnlineProxy(ctx context.Context, cargoBin, projectDir string,
 	// pin CARGO_HTTP_CAINFO explicitly so cargo validates the proxy's minted leaves.
 	prefix := "export ICECLIMBER_HOME=" + remote.ShellQuote(d.Root) + " && . " + remote.ShellQuote(envScript) +
 		" && export CARGO_HTTP_CAINFO=" + remote.ShellQuote(caPath) + " && cd " + remote.ShellQuote(projectDir) + " && "
-	cmd := prefix + cargoBuildCmd(cargoBin, extraArgs, false)
+	cmd := prefix + cargoBuildCmd(cargoBin, d.Arch, d.Libc, extraArgs, false)
 
 	res, err := d.Runner.Run(ctx, cmd, nil)
 	if err != nil {
@@ -124,6 +124,19 @@ func (d Deps) buildRelay(ctx context.Context, cargoBin, projectDir string, extra
 	if err := os.WriteFile(stageToml, tomlBytes, 0o644); err != nil {
 		return BuildResult{}, err
 	}
+	// The controller only resolves + vendors dependencies (from Cargo.toml); it never compiles.
+	// But `cargo generate-lockfile`/`vendor` still parse the manifest, which requires a target —
+	// and a project that relies on the src convention (just src/main.rs or src/lib.rs, no explicit
+	// [[bin]]/[lib]) has none on the controller because only Cargo.toml was staged. Stage empty
+	// stub sources so the manifest parses; the real sources compile offline in the sandbox.
+	if err := os.MkdirAll(filepath.Join(stage, "src"), 0o755); err != nil {
+		return BuildResult{}, err
+	}
+	for _, stub := range []string{"lib.rs", "main.rs"} {
+		if err := os.WriteFile(filepath.Join(stage, "src", stub), nil, 0o644); err != nil {
+			return BuildResult{}, err
+		}
+	}
 	haveLock := false
 	if lockBytes, lerr := d.FS.ReadFile(ctx, path.Join(projectDir, "Cargo.lock")); lerr == nil {
 		if err := os.WriteFile(filepath.Join(stage, "Cargo.lock"), lockBytes, 0o644); err != nil {
@@ -135,8 +148,8 @@ func (d Deps) buildRelay(ctx context.Context, cargoBin, projectDir string, extra
 	env := d.controllerEnv()
 	// 2. Without a Cargo.lock, pin one on the controller so `--locked` vendoring is deterministic.
 	if !haveLock {
-		if out, err := d.runController(ctx, ccargo, env, "generate-lockfile", "--manifest-path", stageToml); err != nil {
-			return BuildResult{}, fmt.Errorf("controller `cargo generate-lockfile` failed: %s", pkg.LastLines(out, 8))
+		if _, err := d.runController(ctx, ccargo, env, "generate-lockfile", "--manifest-path", stageToml); err != nil {
+			return BuildResult{}, fmt.Errorf("controller `cargo generate-lockfile` failed: %v", err)
 		}
 	}
 
@@ -166,7 +179,7 @@ func (d Deps) buildRelay(ctx context.Context, cargoBin, projectDir string, extra
 
 	// 5. Sandbox builds OFFLINE from the relayed vendor dir.
 	d.Progress.Phase("building (offline)")
-	cmd := "cd " + remote.ShellQuote(projectDir) + " && " + cargoBuildCmd(cargoBin, extraArgs, true)
+	cmd := "cd " + remote.ShellQuote(projectDir) + " && " + cargoBuildCmd(cargoBin, d.Arch, d.Libc, extraArgs, true)
 	res, err := d.Runner.Run(ctx, cmd, nil)
 	if err != nil {
 		return BuildResult{}, fmt.Errorf("run offline cargo: %w", err)
@@ -223,13 +236,27 @@ func (d Deps) exists(ctx context.Context, p string) bool {
 // cargoBuildCmd renders the `cargo build --release --message-format=json [--offline] [args…]`
 // invocation (shell-quoted). --message-format=json makes cargo emit one JSON object per line so
 // the compiled executable paths can be parsed from stdout.
-func cargoBuildCmd(cargoBin string, extraArgs []string, offline bool) string {
+func cargoBuildCmd(cargoBin, arch, libc string, extraArgs []string, offline bool) string {
 	// cargo, run by absolute path without rustup, finds rustc via $RUSTC / $PATH — not adjacent
 	// to itself. Point it at the sibling rustc in the same bin/ and put that bin/ on PATH so the
-	// compiler + its helper tools (rust-lld, etc.) resolve during the build.
+	// compiler + its helper tools resolve during the build.
 	binDir := path.Dir(cargoBin)
-	env := "RUSTC=" + remote.ShellQuote(path.Join(binDir, "rustc")) +
-		" PATH=" + remote.ShellQuote(binDir) + `:"$PATH" `
+	pathDirs := binDir
+	rustflags := ""
+	// The sandboxes ship no C toolchain (no cc/ld), so linking a BINARY on a stock musl box would
+	// fail. But rust bundles its own linker, rust-lld, and musl targets link self-contained (the
+	// std ships the CRT objects) — so point the linker at the bundled rust-lld and a musl binary
+	// links with zero system deps (a fully static executable). glibc's gnu target is NOT
+	// self-contained (it needs the system crt/libc), so it still requires a system toolchain — a
+	// library build (no final link) works everywhere regardless.
+	if libc == "musl" {
+		triple := arch + "-unknown-linux-musl"
+		lldDir := path.Join(path.Dir(binDir), "lib", "rustlib", triple, "bin") // rust-lld lives here
+		pathDirs = binDir + ":" + lldDir
+		rustflags = "RUSTFLAGS=" + remote.ShellQuote("-C linker=rust-lld") + " "
+	}
+	env := "RUSTC=" + remote.ShellQuote(path.Join(binDir, "rustc")) + " " +
+		rustflags + "PATH=" + remote.ShellQuote(pathDirs) + `:"$PATH" `
 	parts := []string{remote.ShellQuote(cargoBin), "build", "--release", "--message-format=json"}
 	if offline {
 		parts = append(parts, "--offline")

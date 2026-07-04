@@ -14,6 +14,8 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
 	"github.com/KuroKodaNinja/iceclimber/internal/agent"
 	"github.com/KuroKodaNinja/iceclimber/internal/audit"
+	"github.com/KuroKodaNinja/iceclimber/internal/cargo"
+	"github.com/KuroKodaNinja/iceclimber/internal/conda"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/egress"
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
@@ -29,6 +31,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
+	"github.com/KuroKodaNinja/iceclimber/internal/rust"
 	"github.com/KuroKodaNinja/iceclimber/internal/tui"
 )
 
@@ -462,6 +465,15 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 	pr := o.progress()
 	switch r.Lang {
 	case "python":
+		if r.Project != "" {
+			// Build a whole conda environment.yml (only meaningful with a conda env_manager;
+			// a box without conda errors clearly). Mirrors `install conda --file`.
+			out, err := conda.RunManifest(o.ctx, condaDeps(o.sess(), pr), r.Project, "auto")
+			if err != nil {
+				return opResult{typ: "conda.env", err: err}
+			}
+			return opResult{typ: "conda.env", detail: pkgSummary(out.Installed, out.Failed), echoes: pkgEchoes(out.Installed, out.Failed)}
+		}
 		echoes, err := o.ensurePython(ver, pr)
 		if err != nil {
 			return opResult{typ: "python.install", err: err, echoes: echoes}
@@ -483,6 +495,16 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		if err != nil {
 			return opResult{typ: "node.install", err: err, echoes: echoes}
 		}
+		if r.Project != "" {
+			// Install a whole package.json (npm install/ci). Mirrors `install npm --project`.
+			out, err := npm.RunProject(o.ctx, npmDeps(o.sess(), pr), ver, r.Project, "auto")
+			if err != nil {
+				return opResult{typ: "npm.project", err: err, echoes: echoes}
+			}
+			echoes = append(echoes, pkgEchoes(out.Installed, out.Failed)...)
+			echoes = append(echoes, echo{"export NODE_PATH=" + out.NodePath, true})
+			return opResult{typ: "npm.project", detail: pkgSummary(out.Installed, out.Failed), echoes: echoes}
+		}
 		if len(specs) == 0 { // runtime-only: the agent installs packages as it needs them
 			return opResult{typ: "node.install", detail: "node " + ver, echoes: echoes}
 		}
@@ -498,6 +520,16 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		if err != nil {
 			return opResult{typ: "java.install", err: err, echoes: echoes}
 		}
+		if r.Project != "" {
+			// Build a sandbox Maven project (pom.xml). Mirrors `maven build --project`
+			// (default goals, matched controller mvn version).
+			res, berr := maven.Build(o.ctx, mavenBuildDeps(o.sess(), pr), r.Project, ver, "", nil)
+			if berr != nil {
+				return opResult{typ: "maven.build", err: berr, echoes: echoes}
+			}
+			echoes = append(echoes, buildEchoes(res.Artifacts, res.Tier)...)
+			return opResult{typ: "maven.build", detail: buildDetail(res.Artifacts, res.Tier), echoes: echoes}
+		}
 		if len(specs) == 0 { // runtime-only: the agent resolves dependencies as it needs them
 			return opResult{typ: "java.install", detail: "java " + ver, echoes: echoes}
 		}
@@ -511,6 +543,25 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		}
 		echoes = append(echoes, mavenEchoes(out)...)
 		return opResult{typ: "maven.install", detail: pkgSummary(out.Installed, out.Failed), echoes: echoes}
+	case "rust":
+		echoes, err := o.ensureRust(pr)
+		if err != nil {
+			return opResult{typ: "rust.install", err: err, echoes: echoes}
+		}
+		if r.Project != "" {
+			// Build a sandbox Cargo project (Cargo.toml). Mirrors `cargo build --project`.
+			rustVer := ""
+			if strings.TrimSpace(r.Version) != "" {
+				rustVer = rust.ResolveLine(r.Version)
+			}
+			res, berr := cargo.Build(o.ctx, cargoBuildDeps(o.sess(), pr), r.Project, rustVer, nil)
+			if berr != nil {
+				return opResult{typ: "cargo.build", err: berr, echoes: echoes}
+			}
+			echoes = append(echoes, buildEchoes(res.Artifacts, res.Tier)...)
+			return opResult{typ: "cargo.build", detail: buildDetail(res.Artifacts, res.Tier), echoes: echoes}
+		}
+		return opResult{typ: "rust.install", detail: "rust " + ver, echoes: echoes}
 	case "shell":
 		res, err := installShell(o.ctx, o.sess(), pr)
 		if err != nil {
@@ -598,6 +649,57 @@ func (o *consoleOps) ensureJava(ver string, pr progress.Func) ([]echo, error) {
 		bin = res.Path
 	}
 	return []echo{o.verifyRuntime(bin, "-version")}, nil
+}
+
+// ensureRust locates any installed Rust toolchain, installing the recommended stable line
+// if none is present, and returns a sandbox echo of the toolchain that will run the build.
+// Rust is managed-only (no system source), so — unlike ensurePython/Node/Java — there is no
+// system-runtime branch.
+func (o *consoleOps) ensureRust(pr progress.Func) ([]echo, error) {
+	sess := o.sess()
+	bin, err := rust.Locate(o.ctx, sess.fs, sess.tree.Root, "", sess.fp.Arch, sess.fp.Libc.Family)
+	if err != nil {
+		res, ierr := runtimeInstaller(sess, pr, "rust").Install(o.ctx, rust.ResolveLine(""))
+		if ierr != nil {
+			return nil, ierr
+		}
+		bin = res.Path
+	}
+	return []echo{o.verifyRuntime(bin, "--version")}, nil
+}
+
+// buildEchoes confirms a build tool's produced artifacts (sandbox paths) + the tier used —
+// shared by the Maven and Cargo project-build paths (both report []string artifacts + a tier).
+func buildEchoes(artifacts []string, tier string) []echo {
+	if len(artifacts) == 0 {
+		return []echo{{"build succeeded (no artifact produced)", true}}
+	}
+	echoes := make([]echo, 0, len(artifacts))
+	for _, a := range artifacts {
+		echoes = append(echoes, echo{"built " + a + " (" + tier + ")", true})
+	}
+	return echoes
+}
+
+// buildDetail summarizes a project build for the [POPO] activity line.
+func buildDetail(artifacts []string, tier string) string {
+	if len(artifacts) == 0 {
+		return "build ok (" + tier + ", no artifact)"
+	}
+	return fmt.Sprintf("%d artifact(s) [%s]: %s", len(artifacts), tier, strings.Join(artifacts, ", "))
+}
+
+// pkgEchoes confirms each installed/failed package from a package-manager outcome (a conda
+// env build or an npm project install) as a sandbox echo.
+func pkgEchoes(installed []pkg.Installed, failed []pkg.Failure) []echo {
+	echoes := make([]echo, 0, len(installed)+len(failed))
+	for _, p := range installed {
+		echoes = append(echoes, echo{p.Name + " " + p.Version + " installed", true})
+	}
+	for _, f := range failed {
+		echoes = append(echoes, echo{f.Name + " " + f.Version + " failed", false})
+	}
+	return echoes
 }
 
 // mavenEchoes confirms the resolved coordinates and the classpath the sandbox now

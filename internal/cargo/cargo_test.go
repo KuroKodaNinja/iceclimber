@@ -100,7 +100,7 @@ directory = "/tmp/iceclimber-cargobuild-123/vendor"`
 }
 
 func TestCargoBuildCmd(t *testing.T) {
-	online := cargoBuildCmd("/r/bin/cargo", nil, false)
+	online := cargoBuildCmd("/r/bin/cargo", "aarch64", "glibc", nil, false)
 	for _, want := range []string{"build", "--release", "--message-format=json"} {
 		if !strings.Contains(online, want) {
 			t.Errorf("online cmd missing %q: %s", want, online)
@@ -109,12 +109,25 @@ func TestCargoBuildCmd(t *testing.T) {
 	if strings.Contains(online, "--offline") {
 		t.Errorf("online cmd should not be --offline: %s", online)
 	}
-	offline := cargoBuildCmd("/r/bin/cargo", []string{"--features", "x y"}, true)
+	offline := cargoBuildCmd("/r/bin/cargo", "aarch64", "glibc", []string{"--features", "x y"}, true)
 	if !strings.Contains(offline, "--offline") {
 		t.Errorf("offline cmd missing --offline: %s", offline)
 	}
 	if !strings.Contains(offline, "'x y'") { // extra args shell-quoted
 		t.Errorf("extra arg not quoted: %s", offline)
+	}
+	// glibc: no bundled-linker override (the gnu target needs a system toolchain).
+	if strings.Contains(online, "rust-lld") {
+		t.Errorf("glibc cmd should not force rust-lld: %s", online)
+	}
+	// musl: the bundled rust-lld linker is injected (no system cc on the box) + its sysroot bin
+	// dir is on PATH so rust-lld resolves.
+	musl := cargoBuildCmd("/r/bin/cargo", "aarch64", "musl", nil, false)
+	if !strings.Contains(musl, "-C linker=rust-lld") {
+		t.Errorf("musl cmd should force rust-lld: %s", musl)
+	}
+	if !strings.Contains(musl, "/r/lib/rustlib/aarch64-unknown-linux-musl/bin") {
+		t.Errorf("musl cmd should put the rust-lld sysroot bin on PATH: %s", musl)
 	}
 }
 

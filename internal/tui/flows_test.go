@@ -358,11 +358,13 @@ func TestFlow_InstallPython(t *testing.T) {
 	waitText(t, tm, "httpx")
 	send(tm, tea.KeyEnter) // advance to version
 	waitText(t, tm, "3.12 / 24")
-	send(tm, tea.KeyEnter) // version blank ⇒ submit
+	send(tm, tea.KeyEnter) // version blank ⇒ advance to project
+	waitText(t, tm, "/home/iceclimber/proj")
+	send(tm, tea.KeyEnter) // project blank ⇒ submit
 	select {
 	case r := <-ops.install:
-		if r.Lang != "python" || r.Pkgs != "httpx" || r.Version != "" {
-			t.Fatalf("request = %+v, want {python httpx <blank>}", r)
+		if r.Lang != "python" || r.Pkgs != "httpx" || r.Version != "" || r.Project != "" {
+			t.Fatalf("request = %+v, want {python httpx <blank> <blank>}", r)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("python install never fired")
@@ -387,7 +389,9 @@ func TestFlow_InstallJavaScript(t *testing.T) {
 	waitText(t, tm, "3.12 / 24")
 	tm.Type("20")
 	waitText(t, tm, "20")
-	send(tm, tea.KeyEnter) // submit
+	send(tm, tea.KeyEnter) // advance to project
+	waitText(t, tm, "/home/iceclimber/proj")
+	send(tm, tea.KeyEnter) // project blank ⇒ submit
 	select {
 	case r := <-ops.install:
 		if r.Lang != "javascript" {
@@ -420,7 +424,9 @@ func TestFlow_InstallJava(t *testing.T) {
 	waitText(t, tm, "3.12 / 24")
 	tm.Type("17")
 	waitText(t, tm, "17")
-	send(tm, tea.KeyEnter) // submit
+	send(tm, tea.KeyEnter) // advance to project
+	waitText(t, tm, "/home/iceclimber/proj")
+	send(tm, tea.KeyEnter) // project blank ⇒ submit
 	select {
 	case r := <-ops.install:
 		if r.Lang != "java" {
@@ -431,6 +437,41 @@ func TestFlow_InstallJava(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("java install never fired")
+	}
+	finalConsole(t, tm)
+}
+
+// TestFlow_InstallRustProject drives the fourth language through the form: select Rust and
+// set a project dir, then submit — asserting the request carries Lang=rust + Project (the TUI
+// parity for `cargo build --project`; Rust is managed-only, no system-source page).
+func TestFlow_InstallRustProject(t *testing.T) {
+	ops := newRecordOps()
+	tm := startConsole(t, ops)
+	waitText(t, tm, "i install")
+	press(tm, "i")
+	waitText(t, tm, "Rust")
+	send(tm, tea.KeyDown)  // python → javascript
+	send(tm, tea.KeyDown)  // javascript → java
+	send(tm, tea.KeyDown)  // java → rust
+	send(tm, tea.KeyEnter) // accept Rust → packages
+	waitText(t, tm, "requests / figlet")
+	send(tm, tea.KeyEnter) // blank packages → version
+	waitText(t, tm, "3.12 / 24")
+	send(tm, tea.KeyEnter) // blank version → project
+	waitText(t, tm, "/home/iceclimber/proj")
+	tm.Type("/work/hello")
+	waitText(t, tm, "/work/hello")
+	send(tm, tea.KeyEnter) // submit
+	select {
+	case r := <-ops.install:
+		if r.Lang != "rust" {
+			t.Fatalf("selecting Rust must reach the request; got Lang=%q", r.Lang)
+		}
+		if r.Project != "/work/hello" {
+			t.Fatalf("request = %+v, want Project=/work/hello", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("rust project build never fired")
 	}
 	finalConsole(t, tm)
 }
@@ -447,11 +488,13 @@ func TestFlow_InstallRuntimeOnly(t *testing.T) {
 	waitText(t, tm, "requests / figlet")
 	send(tm, tea.KeyEnter) // packages blank ⇒ advance to version
 	waitText(t, tm, "3.12 / 24")
-	send(tm, tea.KeyEnter) // version blank ⇒ submit
+	send(tm, tea.KeyEnter) // version blank ⇒ advance to project
+	waitText(t, tm, "/home/iceclimber/proj")
+	send(tm, tea.KeyEnter) // project blank ⇒ submit
 	select {
 	case r := <-ops.install:
-		if r.Lang != "python" || r.Pkgs != "" || r.Version != "" {
-			t.Fatalf("request = %+v, want {python <blank> <blank>} (runtime-only)", r)
+		if r.Lang != "python" || r.Pkgs != "" || r.Version != "" || r.Project != "" {
+			t.Fatalf("request = %+v, want {python <blank> <blank> <blank>} (runtime-only)", r)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("runtime-only install never fired")
@@ -494,7 +537,9 @@ func TestFlow_InstallRuntimeSource(t *testing.T) {
 	waitText(t, tm, "requests / figlet")
 	send(tm, tea.KeyEnter) // blank packages → version
 	waitText(t, tm, "3.12 / 24")
-	send(tm, tea.KeyEnter) // blank version → submit
+	send(tm, tea.KeyEnter) // blank version → project
+	waitText(t, tm, "/home/iceclimber/proj")
+	send(tm, tea.KeyEnter) // blank project → submit
 	select {
 	case src := <-ops.rtSources:
 		if !src["python"].System {
@@ -532,6 +577,8 @@ func TestFlow_InstallCondaEnvManager(t *testing.T) {
 	waitText(t, tm, "requests / figlet")
 	send(tm, tea.KeyEnter) // → version
 	waitText(t, tm, "3.12 / 24")
+	send(tm, tea.KeyEnter) // → project
+	waitText(t, tm, "/home/iceclimber/proj")
 	send(tm, tea.KeyEnter) // → submit
 	select {
 	case src := <-ops.rtSources:
@@ -741,6 +788,8 @@ func TestFlow_InstallProgressMeter(t *testing.T) {
 	waitText(t, tm, "requests / figlet")
 	send(tm, tea.KeyEnter) // packages blank → version
 	waitText(t, tm, "3.12 / 24")
+	send(tm, tea.KeyEnter) // version blank → project
+	waitText(t, tm, "/home/iceclimber/proj")
 	send(tm, tea.KeyEnter) // submit ⇒ RunInstall blocks (running stays visible)
 	waitText(t, tm, "Python install")
 
@@ -774,6 +823,8 @@ func TestFlow_RunningIndicator(t *testing.T) {
 	waitText(t, tm, "six")
 	send(tm, tea.KeyEnter) // advance to version
 	waitText(t, tm, "3.12 / 24")
+	send(tm, tea.KeyEnter) // version blank → project
+	waitText(t, tm, "/home/iceclimber/proj")
 	send(tm, tea.KeyEnter)            // submit ⇒ RunInstall blocks
 	waitText(t, tm, "Python install") // the in-flight meter (spinner + label)
 	press(tm, "i")                    // input is ignored while running (no second form)
@@ -794,6 +845,8 @@ func TestFlow_ReadOnlyKeysWhileRunning(t *testing.T) {
 	waitText(t, tm, "requests / figlet")
 	send(tm, tea.KeyEnter)
 	waitText(t, tm, "3.12 / 24")
+	send(tm, tea.KeyEnter) // version blank → project
+	waitText(t, tm, "/home/iceclimber/proj")
 	send(tm, tea.KeyEnter) // submit ⇒ RunInstall blocks (running stays visible)
 	waitText(t, tm, "Python install")
 
