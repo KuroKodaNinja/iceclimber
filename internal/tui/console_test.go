@@ -41,12 +41,21 @@ func (f *fakeOps) Agents() []AgentChoice {
 	return []AgentChoice{{Name: "claude", DisplayName: "Claude Code"}}
 }
 func (f *fakeOps) DetectedRuntimes() []RuntimeChoice                   { return nil }
+func (f *fakeOps) CatalogTools() []ToolChoice                          { return nil }
 func (f *fakeOps) SetRuntimeSources(map[string]RuntimeSelection) error { return nil }
 func (f *fakeOps) PollStatus() tea.Cmd                                 { return func() tea.Msg { return StatusMsg{} } }
 func (f *fakeOps) Egress() EgressSnapshot                              { return EgressSnapshot{} }
 func (f *fakeOps) ApprovePending(string) error                         { return nil }
 func (f *fakeOps) DenyPending(string) error                            { return nil }
 func (f *fakeOps) ForgetRule(_, _ string) error                        { return nil }
+
+// fakeOps2 is fakeOps with a catalog tool list (for the tool-picker form test).
+type fakeOps2 struct {
+	fakeOps
+	tools []ToolChoice
+}
+
+func (f *fakeOps2) CatalogTools() []ToolChoice { return f.tools }
 
 // errOps fails egress actions and serves a fixed snapshot, for error-surfacing.
 type errOps struct {
@@ -602,6 +611,37 @@ func TestConsole_SubmitShellInstall(t *testing.T) {
 	}
 	if ops.install == nil || ops.install.Lang != "shell" {
 		t.Errorf("RunInstall got %+v, want Lang=shell", ops.install)
+	}
+}
+
+// TestConsole_SubmitToolInstall: the install form's "Tool" option routes to RunInstall
+// with Lang="tool" and the picked tool name (TUI parity for `install tool` / tool.install).
+func TestConsole_SubmitToolInstall(t *testing.T) {
+	ops := &fakeOps{}
+	c := NewConsole("sbx", make(chan tea.Msg), "", ops)
+	c.formKind = "install"
+	c.st = &formState{lang: "tool", tool: "ripgrep"}
+
+	updated, cmd := c.submitForm("install")
+	if c2 := updated.(Console); c2.running != "tool install" {
+		t.Fatalf("running = %q, want tool install", c2.running)
+	}
+	if cmd == nil {
+		t.Fatal("submit should return the op command")
+	}
+	if ops.install == nil || ops.install.Lang != "tool" || ops.install.Tool != "ripgrep" {
+		t.Errorf("RunInstall got %+v, want Lang=tool Tool=ripgrep", ops.install)
+	}
+}
+
+// TestInstallForm_ToolPickerShown: the form offers a Tool option + a picker when the
+// catalog has entries.
+func TestInstallForm_ToolPickerShown(t *testing.T) {
+	ops := &fakeOps2{tools: []ToolChoice{{Name: "jq", Version: "1.8.2", Description: "JSON"}}}
+	c := NewConsole("sbx", make(chan tea.Msg), "", ops)
+	form := c.installForm()
+	if form == nil || c.st.tool != "jq" {
+		t.Fatalf("tool picker should default to the first catalog tool; st.tool=%q", c.st.tool)
 	}
 }
 

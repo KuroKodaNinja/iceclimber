@@ -295,7 +295,9 @@ func renderEnv(d Descriptor, token, dir, root string) string {
 		fmt.Fprintf(&b, "export %s=%s\n", e.Key, remote.ShellQuote(e.Value))
 	}
 	fmt.Fprintf(&b, "export ICECLIMBER_HOME=%s\n", remote.ShellQuote(root))
-	fmt.Fprintf(&b, "export PATH=%s:%s:\"$PATH\"\n", remote.ShellQuote(dir), remote.ShellQuote(root))
+	// agent dir + $ICECLIMBER_HOME (popo/nana) + tools/bin (catalog tools by name) on PATH.
+	fmt.Fprintf(&b, "export PATH=%s:%s:%s:\"$PATH\"\n",
+		remote.ShellQuote(dir), remote.ShellQuote(root+"/tools/bin"), remote.ShellQuote(root))
 	return b.String()
 }
 

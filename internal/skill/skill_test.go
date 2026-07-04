@@ -17,7 +17,10 @@ func TestNanaMDIsMinimalAndPointsToPopo(t *testing.T) {
 	}{{"relay", false}, {"proxy", true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			doc := NanaMD(tc.proxy)
-			if len(doc) > 5000 {
+			// A focus ceiling, not a hard limit — raised as real capabilities land (runtime
+			// version guidance #83, the tool catalog #96). The bar is "does every line earn
+			// its place in the system prompt", checked in review; this catches unbounded drift.
+			if len(doc) > 5500 {
 				t.Errorf("NANA.md (%s) should stay focused (system prompt); got %d bytes", tc.name, len(doc))
 			}
 			// The mode marker must be fully spliced out — a leftover placeholder means the

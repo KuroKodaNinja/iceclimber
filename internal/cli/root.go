@@ -79,6 +79,7 @@ func newRootCmd() *cobra.Command {
 		newTuiCmd(),
 		newShellCmd(),
 		newCacheCmd(),
+		newCatalogCmd(),
 	)
 	// pending/approve/deny predate the `egress` group; they stay as hidden top-level
 	// aliases so existing scripts keep working (the group is the documented surface).

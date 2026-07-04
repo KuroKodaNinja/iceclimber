@@ -49,7 +49,10 @@ func TestInstallShellAndShellCommand(t *testing.T) {
 			if !strings.Contains(cout, "HOME="+root) {
 				t.Errorf("shell -c did not set ICECLIMBER_HOME:\n%s", cout)
 			}
-			if !strings.Contains(cout, "BASH="+root+"/shell/bash") {
+			// bash is on PATH — resolved either at <root>/shell/bash or its tools/bin link
+			// (bash migrated into the tool catalog, which also links it into tools/bin; that
+			// dir precedes shell/ on PATH, so `command -v` may report the link — both are bash).
+			if !strings.Contains(cout, "BASH="+root+"/shell/bash") && !strings.Contains(cout, "BASH="+root+"/tools/bin/bash") {
 				t.Errorf("installed bash not on PATH in shell -c:\n%s", cout)
 			}
 			if !strings.Contains(cout, "POPO="+root+"/popo") {

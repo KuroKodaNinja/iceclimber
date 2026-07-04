@@ -42,6 +42,14 @@ func buildParams(verb string, args []string) (any, error) {
 		}
 		return map[string]any{"python_version": ver, "packages": pkgs}, nil
 
+	case "tool.install":
+		// A catalog utility by name (ripgrep, jq, fd, …). Version + platform are the
+		// catalog's job; the agent just names the tool.
+		if len(args) != 1 {
+			return nil, fmt.Errorf("want exactly one tool name (e.g. ripgrep)")
+		}
+		return map[string]any{"name": args[0]}, nil
+
 	case "conda.install":
 		// --file <path>: build a whole environment.yml in the sandbox instead of named
 		// packages (python + channels + specs all come from the manifest).

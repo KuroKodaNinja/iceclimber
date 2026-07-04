@@ -15,6 +15,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
+	"github.com/KuroKodaNinja/iceclimber/internal/shell"
 	"github.com/spf13/cobra"
 )
 
@@ -35,7 +36,7 @@ func newInstallCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&runtimeSource, "runtime-source", "",
 		"set + persist a per-language runtime source, e.g. python=system,node=managed (or python=system:conda)")
 	cmd.AddCommand(newInstallPythonCmd(), newInstallPipCmd(), newInstallNodeCmd(), newInstallNpmCmd(),
-		newInstallJavaCmd(), newInstallMavenCmd(), newInstallCondaCmd(), newInstallShellCmd())
+		newInstallJavaCmd(), newInstallMavenCmd(), newInstallCondaCmd(), newInstallShellCmd(), newInstallToolCmd())
 	return cmd
 }
 
@@ -66,7 +67,7 @@ func newInstallShellCmd() *cobra.Command {
 			defer done()
 
 			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			res, err := newShellInstaller(sess, pr).Install(ctx)
+			res, err := installShell(ctx, sess, pr)
 			finish()
 			if err != nil {
 				return err
@@ -76,7 +77,9 @@ func newInstallShellCmd() *cobra.Command {
 			if res.AlreadyInstalled {
 				verb = "already installed:"
 			}
-			fmt.Fprintf(w, "%s bash %s at %s\n", verb, res.Version, res.Path)
+			// Report the canonical shell path (<root>/shell/bash) — what `iceclimber shell`
+			// runs — not the tools/bin link the catalog Result carries.
+			fmt.Fprintf(w, "%s bash %s at %s\n", verb, res.Version, shell.BinPath(sess.tree.Root))
 			fmt.Fprintln(w, "run `iceclimber shell` to drop into it")
 			return nil
 		},

@@ -37,6 +37,7 @@ func TestConcurrencyContractMatchesDoc(t *testing.T) {
 		"node.install", "npm.install",
 		"java.install", "maven.install", "maven.build",
 		"conda.install",
+		"tool.install",
 	}
 	// Verbs with no shared target — always parallel (empty family).
 	free := []string{"ping", "web.fetch", "collect"}

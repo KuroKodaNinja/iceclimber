@@ -40,6 +40,7 @@ type recordOps struct {
 	denied    chan string
 	agent     chan AgentInstallRequest
 	detected  []RuntimeChoice                  // offered in the install form's source choice
+	tools     []ToolChoice                     // offered in the install form's tool picker
 	rtSources chan map[string]RuntimeSelection // captures SetRuntimeSources
 }
 
@@ -72,6 +73,7 @@ func (o *recordOps) Agents() []AgentChoice {
 	return []AgentChoice{{Name: "claude", DisplayName: "Claude Code"}}
 }
 func (o *recordOps) DetectedRuntimes() []RuntimeChoice { return o.detected }
+func (o *recordOps) CatalogTools() []ToolChoice        { return o.tools }
 func (o *recordOps) SetRuntimeSources(sel map[string]RuntimeSelection) error {
 	o.rtSources <- sel
 	return nil
@@ -719,6 +721,7 @@ func (o *gateOps) RunAgentInstall(AgentInstallRequest) tea.Cmd {
 }
 func (o *gateOps) Agents() []AgentChoice                               { return nil }
 func (o *gateOps) DetectedRuntimes() []RuntimeChoice                   { return nil }
+func (o *gateOps) CatalogTools() []ToolChoice                          { return nil }
 func (o *gateOps) SetRuntimeSources(map[string]RuntimeSelection) error { return nil }
 func (o *gateOps) PollStatus() tea.Cmd                                 { return nil }
 func (o *gateOps) Egress() EgressSnapshot                              { return EgressSnapshot{} }

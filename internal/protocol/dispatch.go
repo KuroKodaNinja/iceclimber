@@ -386,6 +386,7 @@ func resourceKey(data []byte) string {
 			JavaVersion   string `json:"java_version"`
 			Project       string `json:"project"`
 			File          string `json:"file"`
+			Name          string `json:"name"` // tool.install: the tool name
 		} `json:"params"`
 	}
 	_ = json.Unmarshal(data, &req)
@@ -394,9 +395,9 @@ func resourceKey(data []byte) string {
 		return ""
 	}
 	p := req.Params
-	// Prefer the most specific target so distinct projects/envs parallelize; fall back to the
-	// runtime version, then the bare family (safe over-serialization if params don't parse).
-	target := firstNonEmpty(p.Project, p.File, p.Version, p.PythonVersion, p.NodeVersion, p.JavaVersion)
+	// Prefer the most specific target so distinct projects/tools/envs parallelize; fall back to
+	// the runtime version, then the bare family (safe over-serialization if params don't parse).
+	target := firstNonEmpty(p.Name, p.Project, p.File, p.Version, p.PythonVersion, p.NodeVersion, p.JavaVersion)
 	return fam + ":" + target
 }
 
@@ -412,6 +413,8 @@ func runtimeFamily(reqType string) string {
 		return "java"
 	case "conda.install":
 		return "conda"
+	case "tool.install":
+		return "tool" // serialized per tool name (via resourceKey), so two tools install in parallel
 	default:
 		return ""
 	}

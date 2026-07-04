@@ -92,7 +92,7 @@ func newSetupCmd() *cobra.Command {
 			if !skipShell && (yes || askYes(cmd, interactive, "Install the interactive shell (bash, for `iceclimber shell`)? [Y/n] ", true)) {
 				step(w, 4, "shell")
 				pr, finish := installProgress(w, sess.transport)
-				res, err := newShellInstaller(sess, pr).Install(ctx)
+				res, err := installShell(ctx, sess, pr)
 				finish()
 				if err != nil {
 					return err

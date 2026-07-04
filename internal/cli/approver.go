@@ -214,6 +214,11 @@ func summarizeRequest(req protocol.Request) (title string, fields [][2]string, n
 		return "Install npm packages",
 			[][2]string{{"node", orDash(nv)}, {"packages", orDash(summarizePkgs(m["packages"]))}},
 			"Resolved + fetched by Popo, then relayed into the sandbox."
+	case "tool.install":
+		n, _ := m["name"].(string)
+		return "Install tool " + n,
+			[][2]string{{"tool", orDash(n)}},
+			"A catalog utility (checksum-verified static binary) pushed into the sandbox."
 	default:
 		return req.Type, nil, ""
 	}

@@ -1,0 +1,51 @@
+# Embedded default catalog (plan §16). Every entry is PINNED — bumping a tool is editing
+# this file with a new version + verified checksums. Operator files under
+# ~/.iceclimber/catalog/*.yaml (and config `catalog:`) extend or override by name.
+#
+# All three checksum/kind combinations are exercised here on purpose:
+#   bash → static-pinned (inline url+sha)   jq → github-release + shasums-file
+#   fd   → github-release + pinned (upstream ships no sums, so we pin our own)
+# Every asset + sha below was fetched, verified, and run on the musl AND glibc VMs.
+
+- name: bash
+  description: interactive shell for `iceclimber shell` (readline history + completion)
+  kind: static-pinned
+  version: "5.2.15"
+  dest: shell/ # stays where `iceclimber shell` expects it (#87); the shell alias drops the rc
+  platforms:
+    linux/aarch64/musl: {url: "https://github.com/robxu9/bash-static/releases/download/5.2.015-1.2.3-2/bash-linux-aarch64", sha256: 8877ad33344af461ed801066322fd9a7808cd73e4e81087da228e32e8fad54ca}
+    linux/aarch64/glibc: {url: "https://github.com/robxu9/bash-static/releases/download/5.2.015-1.2.3-2/bash-linux-aarch64", sha256: 8877ad33344af461ed801066322fd9a7808cd73e4e81087da228e32e8fad54ca}
+    linux/x86_64/musl: {url: "https://github.com/robxu9/bash-static/releases/download/5.2.015-1.2.3-2/bash-linux-x86_64", sha256: 64469a9512a00199c85622ec56f870f97d50457a4e06e0cfa39bae7adf0cc8f2}
+    linux/x86_64/glibc: {url: "https://github.com/robxu9/bash-static/releases/download/5.2.015-1.2.3-2/bash-linux-x86_64", sha256: 64469a9512a00199c85622ec56f870f97d50457a4e06e0cfa39bae7adf0cc8f2}
+  unpack: {format: binary, bins: [bash]}
+  verify: "bash --version"
+
+- name: jq
+  description: command-line JSON processor
+  kind: github-release
+  version: "1.8.2"
+  repo: jqlang/jq
+  release_tag: jq-1.8.2 # jq's tag isn't the bare version
+  checksums: {recipe: shasums-file, asset: sha256sum.txt}
+  platforms: # single static binary per arch (musl-linked → runs on both libcs)
+    linux/aarch64/musl: {asset: jq-linux-arm64}
+    linux/aarch64/glibc: {asset: jq-linux-arm64}
+    linux/x86_64/musl: {asset: jq-linux-amd64}
+    linux/x86_64/glibc: {asset: jq-linux-amd64}
+  unpack: {format: binary, bins: [jq]}
+  verify: "jq --version"
+
+- name: fd
+  description: fast, user-friendly file finder (a friendlier find)
+  kind: github-release
+  version: "10.4.2"
+  repo: sharkdp/fd
+  release_tag: v10.4.2
+  checksums: {recipe: pinned} # upstream publishes no sums file → we pin our own
+  platforms: # musl builds are static → serve both libcs
+    linux/aarch64/musl: {asset: fd-v10.4.2-aarch64-unknown-linux-musl.tar.gz, sha256: f32d3657473fba74e2600babc8db0b93420d51169223b7e8143b2ed55d8fd9e8}
+    linux/aarch64/glibc: {asset: fd-v10.4.2-aarch64-unknown-linux-musl.tar.gz, sha256: f32d3657473fba74e2600babc8db0b93420d51169223b7e8143b2ed55d8fd9e8}
+    linux/x86_64/musl: {asset: fd-v10.4.2-x86_64-unknown-linux-musl.tar.gz, sha256: e3257d48e29a6be965187dbd24ce9af564e0fe67b3e73c9bdcd180f4ec11bdde}
+    linux/x86_64/glibc: {asset: fd-v10.4.2-x86_64-unknown-linux-musl.tar.gz, sha256: e3257d48e29a6be965187dbd24ce9af564e0fe67b3e73c9bdcd180f4ec11bdde}
+  unpack: {format: tar.gz, strip: 1, bins: [fd]}
+  verify: "fd --version"

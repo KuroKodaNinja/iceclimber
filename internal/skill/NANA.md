@@ -15,8 +15,12 @@ manage files to talk to Popo:
 popo help                              # list verbs and their usage (the source of truth)
 popo node.install                      # install the current recommended runtime (no version = latest)
 popo pip.install --python 3.12 rich    # install packages into a runtime you installed
+popo tool.install ripgrep              # install a common Unix tool (jq, fd, ripgrep, …), then run it by name
 popo web.fetch https://example.com     # fetch a URL through Popo's network
 ```
+
+Common **tools** (ripgrep/`rg`, `jq`, `fd`, …) aren't preinstalled: `popo tool.install
+<name>` gets one, then run it by name (it's on your PATH; unknown → the available list).
 
 `popo <verb>` blocks until Popo answers, prints the result, and exits:
 - **0** — done; the output has what you need (often an absolute path).

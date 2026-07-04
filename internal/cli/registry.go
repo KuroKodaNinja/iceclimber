@@ -3,8 +3,11 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/agent"
+	"github.com/KuroKodaNinja/iceclimber/internal/catalog"
 	"github.com/KuroKodaNinja/iceclimber/internal/conda"
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
 	"github.com/KuroKodaNinja/iceclimber/internal/maven"
@@ -33,9 +36,17 @@ func newInstaller(sess *session, pr progress.Func) *python.Installer {
 	})
 }
 
-// newShellInstaller builds the interactive-shell (static bash) installer from an open session.
-func newShellInstaller(sess *session, pr progress.Func) *shell.Installer {
-	return shell.NewInstaller(shell.Config{
+// loadCatalog builds the tool catalog for a session: embedded defaults + the
+// ~/.iceclimber/catalog convention dir + any config `catalog:` paths (later overrides
+// earlier by name).
+func loadCatalog(sess *session) (*catalog.Catalog, error) {
+	overlays := append([]string{catalog.DefaultOverlayDir()}, sess.catalogPaths...)
+	return catalog.Load(overlays)
+}
+
+// toolInstallDeps builds the catalog installer's deps from an open session.
+func toolInstallDeps(sess *session, pr progress.Func) catalog.InstallDeps {
+	return catalog.InstallDeps{
 		FS:       sess.fs,
 		Runner:   sess.runner,
 		Root:     sess.tree.Root,
@@ -44,7 +55,35 @@ func newShellInstaller(sess *session, pr progress.Func) *shell.Installer {
 		Libc:     sess.fp.Libc.Family,
 		CacheDir: sess.cacheDir,
 		Progress: pr,
-	})
+	}
+}
+
+// installTool resolves + installs a catalog tool by name over the session, returning a
+// clear error (naming the available tools) for an unknown name.
+func installTool(ctx context.Context, sess *session, pr progress.Func, name string) (catalog.Result, error) {
+	cat, err := loadCatalog(sess)
+	if err != nil {
+		return catalog.Result{}, err
+	}
+	e, ok := cat.Lookup(name)
+	if !ok {
+		return catalog.Result{}, fmt.Errorf("unknown tool %q (available: %s)", name, strings.Join(cat.Names(), ", "))
+	}
+	return e.Install(ctx, toolInstallDeps(sess, pr))
+}
+
+// installShell installs the interactive shell: the catalog `bash` entry (into <root>/shell)
+// plus the bash rc (the shell-specific step the catalog doesn't own). This is what
+// `install shell` and the console's shell action run.
+func installShell(ctx context.Context, sess *session, pr progress.Func) (catalog.Result, error) {
+	res, err := installTool(ctx, sess, pr, "bash")
+	if err != nil {
+		return catalog.Result{}, err
+	}
+	if err := shell.WriteRC(ctx, sess.fs, sess.tree.Root); err != nil {
+		return catalog.Result{}, fmt.Errorf("write shell rc: %w", err)
+	}
+	return res, nil
 }
 
 // newNodeInstaller builds the Node installer from an open session.
@@ -199,6 +238,7 @@ func buildRegistry(sess *session, pr progress.Func) protocol.Registry {
 		"maven.install":  maven.Handler(mavenDeps(sess, pr)),
 		"maven.build":    maven.BuildHandler(mavenBuildDeps(sess, pr)),
 		"conda.install":  conda.Handler(condaDeps(sess, pr)),
+		"tool.install":   catalog.Handler(func() (*catalog.Catalog, error) { return loadCatalog(sess) }, toolInstallDeps(sess, pr)),
 		"web.fetch":      webfetch.Handler(webfetchDeps(sess)),
 	}
 }

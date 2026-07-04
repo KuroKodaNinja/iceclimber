@@ -201,6 +201,20 @@ func (o *consoleOps) DetectedRuntimes() []tui.RuntimeChoice {
 	return out
 }
 
+// CatalogTools lists the installable catalog utilities for the install form's tool
+// picker (local; a catalog load failure yields none rather than breaking the form).
+func (o *consoleOps) CatalogTools() []tui.ToolChoice {
+	cat, err := loadCatalog(o.sess())
+	if err != nil {
+		return nil
+	}
+	var out []tui.ToolChoice
+	for _, e := range cat.All() {
+		out = append(out, tui.ToolChoice{Name: e.Name, Version: e.Version, Description: e.Description})
+	}
+	return out
+}
+
 // SetRuntimeSources persists the operator's per-language system/managed choice. The
 // install path + serve loop resolve the source fresh (runtimeSourcesNow), so the
 // choice takes effect without a reconnect.
@@ -498,11 +512,17 @@ func (o *consoleOps) doInstall(r tui.InstallRequest) opResult {
 		echoes = append(echoes, mavenEchoes(out)...)
 		return opResult{typ: "maven.install", detail: pkgSummary(out.Installed, out.Failed), echoes: echoes}
 	case "shell":
-		res, err := newShellInstaller(o.sess(), pr).Install(o.ctx)
+		res, err := installShell(o.ctx, o.sess(), pr)
 		if err != nil {
 			return opResult{typ: "shell.install", err: err}
 		}
 		return opResult{typ: "shell.install", detail: "bash " + res.Version + " — run `iceclimber shell`"}
+	case "tool":
+		res, err := installTool(o.ctx, o.sess(), pr, r.Tool)
+		if err != nil {
+			return opResult{typ: "tool.install", err: err}
+		}
+		return opResult{typ: "tool.install", detail: res.Name + " " + res.Version}
 	}
 	return opResult{typ: "install", err: fmt.Errorf("unknown language %q", r.Lang)}
 }

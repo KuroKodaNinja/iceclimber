@@ -1,6 +1,15 @@
+// Package shell owns the interactive-shell login environment for `iceclimber shell`: the
+// PATH/env preamble (shared with the launcher) and the bash rc file. The bash BINARY is
+// installed via the tool catalog (the `bash` entry, dest: shell/) — this package no longer
+// fetches it, only renders and drops the rc alongside it.
 package shell
 
-import "github.com/KuroKodaNinja/iceclimber/internal/remote"
+import (
+	"context"
+
+	"github.com/KuroKodaNinja/iceclimber/internal/remote"
+	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
+)
 
 // Layout under the install root.
 const (
@@ -15,6 +24,14 @@ const (
 func BinPath(root string) string { return root + "/" + dirName + "/" + binName }
 func RCPath(root string) string  { return root + "/" + dirName + "/" + rcName }
 
+// WriteRC drops (or refreshes) the bash rc at <root>/shell/bashrc — the shell-specific
+// step `install shell` runs after the catalog installs the bash binary. Idempotent; a
+// re-run always refreshes so an updated env preamble (more runtime bins, egress changes)
+// lands without a reinstall.
+func WriteRC(ctx context.Context, fs remotefs.FS, root string) error {
+	return fs.WriteFile(ctx, RCPath(root), []byte(renderRC(root)))
+}
+
 // EnvPreamble returns a POSIX-sh snippet that sets up the "reasonable environment" for an
 // interactive login into the sandbox: ICECLIMBER_HOME, popo/nana + the installed shell on
 // PATH, every installed runtime's bin dir on PATH (installed runtimes are otherwise only
@@ -24,7 +41,7 @@ func RCPath(root string) string  { return root + "/" + dirName + "/" + rcName }
 func EnvPreamble(root string) string {
 	q := remote.ShellQuote(root)
 	return "export ICECLIMBER_HOME=" + q + "\n" +
-		`PATH="$ICECLIMBER_HOME/` + dirName + `:$ICECLIMBER_HOME:$PATH"` + "\n" +
+		`PATH="$ICECLIMBER_HOME/tools/bin:$ICECLIMBER_HOME/` + dirName + `:$ICECLIMBER_HOME:$PATH"` + "\n" +
 		`for d in "$ICECLIMBER_HOME"/runtimes/*/*/bin; do [ -d "$d" ] && PATH="$d:$PATH"; done` + "\n" +
 		`export PATH` + "\n" +
 		`[ -f "$ICECLIMBER_HOME/egress-env.sh" ] && . "$ICECLIMBER_HOME/egress-env.sh"` + "\n"

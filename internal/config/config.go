@@ -23,7 +23,10 @@ type Config struct {
 	SSH        SSH    `yaml:"ssh"`
 	RemoteRoot string `yaml:"remote_root"` // optional; chosen during bootstrap if empty
 	CacheDir   string `yaml:"cache_dir"`
-	Pip        Pip    `yaml:"pip"`
+	// Catalog lists extra tool-catalog files/dirs (YAML) layered over the embedded
+	// defaults + the ~/.iceclimber/catalog convention; later entries override by name.
+	Catalog []string `yaml:"catalog"`
+	Pip     Pip      `yaml:"pip"`
 	// ControllerPython is the operator's python on the controller, used for
 	// Tier-1 cross-platform wheel downloads. Defaults to "python3" at use.
 	ControllerPython string `yaml:"controller_python"`

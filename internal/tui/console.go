@@ -76,10 +76,14 @@ type PasswordRequest struct {
 // ensures the runtime exists (installing it at Version, or the recommended default
 // when blank) and derives the package manager (pip / npm) and resolution tier.
 type InstallRequest struct {
-	Lang    string // "python" | "javascript"
+	Lang    string // "python" | "javascript" | "java" | "shell" | "tool"
 	Version string // runtime version to ensure/target (blank = recommended default)
 	Pkgs    string // space/comma-separated package specs
+	Tool    string // lang=="tool": the catalog tool name to install
 }
+
+// ToolChoice is one catalog utility offered in the console's tool picker.
+type ToolChoice struct{ Name, Version, Description string }
 
 // AgentInstallRequest is an operator request to install/wrap a coding agent (the
 // nana wrapper). Wrap uses a binary already on the sandbox (no relay); Bin optionally
@@ -131,6 +135,9 @@ type OpRunner interface {
 	Agents() []AgentChoice
 	// DetectedRuntimes lists system runtimes the operator may opt into at bootstrap. Local.
 	DetectedRuntimes() []RuntimeChoice
+	// CatalogTools lists the installable catalog utilities (for the install form's tool
+	// picker). Local (no SSH).
+	CatalogTools() []ToolChoice
 	// SetRuntimeSources persists the operator's per-language bootstrap choice (system vs
 	// managed, and the env_manager for a system python). Local.
 	SetRuntimeSources(sel map[string]RuntimeSelection) error
@@ -300,6 +307,7 @@ type formState struct {
 	pyEnvManager string
 	// bootstrap form: "provision" (safe, default) | "reset" (destructive — wipe runtimes + state).
 	bootstrapAction string
+	tool            string // install form: selected catalog tool (lang=="tool")
 }
 
 // NewConsole builds a console reading events (and, optionally, the agent stream).
@@ -715,7 +723,7 @@ func (c Console) submitForm(kind string) (tea.Model, tea.Cmd) {
 		}
 		// Batch the spinner tick so the in-flight footer animates while the op runs.
 		return c, tea.Batch(c.ops.RunInstall(InstallRequest{
-			Lang: c.st.lang, Version: c.st.version, Pkgs: c.st.pkgs,
+			Lang: c.st.lang, Version: c.st.version, Pkgs: c.st.pkgs, Tool: c.st.tool,
 		}), c.tickSpinner())
 	case "agent":
 		if c.st.agentName == "" {
@@ -856,8 +864,23 @@ func (c *Console) installForm() *huh.Form {
 			huh.NewOption("JavaScript", "javascript"),
 			huh.NewOption("Java", "java"),
 			huh.NewOption("Shell (bash — for `iceclimber shell`)", "shell"),
+			huh.NewOption("Tool (a catalog utility: jq, fd, ripgrep, …)", "tool"),
 		),
 	)}
+	// Tool picker — shown only for the "tool" language; a Select over the catalog so the
+	// operator installs a utility the same way the CLI's `install tool` + agent's
+	// `tool.install` do (TUI/cmdline parity).
+	if tools := c.ops.CatalogTools(); len(tools) > 0 {
+		opts := make([]huh.Option[string], len(tools))
+		for i, t := range tools {
+			opts[i] = huh.NewOption(fmt.Sprintf("%s %s — %s", t.Name, t.Version, t.Description), t.Name)
+		}
+		c.st.tool = tools[0].Name
+		groups = append(groups, huh.NewGroup(huh.NewSelect[string]().
+			Title("tool").Description("A checksum-verified static utility, installed onto the sandbox PATH.").
+			Value(&c.st.tool).Options(opts...),
+		).WithHideFunc(func() bool { return c.st.lang != "tool" }))
+	}
 	// One source page per detected system runtime, shown only when the chosen language matches
 	// it (huh hides at the group level, not the field level) — so the wizard is language →
 	// source → [python env] → packages, skipping runtimes the box can't source from the system.
@@ -901,7 +924,7 @@ func (c *Console) installForm() *huh.Form {
 		huh.NewInput().Title("version (optional)").
 			Description("Blank uses the recommended default — Python 3.12 · JavaScript 24 · Java 21.").
 			Placeholder("3.12 / 24 / 21").Value(&c.st.version),
-	).WithHideFunc(func() bool { return c.st.lang == "shell" }))
+	).WithHideFunc(func() bool { return c.st.lang == "shell" || c.st.lang == "tool" }))
 	return huh.NewForm(groups...)
 }
 
@@ -924,6 +947,8 @@ func installLabel(lang string) string {
 		return "Java install"
 	case "shell":
 		return "shell install"
+	case "tool":
+		return "tool install"
 	default:
 		return "Python install"
 	}

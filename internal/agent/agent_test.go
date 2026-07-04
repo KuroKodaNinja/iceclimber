@@ -76,8 +76,8 @@ func TestRenderEnv(t *testing.T) {
 		t.Errorf("ICECLIMBER_HOME not exported:\n%s", got)
 	}
 	// Both the agent dir and $ICECLIMBER_HOME (where popo lives) on PATH.
-	if !strings.Contains(got, "export PATH='/opt/iceclimber/agent/claude':'/opt/iceclimber':\"$PATH\"") {
-		t.Errorf("agent dir + $ICECLIMBER_HOME not on PATH:\n%s", got)
+	if !strings.Contains(got, "export PATH='/opt/iceclimber/agent/claude':'/opt/iceclimber/tools/bin':'/opt/iceclimber':\"$PATH\"") {
+		t.Errorf("agent dir + tools/bin + $ICECLIMBER_HOME not on PATH:\n%s", got)
 	}
 }
 
