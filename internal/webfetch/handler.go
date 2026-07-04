@@ -116,10 +116,14 @@ func Run(ctx context.Context, d Deps, id string, req Request) (GateOutcome, erro
 		return GateOutcome{Status: "ok", Result: res, Venue: venue, URL: resolved}, nil
 	}
 
+	// regate re-checks each redirect hop the controller fetch follows (see regateRedirect).
+	origHost := hostOnly(resolved)
+	regate := func(hop string) error { return regateRedirect(d.Policy, origHost, hop) }
+
 	// Controller venue → gate. doFetch/denied are shared by the rule-based and
 	// interactively-approved paths.
 	doFetch := func() (GateOutcome, error) {
-		res, err := controllerFetch(ctx, d.FS, d.Root, method, req, resolved)
+		res, err := controllerFetch(ctx, d.FS, d.Root, method, req, resolved, regate)
 		if err != nil {
 			record("allow", Result{}, "error")
 			return GateOutcome{}, err
@@ -217,4 +221,23 @@ func hostOnly(raw string) string {
 		return u.Hostname()
 	}
 	return raw
+}
+
+// regateRedirect decides whether a controller-venue fetch may follow a redirect to hop, given
+// the origin host it started from. Policy.Decide ran only on the original URL, so without this
+// an allowed host that 302s to an arbitrary public host would be followed and its body returned
+// to the sandbox — the per-host allow-list bypassed. The SSRF floor is re-applied on every hop,
+// a same-host redirect (path change only) is fine since the host was already gated, and a
+// cross-host redirect is refused unless the new host is explicitly allowed.
+func regateRedirect(policy *egress.Policy, origHost, hop string) error {
+	if err := checkSSRF(hop); err != nil {
+		return err
+	}
+	if hostOnly(hop) == origHost {
+		return nil
+	}
+	if policy.Decide(hop) != egress.Allow {
+		return fmt.Errorf("redirect to unapproved host %q refused", hostOnly(hop))
+	}
+	return nil
 }

@@ -61,10 +61,10 @@ func (p *Policy) Store() *Store { return p.store }
 // Resolve applies fetch rewrites then venue selection. It returns the
 // (possibly rewritten) URL, the venue, and whether a rewrite fired.
 func (p *Policy) Resolve(raw string) (url, venue string, rewritten bool, err error) {
-	raw = normalizeURL(raw)
+	raw = Canonical(raw)
 	for _, rw := range p.rewrites {
 		if nu, ok := applyRewrite(rw, raw); ok {
-			return nu, normVenue(rw.Venue), true, nil
+			return Canonical(nu), normVenue(rw.Venue), true, nil
 		}
 	}
 	host, err := hostOf(raw)
@@ -72,7 +72,7 @@ func (p *Policy) Resolve(raw string) (url, venue string, rewritten bool, err err
 		return "", "", false, err
 	}
 	for _, ad := range p.allowed {
-		if globMatch(ad.Pattern, host) {
+		if hostMatch(ad.Pattern, host) {
 			return raw, normVenue(ad.ReachableFrom), false, nil
 		}
 	}
@@ -85,12 +85,12 @@ func (p *Policy) Resolve(raw string) (url, venue string, rewritten bool, err err
 // operator declared these hosts reachable, so listed registries need no per-request
 // approval (an explicit store Deny still overrides, since callers check Decide first).
 func (p *Policy) ConfigAllowed(raw string) bool {
-	host, err := hostOf(normalizeURL(raw))
+	host, err := hostOf(raw)
 	if err != nil {
 		return false
 	}
 	for _, ad := range p.allowed {
-		if globMatch(ad.Pattern, host) {
+		if hostMatch(ad.Pattern, host) {
 			return true
 		}
 	}
@@ -102,30 +102,43 @@ func (p *Policy) ConfigAllowed(raw string) bool {
 // uses this so a config allowed_domains entry can pre-allow a host under
 // unlisted_domain_policy: deny, while an explicit deny rule still wins.
 func (p *Policy) StoreDenied(url string) bool {
-	for _, r := range p.store.Deny() {
-		if globMatch(r, url) {
-			return true
-		}
+	url = Canonical(url)
+	r, err := p.store.load()
+	if err != nil {
+		return true // fail closed: an unreadable store denies
 	}
-	return false
+	return matchesAny(r.Deny, url)
 }
 
 // unlisted policy (gate → hold for approval, deny → refuse).
 func (p *Policy) Decide(url string) Decision {
-	for _, r := range p.store.Deny() {
-		if globMatch(r, url) {
-			return Deny
-		}
+	url = Canonical(url)
+	r, err := p.store.load()
+	if err != nil {
+		return Deny // fail closed: an unreadable rule store denies rather than leaks
 	}
-	for _, r := range p.store.Allow() {
-		if globMatch(r, url) {
-			return Allow
-		}
+	if matchesAny(r.Deny, url) {
+		return Deny
+	}
+	if matchesAny(r.Allow, url) {
+		return Allow
 	}
 	if p.unlisted == "deny" {
 		return Deny
 	}
 	return Hold
+}
+
+// matchesAny reports whether any stored glob matches the canonical url. Each pattern is
+// canonicalized too, so even a rule written before canonicalization (or by hand) is compared
+// on equal footing — closing the deny-evasion gap regardless of how the rule was stored.
+func matchesAny(patterns []string, canonicalURL string) bool {
+	for _, r := range patterns {
+		if globMatch(Canonical(r), canonicalURL) {
+			return true
+		}
+	}
+	return false
 }
 
 func normVenue(v string) string {

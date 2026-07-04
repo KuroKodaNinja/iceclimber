@@ -393,32 +393,12 @@ func (pp *proxyPolicy) evaluate(r proxy.Request, resolved, rewriteHost string) p
 // pathDenyURL is the canonical URL the package/path-level deny rules match against.
 func pathDenyURL(r proxy.Request) string { return normalizeEgressURL(r.URL) }
 
-// normalizeEgressURL canonicalizes a URL for deny matching, defending against the tricks an
-// upstream silently collapses — otherwise a glob like "https://pypi.org/simple/six/*" is
-// evaded by "/simple/./six/", "/simple//six/", a %2e-encoded dot, a cased host, or the ":443"
-// port. It yields: the real scheme; a lower-cased, port-free, trailing-dot-free host; a
-// path.Clean'd path (dot-segments + duplicate slashes collapsed, trailing slash preserved so
-// "/six/" still matches "/six/*"); and the query appended. Used both by the request-time
-// PathDenier and to normalize index-derived artifact URLs, so the two always agree.
+// normalizeEgressURL canonicalizes a URL for deny matching. It delegates to egress.Canonical —
+// the single canonicalizer the policy gate also matches on — so the request-time PathDenier and
+// the policy's allow/deny rules can never disagree about what a URL "is". (See egress.Canonical
+// for the trick surface it defends: dot-segments, duplicate slashes, cased host, ":443" port.)
 func normalizeEgressURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return raw
-	}
-	scheme := u.Scheme
-	if scheme == "" {
-		scheme = "https"
-	}
-	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
-	clean := path.Clean("/" + strings.TrimPrefix(u.Path, "/"))
-	if strings.HasSuffix(u.Path, "/") && !strings.HasSuffix(clean, "/") {
-		clean += "/"
-	}
-	match := scheme + "://" + host + clean
-	if u.RawQuery != "" {
-		match += "?" + u.RawQuery
-	}
-	return match
+	return egress.Canonical(raw)
 }
 
 // urlHost extracts the hostname from a URL (no port), for rewrite detection.

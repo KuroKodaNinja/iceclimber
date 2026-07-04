@@ -8,9 +8,24 @@ package catalog
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 )
+
+// safeSubpath reports whether p is safe to join under <root>: empty (the caller's default) or
+// a relative path with no absolute root and no ".." escape — the zip-slip guard for the
+// operator-supplied dest/bins.
+func safeSubpath(p string) bool {
+	if p == "" {
+		return true
+	}
+	if path.IsAbs(p) {
+		return false
+	}
+	clean := path.Clean(p)
+	return clean != ".." && !strings.HasPrefix(clean, "../")
+}
 
 // Kind is the fetch strategy for an entry (Go, parameterized by the entry's data).
 type Kind string
@@ -134,6 +149,18 @@ func (e Entry) validate() error {
 	}
 	if len(e.Unpack.Bins) == 0 {
 		return fmt.Errorf("%s: unpack.bins is empty (nothing to install)", where)
+	}
+	// dest + bins are joined under <root> (and bins are linked into tools/bin), so an absolute
+	// or ".." component would escape the sandbox install root. Reject it at load — the same
+	// supply-chain floor as the mandatory checksum, and the guard the future aqua-importer
+	// (less-trusted entries) will lean on.
+	if !safeSubpath(e.Dest) {
+		return fmt.Errorf("%s: dest %q must stay under <root> (no absolute path or \"..\")", where, e.Dest)
+	}
+	for _, b := range e.Unpack.Bins {
+		if b == "" || !safeSubpath(b) {
+			return fmt.Errorf("%s: bin %q must be a relative path under the install dir (no absolute path or \"..\")", where, b)
+		}
 	}
 	pinned := e.effectiveRecipe() == recipePinned
 	for key, p := range e.Platforms {

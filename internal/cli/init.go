@@ -68,6 +68,46 @@ cache_dir: ~/.iceclimber-cache
 #         linux/aarch64/musl:
 #           url: https://mirror.internal/cpython-3.11.13-musl.tar.gz
 #           sha256: <hex>
+
+# --- Egress: how the sandbox reaches the network for packages/web.fetch ---
+# egress_mode: proxy defaults; the sandbox's own tools reach real registries through a
+# controller-run MITM proxy over the SSH tunnel (still no direct sandbox internet).
+# egress_mode: relay is the stricter air-gap — the controller resolves + relays artifacts
+# in; the sandbox never opens a connection. See the README "Egress" section.
+# egress_mode: proxy            # proxy | relay
+# egress_proxy_port: 18080      # sandbox loopback port the proxy is tunneled to (0 = default)
+#
+# web.fetch venue routing + gating (controller-venue fetch is a tunnel through the sandbox's
+# isolation, so it's gated by default):
+# network:
+#   unlisted_domain_policy: gate   # gate (hold for approval) | deny
+#   allowed_domains:
+#     - pattern: "*.pypi.org"
+#       reachable_from: sandbox     # sandbox | controller
+# fetch_rewrites:                   # redirect/re-venue a URL before gating
+#   - match: "https://example.com/*"
+#     rewrite_to: "https://mirror.internal/*"
+#     venue: sandbox
+
+# --- Tier-1 relay: the controller's own tools, used to resolve+download for air-gapped boxes ---
+# controller_python: python3      # for cross-platform wheel relay
+# controller_npm: npm
+# controller_java: java
+# controller_mvn: mvn             # for maven.build's offline .m2 priming
+# controller_conda: conda         # (or the drop-in "mamba") for air-gapped conda
+#
+# Sandbox-reachable mirrors (Tier 0) + the controller-side source (Tier 1):
+# pip:   { index_url: "", extra_index_url: "", trusted_host: "", controller_index_url: "" }
+# npm:   { registry_url: "", controller_registry: "" }
+# maven: { repository_url: "", controller_repository: "" }
+
+# --- Serving + logs ---
+# dispatch_concurrency: 4         # how many requests Popo services at once (0 = default 4)
+# log_max_bytes: 8388608          # per-generation cap for the rotating log sinks (0 = 8 MiB)
+# log_keep: 4                     # rotated generations kept (0 = 4)
+# audit_log: ""                   # web.fetch audit JSONL (default ~/.iceclimber/audit/<id>.jsonl)
+# activity_log: ""                # request/operator activity JSONL (default ~/.iceclimber/<id>/activity.jsonl)
+# approvals_file: ""              # operator allow/deny rules (default ~/.iceclimber/<id>/approvals.json)
 `
 
 func newInitCmd() *cobra.Command {

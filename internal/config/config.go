@@ -1,7 +1,7 @@
 // Package config loads and validates the operator-owned iceclimber.yaml. This
-// file is never written by Nana. Only the fields needed by the current build
-// phase are modeled; network/fetch_rewrites/approvals (§3, §6.1) land when
-// web.fetch is implemented.
+// file is never written by Nana. It models the full operator surface: SSH/transport,
+// per-language runtime source + pins, package-manager mirrors + Tier-1 controllers,
+// egress mode + web.fetch venue routing/rewrites/approvals, and the log-rotation knobs.
 package config
 
 import (

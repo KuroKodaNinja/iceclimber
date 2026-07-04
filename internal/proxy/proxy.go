@@ -241,17 +241,30 @@ func (p *Proxy) forward(w net.Conn, req *http.Request, v Verdict) bool {
 	if p.audit != nil {
 		p.audit(pr, v, resp.StatusCode)
 	}
-	// Learn-on-serve: for a small, known-length 200 the observer wants (a pip index), buffer
-	// the body, hand it to observe, then deliver it intact. Everything else streams.
+	// Learn-on-serve: for a 200 the observer wants (a pip index), buffer up to the cap, hand it
+	// to observe, then deliver the body intact. A chunked index reports ContentLength == -1, so
+	// this must NOT require a known length — a `Transfer-Encoding: chunked` pip simple index
+	// (common) was previously skipped, leaving its artifact URLs unlearned so a mid-session deny
+	// couldn't block them. We buffer at most maxObserveBytes and stream any remainder unobserved.
 	if p.shouldObserve != nil && p.observe != nil && resp.StatusCode == http.StatusOK &&
-		resp.ContentLength >= 0 && resp.ContentLength <= maxObserveBytes && p.shouldObserve(pr) {
-		body, rerr := io.ReadAll(io.LimitReader(resp.Body, resp.ContentLength))
+		resp.ContentLength <= maxObserveBytes && p.shouldObserve(pr) {
+		prefix, rerr := io.ReadAll(io.LimitReader(resp.Body, maxObserveBytes))
 		if rerr != nil {
 			return false // partial read — can't safely stream the remainder
 		}
-		p.observe(pr, body)
-		resp.Body = io.NopCloser(bytes.NewReader(body))
-		resp.ContentLength = int64(len(body))
+		p.observe(pr, prefix)
+		if int64(len(prefix)) < maxObserveBytes {
+			// Whole body fit under the cap — deliver it with a known length.
+			resp.Body = io.NopCloser(bytes.NewReader(prefix))
+			resp.ContentLength = int64(len(prefix))
+		} else {
+			// Body reached the cap: observe the prefix, stream prefix + the untouched remainder
+			// (framing keeps the declared length / chunked encoding).
+			resp.Body = struct {
+				io.Reader
+				io.Closer
+			}{io.MultiReader(bytes.NewReader(prefix), resp.Body), resp.Body}
+		}
 	}
 	return writeResponse(w, req.Method, resp)
 }

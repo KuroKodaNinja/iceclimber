@@ -67,13 +67,21 @@ func (i *Installer) Install(ctx context.Context, minor string) (Result, error) {
 	if ok, err := relay.Exists(ctx, i.cfg.FS, bin); err != nil {
 		return Result{}, err
 	} else if ok {
-		return Result{Version: r.FullVersion, Path: bin, AlreadyInstalled: true}, nil
+		// Verify-on-hit: bin/python3 existing can be a PARTIAL install (interrupted after the
+		// binary landed but before the tree finished). Only a clean run counts as installed;
+		// otherwise fall through and reinstall over the broken tree (heal, don't falsely skip).
+		if err := i.verify(ctx, bin); err == nil {
+			return Result{Version: r.FullVersion, Path: bin, AlreadyInstalled: true}, nil
+		}
 	}
 
 	tarball, err := i.fetch(ctx, r)
 	if err != nil {
 		return Result{}, err
 	}
+	// Replace the target wholesale so a repaired (partial) install leaves no stale files; a
+	// fresh install's target doesn't exist yet, so this is a cheap no-op there.
+	_ = i.cfg.FS.RemoveAll(ctx, target)
 	if err := i.extractAndPush(ctx, tarball, target); err != nil {
 		return Result{}, fmt.Errorf("push python tree: %w", err)
 	}

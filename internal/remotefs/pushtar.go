@@ -49,6 +49,18 @@ func stripLead(name string) string {
 	return name[i+1:]
 }
 
+// safeRel reports whether a stripped entry path stays within the target dir — no absolute
+// path and no ".." escape (zip-slip). Runtime archives are SHA-pinned, but the SHASUMS come
+// from the same origin as the tarball, so a compromised mirror controls both; extraction of an
+// escaping entry must fail loudly rather than write outside the sandbox install root.
+func safeRel(rel string) bool {
+	if path.IsAbs(rel) {
+		return false
+	}
+	clean := path.Clean(rel)
+	return clean != ".." && !strings.HasPrefix(clean, "../")
+}
+
 // restrip gunzips gz and writes a plain tar to w with the top-level component
 // stripped from every entry — the stream handed to a remote `tar -x`.
 func restrip(gz io.Reader, w io.Writer) error {
@@ -70,6 +82,9 @@ func restrip(gz io.Reader, w io.Writer) error {
 		rel := stripLead(hdr.Name)
 		if rel == "" {
 			continue
+		}
+		if !safeRel(rel) {
+			return fmt.Errorf("unsafe path in archive: %q", hdr.Name)
 		}
 		out := &tar.Header{
 			Typeflag: hdr.Typeflag,
@@ -124,6 +139,9 @@ func pushPerFile(ctx context.Context, fs FS, gz io.Reader, target string) error 
 		rel := stripLead(hdr.Name)
 		if rel == "" {
 			continue
+		}
+		if !safeRel(rel) {
+			return fmt.Errorf("unsafe path in archive: %q", hdr.Name)
 		}
 		dst := path.Join(target, rel)
 		switch hdr.Typeflag {

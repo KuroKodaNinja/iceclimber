@@ -373,6 +373,54 @@ func TestProxy_ResponseObserver(t *testing.T) {
 	}
 }
 
+func TestProxy_ResponseObserverChunked(t *testing.T) {
+	// A 200 with NO Content-Length (chunked / unknown length → resp.ContentLength == -1) must
+	// still reach the observer. The fix dropped the old `ContentLength >= 0` guard: a chunked pip
+	// simple index (common) was previously skipped, so its artifact URLs were never learned and a
+	// mid-session package deny couldn't block them. Assert the observer still fires and the client
+	// gets the body intact.
+	const index = `<!DOCTYPE html><html><body>` +
+		`<a href="https://files.example/pkg-1.0-py3-none-any.whl">pkg-1.0</a>` +
+		`</body></html>`
+	up, tr := upstreamTLS(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		// Deliberately no Content-Length; flush to commit the response to unknown-length framing
+		// (chunked over HTTP/1.1, streamed over HTTP/2) so the upstream RoundTrip reports -1.
+		io.WriteString(w, index)
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			t.Errorf("flush upstream: %v", err)
+		}
+	})
+	defer up.Close()
+	ca, _ := NewCA()
+	p := New(ca, nil, nil, tr)
+	var observed [][]byte
+	p.SetResponseObserver(
+		func(r Request) bool { return strings.HasPrefix(r.Path, "/simple/") },
+		func(r Request, body []byte) { observed = append(observed, body) },
+	)
+	client, stop := clientThroughProxy(t, p)
+	defer stop()
+
+	resp, err := client.Get(up.URL + "/simple/pkg/")
+	if err != nil {
+		t.Fatalf("get chunked index through proxy: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	// The client still receives the whole body intact.
+	if string(body) != index {
+		t.Errorf("client body = %q, want the index delivered intact", body)
+	}
+	// The observer fired despite the unknown (chunked) length — the artifact URL was learned.
+	if len(observed) != 1 {
+		t.Fatalf("observer fired %d times, want 1 (a chunked index must still be observed)", len(observed))
+	}
+	if !strings.Contains(string(observed[0]), "pkg-1.0-py3-none-any.whl") {
+		t.Errorf("observed body = %q, want the artifact URL learned", observed[0])
+	}
+}
+
 func TestCanonHost(t *testing.T) {
 	for in, want := range map[string]string{
 		"PyPI.org":  "pypi.org",

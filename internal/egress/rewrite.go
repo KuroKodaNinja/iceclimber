@@ -3,6 +3,7 @@ package egress
 import (
 	"fmt"
 	"net/url"
+	"path"
 	"strings"
 )
 
@@ -56,18 +57,45 @@ func globMatch(pattern, s string) bool {
 	return true
 }
 
-// normalizeURL ensures the URL has a path so a host rule like
-// "https://host/*" matches a bare "https://host" (which has no path). Safe
-// against "https://host.evil.com" because the rule's prefix includes the slash.
-func normalizeURL(raw string) string {
+// Canonical canonicalizes a URL — or a full-URL glob pattern — into the one form the gate
+// matches on, defending against the tricks an upstream silently collapses. Otherwise a deny
+// like "https://pypi.org/simple/six/*" is evaded by "/simple/./six/", "/simple//six/", a cased
+// host, or a ":443" port: the weak-normalized request misses the byte-exact deny, matches a
+// broad allow, and the upstream then collapses the path and serves the denied resource.
+//
+// It yields: the scheme (defaulting https); a lower-cased, port-free, trailing-dot-free host;
+// a path.Clean'd path (dot-segments + duplicate slashes collapsed, a trailing slash preserved
+// so "/six/" still matches "/six/*"); and the original query. BOTH the concrete URL and the
+// stored rule pass through it, so the two always agree. A parse failure returns the input
+// unchanged, so matching fails closed at the call site rather than matching a broad allow.
+func Canonical(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return raw
 	}
-	if u.Path == "" {
-		u.Path = "/"
+	scheme := u.Scheme
+	if scheme == "" {
+		scheme = "https"
 	}
-	return u.String()
+	host := canonHost(u)
+	clean := path.Clean("/" + strings.TrimPrefix(u.Path, "/"))
+	if clean == "." {
+		clean = "/"
+	}
+	if strings.HasSuffix(u.Path, "/") && !strings.HasSuffix(clean, "/") {
+		clean += "/" // path.Clean drops a trailing slash; keep it so "/x/" still matches "/x/*"
+	}
+	out := scheme + "://" + host + clean
+	if u.RawQuery != "" {
+		out += "?" + u.RawQuery
+	}
+	return out
+}
+
+// canonHost is the lower-cased, port-free, trailing-dot-free hostname (DNS is
+// case-insensitive and "host." == "host"), the form host matching compares.
+func canonHost(u *url.URL) string {
+	return strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
 }
 
 func hostOf(raw string) (string, error) {
@@ -78,15 +106,26 @@ func hostOf(raw string) (string, error) {
 	if u.Hostname() == "" {
 		return "", fmt.Errorf("url has no host")
 	}
-	return u.Hostname(), nil
+	return canonHost(u), nil
 }
 
-// HostGlob builds the host-level allow/deny rule for a URL: "<scheme>://<host>/*".
-// Used by approve/deny when no explicit pattern is given (decision #31).
+// hostMatch matches an allowed_domains host pattern against an already-canonical (lower-cased)
+// host, lower-casing the pattern so an operator's "PyPI.org" still matches "pypi.org".
+func hostMatch(pattern, canonicalHost string) bool {
+	return globMatch(strings.ToLower(pattern), canonicalHost)
+}
+
+// HostGlob builds the host-level allow/deny rule for a URL: "<scheme>://<host>/*", with the
+// host canonicalized (lower-cased, port stripped) so the stored rule matches canonical request
+// URLs. Used by approve/deny when no explicit pattern is given (decision #31).
 func HostGlob(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return raw
 	}
-	return u.Scheme + "://" + u.Host + "/*"
+	scheme := u.Scheme
+	if scheme == "" {
+		scheme = "https"
+	}
+	return scheme + "://" + canonHost(u) + "/*"
 }

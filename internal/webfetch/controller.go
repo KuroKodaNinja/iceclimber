@@ -21,13 +21,26 @@ const maxControllerBody = 64 << 20 // 64 MiB
 // controllerFetch performs the request from Popo's own network (the controller
 // venue) with an SSRF-safe dialer, then materializes the body inline or as a
 // blob pushed into the sandbox so Nana can read it.
-func controllerFetch(ctx context.Context, fs remotefs.FS, root, method string, req Request, url string) (Result, error) {
+func controllerFetch(ctx context.Context, fs remotefs.FS, root, method string, req Request, url string, regate func(hop string) error) (Result, error) {
 	client := &http.Client{
 		Timeout: 60 * time.Second,
 		Transport: &http.Transport{
 			DialContext:           safeDialContext,
 			TLSHandshakeTimeout:   15 * time.Second,
 			ResponseHeaderTimeout: 30 * time.Second,
+		},
+		// Re-gate every redirect hop: Policy.Decide ran only on the original URL, so without
+		// this an allowed host that 302s to an arbitrary public host would be followed and its
+		// body returned to the sandbox — the per-host allow-list bypassed. The SSRF IP floor
+		// (safeDialContext) still contains each hop, but the egress POLICY must hold too.
+		CheckRedirect: func(r *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			if regate != nil {
+				return regate(r.URL.String())
+			}
+			return nil
 		},
 	}
 

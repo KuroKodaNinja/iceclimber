@@ -15,12 +15,13 @@ manage files to talk to Popo:
 popo help                              # list verbs and their usage (the source of truth)
 popo node.install                      # install the current recommended runtime (no version = latest)
 popo pip.install --python 3.12 rich    # install packages into a runtime you installed
-popo tool.install ripgrep              # install a common Unix tool (jq, fd, ripgrep, …), then run it by name
+popo tool.install jq                   # install a catalog utility (see `popo tool.install` with a bad name for the list), then run it by name
 popo web.fetch https://example.com     # fetch a URL through Popo's network
 ```
 
-Common **tools** (ripgrep/`rg`, `jq`, `fd`, …) aren't preinstalled: `popo tool.install
-<name>` gets one, then run it by name (it's on your PATH; unknown → the available list).
+Common **tools** aren't preinstalled: `popo tool.install <name>` gets one from the catalog,
+then run it by name (it's on your PATH). The available set is operator-curated — run
+`popo tool.install` with an unknown name and the error lists exactly what's installable.
 
 `popo <verb>` blocks until Popo answers, prints the result, and exits:
 - **0** — done; the output has what you need (often an absolute path).

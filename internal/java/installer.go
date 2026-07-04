@@ -70,13 +70,20 @@ func (i *Installer) Install(ctx context.Context, version string) (Result, error)
 	if ok, err := relay.Exists(ctx, i.cfg.FS, bin); err != nil {
 		return Result{}, err
 	} else if ok {
-		return Result{Version: r.FullVersion, Path: bin, AlreadyInstalled: true}, nil
+		// Verify-on-hit: bin/java existing can be a PARTIAL install (interrupted mid-tree).
+		// Only a clean run counts as installed; otherwise reinstall over the broken tree.
+		if err := i.verify(ctx, bin); err == nil {
+			return Result{Version: r.FullVersion, Path: bin, AlreadyInstalled: true}, nil
+		}
 	}
 
 	tarball, err := i.fetch(ctx, r)
 	if err != nil {
 		return Result{}, err
 	}
+	// Replace the target wholesale so a repaired (partial) install leaves no stale files (a
+	// fresh install's target doesn't exist, so this is a no-op).
+	_ = i.cfg.FS.RemoveAll(ctx, target)
 	if err := i.extractAndPush(ctx, tarball, target); err != nil {
 		return Result{}, fmt.Errorf("push jdk tree: %w", err)
 	}
