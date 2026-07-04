@@ -94,6 +94,7 @@ cache_dir: ~/.iceclimber-cache
 # controller_npm: npm
 # controller_java: java
 # controller_mvn: mvn             # for maven.build's offline .m2 priming
+# controller_cargo: cargo         # for cargo.build's air-gapped crate vendoring
 # controller_conda: conda         # (or the drop-in "mamba") for air-gapped conda
 #
 # Sandbox-reachable mirrors (Tier 0) + the controller-side source (Tier 1):

@@ -94,7 +94,7 @@ fan out (subagents / several requests at once) without them queuing behind one s
 2. Requests that touch the **same runtime line are serialized** by Popo — at most one runs at a
    time — so two installs can't corrupt one environment. The lines: `python.install` + `pip.install`
    (a Python + its packages), `node.install` + `npm.install`, `java.install` + `maven.install`/
-   `maven.build`, `conda.install`, and `tool.install` (serialized per tool name — two different
+   `maven.build`, `rust.install` + `cargo.build`, `conda.install`, and `tool.install` (serialized per tool name — two different
    tools install in parallel). You may send same-line requests concurrently, but they
    won't overlap (a `pip.install` waits for the `python.install` it needs — send the runtime
    first). Prefer **one** `pip.install`/`npm.install` with several packages over many parallel
@@ -125,8 +125,10 @@ install`/`wrap` — to inform the operator's `status` view. **You don't write it
 | `node.install` | `{ version? }` (line, e.g. "24"; omit or "latest" = recommended) | `{ version, path, already_installed }` |
 | `npm.install` | `{ node_version, packages:[{name,version?}] }` or `{ node_version, project:"<dir>" }` | `{ installed, failed, node_path }` |
 | `java.install` | `{ version? }` (feature, e.g. "21"; omit or "latest" = recommended) | `{ version, path, already_installed }` |
+| `rust.install` | `{ version? }` (omit or "latest" = current stable, or an exact "1.83.0") | `{ version, path, already_installed }` — rustc + cargo land in the same bin/ |
 | `maven.install` | `{ java_version, packages:[{name:"group:artifact",version}] }` | `{ installed, failed, classpath }` |
 | `maven.build` | `{ project, java_version, goals?:["package"], maven_version? }` | `{ artifacts:[<jar path>], tier:"relay"\|"proxy" }` |
+| `cargo.build` | `{ project, rust_version?, args?:["--features","x"] }` | `{ artifacts:[<binary path>], tier:"relay"\|"proxy" }` |
 | `conda.install` | `{ python_version, packages:[{name,version?}], extra_args?:["-c","conda-forge",…] }` or `{ file:"<environment.yml>" }` | `{ installed:[{name,version,tier,sha256?}], failed }` |
 | `tool.install` | `{ name }` (a catalog utility, e.g. "jq"; an unknown name returns the available list) | `{ name, version, path, already_installed }` — then run the tool by name (it's on PATH) |
 | `web.fetch` | `{ url, method?, headers?, body? }` | `{ status_code, venue, encoding, body_inline? , body_blob? }` |

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/agent"
+	"github.com/KuroKodaNinja/iceclimber/internal/cargo"
 	"github.com/KuroKodaNinja/iceclimber/internal/catalog"
 	"github.com/KuroKodaNinja/iceclimber/internal/conda"
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
@@ -188,6 +189,23 @@ func mavenBuildDeps(sess *session, pr progress.Func) maven.BuildDeps {
 	}
 }
 
+// cargoBuildDeps builds the cargo.build dependency bundle from an open session (the Rust build:
+// online through the proxy in proxy mode, air-gapped via a controller-vendored crate tree in
+// relay mode).
+func cargoBuildDeps(sess *session, pr progress.Func) cargo.Deps {
+	return cargo.Deps{
+		FS:              sess.fs,
+		Runner:          sess.runner,
+		Root:            sess.tree.Root,
+		Arch:            sess.fp.Arch,
+		Libc:            sess.fp.Libc.Family,
+		EgressProxy:     sess.egressProxy,
+		ControllerCargo: sess.controllerCargo,
+		CacheDir:        sess.cacheDir,
+		Progress:        pr,
+	}
+}
+
 // pipDeps builds the pip.install dependency bundle from an open session.
 func pipDeps(sess *session, pr progress.Func) pip.Deps {
 	src := sess.runtimeSourcesNow().Of("python")
@@ -254,6 +272,7 @@ func buildRegistry(sess *session, pr progress.Func) protocol.Registry {
 		"npm.install":   npm.Handler(npmDeps(sess, pr)),
 		"maven.install": maven.Handler(mavenDeps(sess, pr)),
 		"maven.build":   maven.BuildHandler(mavenBuildDeps(sess, pr)),
+		"cargo.build":   cargo.BuildHandler(cargoBuildDeps(sess, pr)),
 		"conda.install": conda.Handler(condaDeps(sess, pr)),
 		"tool.install":  catalog.Handler(func() (*catalog.Catalog, error) { return loadCatalog(sess) }, toolInstallDeps(sess, pr)),
 		"web.fetch":     webfetch.Handler(webfetchDeps(sess)),

@@ -38,6 +38,15 @@ type Spec struct {
 	Recommended string                                                                                            // the line installed when the caller omits a version / says "latest"
 	Verify      func(bin string) string                                                                           // the shell command that proves the install runs
 	Resolve     func(ctx context.Context, fp Fingerprint, client *http.Client, version string) (relay.Pin, error) // live upstream resolution → the exact checksummed asset
+	// Assemble (optional) transforms the fetched upstream tarball into a clean, ready-to-push
+	// tree ON THE CONTROLLER before it's streamed to the sandbox — for runtimes whose
+	// distribution isn't already a strip-1 bin/ layout. (Rust ships a component-split tarball —
+	// cargo/, rustc/, rust-std-<target>/ each with their own subtree + an install.sh — that must
+	// be merged into one prefix so rustc finds its sysroot.) It receives the local path to the
+	// fetched tarball and returns the local path to a gzipped tar of the clean tree, wrapped in a
+	// single top-level dir the push strips (exactly like the native layouts). nil (the common
+	// case) pushes the tarball as-is.
+	Assemble func(ctx context.Context, tarball string) (cleanTarball string, err error)
 }
 
 // Config holds one install's dependencies (identical across languages — the whole point).
@@ -102,6 +111,16 @@ func (i *Installer) Install(ctx context.Context, version string) (Result, error)
 	tarball, err := i.fetch(ctx, pin)
 	if err != nil {
 		return Result{}, err
+	}
+	// A non-standard distribution (Rust's component split) is assembled into a clean strip-1
+	// tree on the controller before it's pushed; the common case pushes the tarball as-is.
+	if i.spec.Assemble != nil {
+		i.cfg.Progress.Phase("assembling")
+		clean, err := i.spec.Assemble(ctx, tarball)
+		if err != nil {
+			return Result{}, fmt.Errorf("assemble %s tree: %w", i.spec.Lang, err)
+		}
+		tarball = clean
 	}
 	// Replace the target wholesale so a repaired (partial) install leaves no stale files (a
 	// fresh install's target doesn't exist, so this is a no-op). The runtime tarballs nest

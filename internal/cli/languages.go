@@ -5,6 +5,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/node"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
+	"github.com/KuroKodaNinja/iceclimber/internal/rust"
 )
 
 // managedLangs is the registry of iceclimber-managed language runtimes — the single place a new
@@ -14,7 +15,7 @@ import (
 // probe — reads this list instead, so adding a language is one entry here plus its own
 // resolve.go/Spec, not edits scattered across a handful of switch statements.
 func managedLangs() []runtime.Spec {
-	return []runtime.Spec{python.Spec(), node.Spec(), java.Spec()}
+	return []runtime.Spec{python.Spec(), node.Spec(), java.Spec(), rust.Spec()}
 }
 
 // managedLangSpec looks up a registered language's Spec by its canonical name ("python",

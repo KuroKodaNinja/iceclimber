@@ -15,6 +15,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
+	"github.com/KuroKodaNinja/iceclimber/internal/rust"
 	"github.com/KuroKodaNinja/iceclimber/internal/shell"
 	"github.com/spf13/cobra"
 )
@@ -36,7 +37,8 @@ func newInstallCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&runtimeSource, "runtime-source", "",
 		"set + persist a per-language runtime source, e.g. python=system,node=managed (or python=system:conda)")
 	cmd.AddCommand(newInstallPythonCmd(), newInstallPipCmd(), newInstallNodeCmd(), newInstallNpmCmd(),
-		newInstallJavaCmd(), newInstallMavenCmd(), newInstallCondaCmd(), newInstallShellCmd(), newInstallToolCmd())
+		newInstallJavaCmd(), newInstallMavenCmd(), newInstallCondaCmd(), newInstallRustCmd(),
+		newInstallShellCmd(), newInstallToolCmd())
 	return cmd
 }
 
@@ -335,6 +337,36 @@ func newInstallPythonCmd() *cobra.Command {
 				verb = "already installed:"
 			}
 			fmt.Fprintf(w, "%s python %s at %s\n", verb, res.Version, res.Path)
+			return nil
+		},
+	}
+	return cmd
+}
+
+func newInstallRustCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rust [version]",
+		Short: "Install a portable Rust toolchain (rustc + cargo + std); no version = the current stable",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, _, sess, done, err := openCommandSession(cmd, 15*time.Minute, "install")
+			if err != nil {
+				return err
+			}
+			defer done()
+
+			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
+			res, err := runtimeInstaller(sess, pr, "rust").Install(ctx, optionalVersion(args, rust.ResolveLine))
+			finish()
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			verb := "installed"
+			if res.AlreadyInstalled {
+				verb = "already installed:"
+			}
+			fmt.Fprintf(w, "%s rust %s at %s\n", verb, res.Version, res.Path)
 			return nil
 		},
 	}

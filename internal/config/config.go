@@ -48,6 +48,10 @@ type Config struct {
 	// prime an offline .m2 repo the sandbox builds from (air-gapped `mvn -o package`).
 	// Defaults to "mvn" at use; maven.build errors clearly if absent.
 	ControllerMvn string `yaml:"controller_mvn"`
+	// ControllerCargo is the operator's cargo on the controller, used by cargo.build's relay
+	// tier to vendor every crate the sandbox builds from offline (air-gapped `cargo build
+	// --offline`). Defaults to "cargo" at use; the relay tier errors clearly if absent.
+	ControllerCargo string `yaml:"controller_cargo"`
 	// AuditLog is the controller-side web.fetch audit JSONL path. Empty means
 	// the default ~/.iceclimber/audit/<sandbox_id>.jsonl.
 	AuditLog string `yaml:"audit_log"`

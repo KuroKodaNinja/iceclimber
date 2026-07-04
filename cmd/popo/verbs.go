@@ -18,7 +18,7 @@ func buildParams(verb string, args []string) (any, error) {
 	case "ping":
 		return nil, nil
 
-	case "python.install", "node.install", "java.install":
+	case "python.install", "node.install", "java.install", "rust.install":
 		// The version is optional: omit it (or pass "latest") to install the current
 		// recommended line — Popo resolves it, so an agent never has to guess a number and
 		// won't pick an older one. Pass a specific line only when the task requires it.
@@ -149,6 +149,24 @@ func buildParams(verb string, args []string) (any, error) {
 		p := map[string]any{"java_version": ver, "project": proj}
 		if len(rest) > 0 {
 			p["goals"] = rest // optional goals, e.g. clean package
+		}
+		return p, nil
+
+	case "cargo.build":
+		proj, rest, err := requireFlag(args, "--project")
+		if err != nil {
+			return nil, err
+		}
+		p := map[string]any{"project": proj}
+		if rv, r2, ok := takeFlag(rest, "--rust"); ok {
+			if rv == "" {
+				return nil, fmt.Errorf("--rust needs a value")
+			}
+			rest = r2
+			p["rust_version"] = rv
+		}
+		if len(rest) > 0 {
+			p["args"] = rest // optional passthrough cargo args
 		}
 		return p, nil
 

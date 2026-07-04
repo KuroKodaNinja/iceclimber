@@ -70,6 +70,7 @@ func newRootCmd() *cobra.Command {
 		newServeCmd(),
 		newInstallCmd(),
 		newMavenCmd(),
+		newCargoCmd(),
 		newAgentCmd(),
 		newWebCmd(),
 		newEgressCmd(),
