@@ -75,18 +75,47 @@ func fleetTargetsRead() (*config.Fleet, []*config.Config, error) {
 	return f, m, err
 }
 
-// fleetTargetsMutate resolves members for a MUTATING fan-out (install*/bootstrap/agent install):
-// a missing --sandbox is an ERROR — a forgotten flag must never fan a mutation to N boxes (§14.2).
+// fleetTargetsMutate resolves members for a MUTATING fan-out (install*/bootstrap/agent install).
+// A missing --sandbox is fine for a SINGLE-box setup (unambiguous), but an ERROR when the fleet
+// has >1 member — a forgotten flag must never fan a mutation to N boxes (§14.2).
 func fleetTargetsMutate() ([]*config.Config, error) {
 	f, err := resolveFleet()
 	if err != nil {
 		return nil, err
 	}
 	if sandboxID == "" {
+		if len(f.Members()) == 1 {
+			return f.Members(), nil
+		}
 		return nil, fmt.Errorf("--sandbox is required to fan this out across the fleet (%s) — name a box, a glob, a list, or `--sandbox all`",
 			strings.Join(f.IDs(), ", "))
 	}
 	return f.Resolve(sandboxID)
+}
+
+// runFleetMutation runs a mutating command single-box (as today: direct output, fail-fast) or
+// fanned out across the --sandbox targets ([box]-prefixed, keep-going, summary + exit 1). op
+// gets an already-open, ops-locked session for one member and its output writer. §14.2/14.5.
+func runFleetMutation(cmd *cobra.Command, timeout time.Duration, mode, action string, op func(ctx context.Context, cfg *config.Config, sess *session, out io.Writer) error) error {
+	targets, err := fleetTargetsMutate()
+	if err != nil {
+		return err
+	}
+	one := func(ctx context.Context, cfg *config.Config, out io.Writer) error {
+		ictx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		sess, err := openLockedSession(ictx, cfg, transport, mode)
+		if err != nil {
+			return err
+		}
+		defer sess.Close()
+		return op(ictx, cfg, sess, out)
+	}
+	if len(targets) == 1 {
+		return one(cmd.Context(), targets[0], cmd.OutOrStdout())
+	}
+	results := fanOut(cmd.Context(), cmd.OutOrStdout(), targets, one)
+	return summarizeFanOut(cmd.OutOrStdout(), action, results)
 }
 
 // fanResult is one member's fan-out outcome.

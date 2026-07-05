@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 	"time"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/popobin"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
@@ -26,54 +28,55 @@ func newBootstrapCmd() *cobra.Command {
 			"install` (or the console's install form) after bootstrapping.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx, cfg, sess, done, err := openCommandSession(cmd, 2*time.Minute, "bootstrap")
-			if err != nil {
-				return err
-			}
-			defer done()
-
-			// Re-bootstrap is safe by default — the tree is created with mkdir -p and only
-			// generated files are overwritten, so installed runtimes under <root>/runtimes
-			// survive. `--force` is the opposite: a destructive reset that wipes the whole
-			// sandbox tree (runtimes + state) for a clean slate, guarded against an unsafe root.
-			hadRuntimes := sandboxHasRuntimes(ctx, sess)
-			reset := false
-			if force {
-				if gErr := guardResettableRoot(sess.tree.Root); gErr != nil {
-					return gErr
-				}
-				if rErr := sess.fs.RemoveAll(ctx, sess.tree.Root); rErr != nil {
-					return fmt.Errorf("reset sandbox %s: %w", sess.tree.Root, rErr)
-				}
-				reset, hadRuntimes = true, false
-			}
-
-			if err := provision(ctx, sess); err != nil {
-				return err
-			}
-			// In proxy egress mode, install the CA + per-tool trust/proxy config so the
-			// sandbox's own package managers reach registries through Popo's MITM proxy.
-			if err := writeEgressTrust(ctx, sess, cfg); err != nil {
-				return err
-			}
-
-			state := "new sandbox"
-			switch {
-			case reset:
-				state = "reset — removed the existing tree (runtimes + state) and reprovisioned"
-			case hadRuntimes:
-				state = "existing sandbox — installed runtimes/packages preserved (use --force to reset)"
-			}
-			fmt.Fprintf(cmd.OutOrStdout(),
-				"bootstrap ok\n  sandbox:    %s\n  root:       %s\n  transport:  %s\n  state:      %s\n  smoke test: ping/pong round-trip passed\n  skill:      wrote %s\n",
-				cfg.SandboxID, sess.tree.Root, sess.transport, state, sess.tree.SkillFile())
-			fmt.Fprintf(cmd.OutOrStdout(),
-				"  next:       install runtimes with `iceclimber install …` (managed or system); wire NANA.md into your agent (`iceclimber skill print`)\n")
-			return nil
+			// Fleet-aware (§14.2/14.5): single-box as today, or fanned out across --sandbox.
+			return runFleetMutation(cmd, 2*time.Minute, "bootstrap", "bootstrap",
+				func(ctx context.Context, cfg *config.Config, sess *session, out io.Writer) error {
+					return bootstrapOne(ctx, cfg, sess, out, force)
+				})
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "destructive reset: wipe the sandbox tree (incl. installed runtimes) and reprovision fresh")
 	return cmd
+}
+
+// bootstrapOne provisions one sandbox — the per-member body shared by the single-box and
+// fan-out paths of `bootstrap`. Output goes to out ([box]-prefixed under fan-out).
+func bootstrapOne(ctx context.Context, cfg *config.Config, sess *session, out io.Writer, force bool) error {
+	// Re-bootstrap is safe by default — the tree is created with mkdir -p and only generated
+	// files are overwritten, so installed runtimes under <root>/runtimes survive. `--force` is
+	// a destructive reset that wipes the whole tree, guarded against an unsafe root.
+	hadRuntimes := sandboxHasRuntimes(ctx, sess)
+	reset := false
+	if force {
+		if gErr := guardResettableRoot(sess.tree.Root); gErr != nil {
+			return gErr
+		}
+		if rErr := sess.fs.RemoveAll(ctx, sess.tree.Root); rErr != nil {
+			return fmt.Errorf("reset sandbox %s: %w", sess.tree.Root, rErr)
+		}
+		reset, hadRuntimes = true, false
+	}
+	if err := provision(ctx, sess); err != nil {
+		return err
+	}
+	// In proxy egress mode, install the CA + per-tool trust/proxy config so the sandbox's own
+	// package managers reach registries through Popo's MITM proxy.
+	if err := writeEgressTrust(ctx, sess, cfg); err != nil {
+		return err
+	}
+	state := "new sandbox"
+	switch {
+	case reset:
+		state = "reset — removed the existing tree (runtimes + state) and reprovisioned"
+	case hadRuntimes:
+		state = "existing sandbox — installed runtimes/packages preserved (use --force to reset)"
+	}
+	fmt.Fprintf(out,
+		"bootstrap ok\n  sandbox:    %s\n  root:       %s\n  transport:  %s\n  state:      %s\n  smoke test: ping/pong round-trip passed\n  skill:      wrote %s\n",
+		cfg.SandboxID, sess.tree.Root, sess.transport, state, sess.tree.SkillFile())
+	fmt.Fprintf(out,
+		"  next:       install runtimes with `iceclimber install …` (managed or system); wire NANA.md into your agent (`iceclimber skill print`)\n")
+	return nil
 }
 
 // guardResettableRoot refuses to destructively remove a root that isn't a dedicated sandbox
