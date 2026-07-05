@@ -15,10 +15,12 @@ import (
 // install landing on this version is proof the operator pin bypassed the live resolver (§17).
 const pinnedFull = "3.11.13"
 
-// runtimePinsYAML pins python 3.11 to a fixed PBS asset per aarch64 platform (both live boxes
-// are aarch64: the musl Alpine box and the glibc Ubuntu box). The URLs + sha256s are real,
-// checksum-verified 20251007 PBS releases — the air-gapped-mirror path a compliance operator
-// would encode against their own mirror.
+// runtimePinsYAML pins python 3.11 to a fixed PBS asset per platform — both arches the live
+// boxes come in (aarch64 on the macOS harness, x86_64 on a Linux one), musl and glibc. The
+// URLs + sha256s are real, checksum-verified 20251007 PBS releases (verified against the
+// release's SHA256SUMS) — the air-gapped-mirror path a compliance operator would encode
+// against their own mirror. A platform missing from this block would fall through to the
+// live resolver and install the latest patch, failing the assertions below.
 const runtimePinsYAML = `runtime_pins:
   python:
     "3.11":
@@ -30,13 +32,19 @@ const runtimePinsYAML = `runtime_pins:
         linux/aarch64/glibc:
           url: https://github.com/astral-sh/python-build-standalone/releases/download/20251007/cpython-3.11.13+20251007-aarch64-unknown-linux-gnu-install_only.tar.gz
           sha256: 9e399423248aeae4f4355ea3f5f6d75585bcdd4bee7254c0d29e3db91eb98580
+        linux/x86_64/musl:
+          url: https://github.com/astral-sh/python-build-standalone/releases/download/20251007/cpython-3.11.13+20251007-x86_64-unknown-linux-musl-install_only.tar.gz
+          sha256: d75041379b366cf0fef82631179f7cebeffe515f1ba6c45fd4a69a24dc4a9602
+        linux/x86_64/glibc:
+          url: https://github.com/astral-sh/python-build-standalone/releases/download/20251007/cpython-3.11.13+20251007-x86_64-unknown-linux-gnu-install_only.tar.gz
+          sha256: c102eddacd398aeebb7c17664cf47c46c1b82402a5a63f1503c454b7d3d3471c
 `
 
 // TestRuntimePinPython proves an operator runtime pin drives the install: `install python 3.11`
 // against a config whose runtime_pins fix 3.11→3.11.13 installs exactly 3.11.13 (not the live
 // latest), the checksum-pinned tarball verifies + runs on the box, and re-install is idempotent.
-// Exec transport (the bulk tar push) on the musl box; the glibc platform key is present too so
-// the same block works on either aarch64 box.
+// Exec transport (the bulk tar push) on the musl box; glibc and both-arch platform keys are
+// present too, so the same block works on any of the live boxes.
 func TestRuntimePinPython(t *testing.T) {
 	sb := requireSandbox(t)
 	root := "/tmp/iceclimber-pypin-" + protocol.NewID()

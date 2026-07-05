@@ -4,6 +4,7 @@ package functional
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -23,6 +24,11 @@ import (
 //     self-contained, so a binary would need a system cc the box lacks; a lib build still proves
 //     the whole seam (resolve → vendor → relay → offline compile) without a linker.
 func TestCargoBuildRelay(t *testing.T) {
+	// Relay mode resolves + vendors on the controller (controller_cargo, like pip's
+	// controller_python) — skip with a clear message where the controller lacks rust.
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skip("cargo not found on the controller; install rust to run the cargo relay test")
+	}
 	musl := requireSandbox(t)
 	t.Run("musl-binary", func(t *testing.T) { cargoBuildRelayOn(t, musl, true) })
 	t.Run("glibc-library", func(t *testing.T) { cargoBuildRelayOn(t, requireGlibcSandbox(t), false) })

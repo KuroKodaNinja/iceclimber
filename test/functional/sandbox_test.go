@@ -20,7 +20,8 @@ func TestSandboxLifecycle(t *testing.T) {
 	if _, err := exec.LookPath("limactl"); err != nil {
 		t.Skip("limactl not found; install Lima to run the sandbox lifecycle test")
 	}
-	name := "icxfn" + strings.ToLower(protocol.NewID())[:8]
+	id := protocol.NewID() // ULID: 10 timestamp chars + 16 random — take the RANDOM tail
+	name := "icxfn" + strings.ToLower(id[len(id)-8:])
 	instance := "iceclimber-" + name
 
 	// Always tear the VM + registry down, even on a mid-test failure (best-effort).
@@ -90,7 +91,8 @@ func TestContainerSandboxLifecycle(t *testing.T) {
 	} else if _, err := exec.LookPath("limactl"); err != nil {
 		t.Skip("limactl not found; install Lima to run the container sandbox lifecycle test")
 	}
-	name := "icxc" + strings.ToLower(protocol.NewID())[:8]
+	id := protocol.NewID() // ULID: 10 timestamp chars + 16 random — take the RANDOM tail
+	name := "icxc" + strings.ToLower(id[len(id)-8:])
 	cname := "iceclimber-" + name // the container name (and the internal-net gateway is 10.89.0.1)
 	t.Cleanup(func() { _ = exec.Command(iceclimberBin, "sandbox", "rm", name, "--force").Run() })
 
