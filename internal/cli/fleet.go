@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/config"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
+	"github.com/KuroKodaNinja/iceclimber/internal/relay"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -116,6 +119,141 @@ func runFleetMutation(cmd *cobra.Command, timeout time.Duration, mode, action st
 	}
 	results := fanOut(cmd.Context(), cmd.OutOrStdout(), targets, one)
 	return summarizeFanOut(cmd.OutOrStdout(), action, results)
+}
+
+// parallel runs fn(i) for i in [0,n) with bounded concurrency (fanOutConcurrency), waiting
+// for all — the shared shape of the fan-out and two-phase-install loops.
+func parallel(n int, fn func(i int)) {
+	sem := make(chan struct{}, fanOutConcurrency)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		i := i
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			fn(i)
+		}()
+	}
+	wg.Wait()
+}
+
+// progressNop discards install progress events (used during the fleet resolve phase, where a
+// live per-member byte meter would be noise).
+func progressNop(progress.Event) {}
+
+// printInstallResult renders a runtime install result the way the single-box commands do.
+func printInstallResult(out io.Writer, lang string, res runtime.Result) {
+	verb := "installed"
+	if res.AlreadyInstalled {
+		verb = "already installed:"
+	}
+	fmt.Fprintf(out, "%s %s %s at %s\n", verb, lang, res.Version, res.Path)
+}
+
+// runFleetInstall installs a runtime single-box (today's path: live progress, fail-fast) or
+// across the fleet with RESOLVE-VERSION-ONCE (§14.5): phase 1 opens a session + resolves each
+// member's platform asset; the resolved full versions are asserted equal (N boxes must not land
+// on different patch releases if the upstream index moves mid-fan-out); phase 2 installs the
+// resolved pin on each member concurrently ([box]-prefixed). The cache's per-asset flock makes
+// the same asset download once and push N.
+func runFleetInstall(cmd *cobra.Command, timeout time.Duration, lang, version string, mk func(*session, progress.Func) *runtime.Installer, post func(context.Context, *session, runtime.Result) error) error {
+	targets, err := fleetTargetsMutate()
+	if err != nil {
+		return err
+	}
+	out := cmd.OutOrStdout()
+
+	if len(targets) == 1 {
+		ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+		defer cancel()
+		sess, err := openLockedSession(ctx, targets[0], transport, "install")
+		if err != nil {
+			return err
+		}
+		defer sess.Close()
+		pr, finish := installProgress(out, sess.transport)
+		res, err := mk(sess, pr).Install(ctx, version)
+		finish()
+		if err != nil {
+			return err
+		}
+		if post != nil {
+			if err := post(ctx, sess, res); err != nil {
+				return err
+			}
+		}
+		printInstallResult(out, lang, res)
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+	defer cancel()
+
+	type member struct {
+		cfg  *config.Config
+		sess *session
+		inst *runtime.Installer
+		pin  relay.Pin
+		err  error
+	}
+	ms := make([]*member, len(targets))
+	parallel(len(targets), func(i int) {
+		m := &member{cfg: targets[i]}
+		ms[i] = m
+		sess, err := openLockedSession(ctx, m.cfg, transport, "install")
+		if err != nil {
+			m.err = err
+			return
+		}
+		m.sess = sess
+		m.inst = mk(sess, progressNop)
+		m.pin, m.err = m.inst.Resolve(ctx, version)
+	})
+	defer func() {
+		for _, m := range ms {
+			if m != nil && m.sess != nil {
+				_ = m.sess.Close()
+			}
+		}
+	}()
+
+	// Version consistency across everyone who resolved (§14.5).
+	resolved := ""
+	for _, m := range ms {
+		if m.err == nil {
+			if resolved == "" {
+				resolved = m.pin.FullVersion
+			} else if m.pin.FullVersion != resolved {
+				return fmt.Errorf("fleet resolved %s to different versions (%s vs %s) — the upstream index moved mid-resolve; retry", lang, resolved, m.pin.FullVersion)
+			}
+		}
+	}
+	if resolved != "" {
+		fmt.Fprintf(out, "resolved %s → %s; installing on %d sandboxes\n", lang, resolved, len(targets))
+	}
+
+	var mu sync.Mutex
+	results := make([]fanResult, len(targets))
+	parallel(len(targets), func(i int) {
+		m := ms[i]
+		pw := &prefixWriter{mu: &mu, w: out, prefix: "[" + m.cfg.SandboxID + "] "}
+		defer pw.flush()
+		if m.err != nil {
+			results[i] = fanResult{ID: m.cfg.SandboxID, Err: m.err}
+			return
+		}
+		res, ierr := m.inst.InstallPin(ctx, m.pin)
+		if ierr == nil && post != nil {
+			ierr = post(ctx, m.sess, res)
+		}
+		if ierr == nil {
+			printInstallResult(pw, lang, res)
+		}
+		results[i] = fanResult{ID: m.cfg.SandboxID, Err: ierr}
+	})
+	return summarizeFanOut(out, "install "+lang, results)
 }
 
 // fanResult is one member's fan-out outcome.

@@ -95,6 +95,21 @@ func (i *Installer) Install(ctx context.Context, version string) (Result, error)
 	if err != nil {
 		return Result{}, err
 	}
+	return i.InstallPin(ctx, pin)
+}
+
+// Resolve resolves version → the exact checksummed asset Pin for this installer's platform,
+// WITHOUT installing (operator pin short-circuit first, §17, else the live upstream resolver).
+// Exposed so a FLEET install can resolve every member once, assert version-consistency across
+// platforms, then InstallPin — no member drifts to a different patch mid-fan-out (§14.5).
+func (i *Installer) Resolve(ctx context.Context, version string) (relay.Pin, error) {
+	return i.resolve(ctx, version)
+}
+
+// InstallPin installs an already-resolved Pin — Install minus the resolve step: verify-on-hit
+// short-circuit, fetch (cached, per-asset flock ⇒ download-once/push-N), optional Assemble,
+// wholesale replace + push, verify.
+func (i *Installer) InstallPin(ctx context.Context, pin relay.Pin) (Result, error) {
 	target := i.targetDir(pin.FullVersion)
 	bin := path.Join(target, "bin", i.spec.BinName)
 

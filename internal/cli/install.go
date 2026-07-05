@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -13,7 +14,9 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/npm"
 	"github.com/KuroKodaNinja/iceclimber/internal/pip"
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
+	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/python"
+	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtimes"
 	"github.com/KuroKodaNinja/iceclimber/internal/rust"
 	"github.com/KuroKodaNinja/iceclimber/internal/shell"
@@ -192,29 +195,11 @@ func newInstallJavaCmd() *cobra.Command {
 		Short: "Install a portable Temurin JDK (javac bundled); no version = the recommended line",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, _, sess, done, err := openCommandSession(cmd, 15*time.Minute, "install")
-			if err != nil {
-				return err
-			}
-			defer done()
-
-			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			res, err := newJavaInstaller(sess, pr).Install(ctx, optionalVersion(args, java.ResolveLine))
-			finish()
-			if err != nil {
-				return err
-			}
-			// In proxy mode, build the JVM truststore now so any JVM tool trusts the egress CA.
-			if err := ensureEgressJavaTrust(ctx, sess, res.Path); err != nil {
-				return err
-			}
-			w := cmd.OutOrStdout()
-			verb := "installed"
-			if res.AlreadyInstalled {
-				verb = "already installed:"
-			}
-			fmt.Fprintf(w, "%s java %s at %s\n", verb, res.Version, res.Path)
-			return nil
+			return runFleetInstall(cmd, 15*time.Minute, "java", optionalVersion(args, java.ResolveLine), newJavaInstaller,
+				func(ctx context.Context, sess *session, res runtime.Result) error {
+					// In proxy mode, build the JVM truststore so any JVM tool trusts the egress CA.
+					return ensureEgressJavaTrust(ctx, sess, res.Path)
+				})
 		},
 	}
 	return cmd
@@ -289,25 +274,7 @@ func newInstallNodeCmd() *cobra.Command {
 		Short: "Install a portable Node.js runtime (npm bundled); no version = the recommended line",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, _, sess, done, err := openCommandSession(cmd, 10*time.Minute, "install")
-			if err != nil {
-				return err
-			}
-			defer done()
-
-			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			res, err := newNodeInstaller(sess, pr).Install(ctx, optionalVersion(args, node.ResolveLine))
-			finish()
-			if err != nil {
-				return err
-			}
-			w := cmd.OutOrStdout()
-			verb := "installed"
-			if res.AlreadyInstalled {
-				verb = "already installed:"
-			}
-			fmt.Fprintf(w, "%s node %s at %s\n", verb, res.Version, res.Path)
-			return nil
+			return runFleetInstall(cmd, 10*time.Minute, "node", optionalVersion(args, node.ResolveLine), newNodeInstaller, nil)
 		},
 	}
 	return cmd
@@ -319,25 +286,8 @@ func newInstallPythonCmd() *cobra.Command {
 		Short: "Install a portable Python runtime (python-build-standalone); no version = the recommended line",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, _, sess, done, err := openCommandSession(cmd, 10*time.Minute, "install")
-			if err != nil {
-				return err
-			}
-			defer done()
-
-			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			res, err := newInstaller(sess, pr).Install(ctx, optionalVersion(args, python.ResolveLine))
-			finish()
-			if err != nil {
-				return err
-			}
-			w := cmd.OutOrStdout()
-			verb := "installed"
-			if res.AlreadyInstalled {
-				verb = "already installed:"
-			}
-			fmt.Fprintf(w, "%s python %s at %s\n", verb, res.Version, res.Path)
-			return nil
+			// Fleet-aware (§14.5): single-box, or fanned out with resolve-version-once.
+			return runFleetInstall(cmd, 10*time.Minute, "python", optionalVersion(args, python.ResolveLine), newInstaller, nil)
 		},
 	}
 	return cmd
@@ -349,25 +299,8 @@ func newInstallRustCmd() *cobra.Command {
 		Short: "Install a portable Rust toolchain (rustc + cargo + std); no version = the current stable",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, _, sess, done, err := openCommandSession(cmd, 15*time.Minute, "install")
-			if err != nil {
-				return err
-			}
-			defer done()
-
-			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			res, err := runtimeInstaller(sess, pr, "rust").Install(ctx, optionalVersion(args, rust.ResolveLine))
-			finish()
-			if err != nil {
-				return err
-			}
-			w := cmd.OutOrStdout()
-			verb := "installed"
-			if res.AlreadyInstalled {
-				verb = "already installed:"
-			}
-			fmt.Fprintf(w, "%s rust %s at %s\n", verb, res.Version, res.Path)
-			return nil
+			return runFleetInstall(cmd, 15*time.Minute, "rust", optionalVersion(args, rust.ResolveLine),
+				func(s *session, pr progress.Func) *runtime.Installer { return runtimeInstaller(s, pr, "rust") }, nil)
 		},
 	}
 	return cmd
