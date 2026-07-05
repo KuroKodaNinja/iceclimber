@@ -30,8 +30,9 @@ CFG="$REPO/.demo/config.yaml"
 root="$(limactl shell "$DEMO" -- sh -lc 'echo $HOME/iceclimber-demo')"
 bash "$HERE/gen-config.sh" "$DEMO" "$CFG" "$root"
 "$BIN" bootstrap --config "$CFG"
-rm -f "$HOME/.iceclimber/$DEMO/approvals.json" "$HOME/.iceclimber/$DEMO/pending.json"
-: > "$HOME/.iceclimber/$DEMO/agent.log" 2>/dev/null || true
+state="${XDG_CONFIG_HOME:-$HOME/.config}/iceclimber/$DEMO"
+rm -f "$state/approvals.json" "$state/pending.json"
+: > "$state/agent.log" 2>/dev/null || true
 make -C "$REPO" demo-reset
 
 # 2. Air-gap the sandbox. Restore egress on exit.

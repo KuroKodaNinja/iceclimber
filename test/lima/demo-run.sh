@@ -38,7 +38,7 @@ printf 'egress_mode: relay\n' >> "$CFG"
 
 # 2. Pre-approve the fetch host (operator-owned allow rule) so the unattended
 #    agent isn't held at the gate.
-approvals="$HOME/.iceclimber/$DEMO/approvals.json"
+approvals="${XDG_CONFIG_HOME:-$HOME/.config}/iceclimber/$DEMO/approvals.json"
 mkdir -p "$(dirname "$approvals")"
 printf '%s\n' '{"allow":["https://xkcd.com/*"],"deny":[]}' > "$approvals"
 
