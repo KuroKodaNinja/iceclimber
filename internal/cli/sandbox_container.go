@@ -270,6 +270,24 @@ func newContainerConfig(name, cname, ip, identity, known, sshCfg, hostKind, host
 	}
 }
 
+// rewriteKnownHostsAddr points every known_hosts entry at addr, keeping the key type
+// and key material (the pinned trust) intact.
+func rewriteKnownHostsAddr(path, addr string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	for i, l := range lines {
+		f := strings.Fields(l)
+		if len(f) >= 3 && !strings.HasPrefix(f[0], "#") {
+			f[0] = addr
+			lines[i] = strings.Join(f, " ")
+		}
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+}
+
 // containerProviderStatus reports the container's run state for list/status (mirrors the
 // lima.Instance role for the container backend), normalized to a Lima-ish label.
 func containerProviderStatus(ctx context.Context, p *config.Provider) (status string, exists bool) {
@@ -406,36 +424,61 @@ func parenNames(ids []string) string {
 // re-resolve its IP, and rewrite the ssh_config + known_hosts if the IP moved. A no-op for
 // non-container providers (and cheap when nothing changed). Called from openSessionWith.
 func refreshContainerSSH(ctx context.Context, cfg *config.Config) error {
-	p := cfg.Provider
-	if !isContainerProvider(p) {
+	if !isContainerProvider(cfg.Provider) {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	cl := container.New(runnerForProvider(p))
+	return refreshContainerSSHWith(ctx, cfg, container.New(runnerForProvider(cfg.Provider)))
+}
+
+// refreshContainerSSHWith is refreshContainerSSH over an injected client (the unit-test
+// seam — tests drive it with a fake Runner).
+func refreshContainerSSHWith(ctx context.Context, cfg *config.Config, cl *container.Client) error {
+	p := cfg.Provider
 	st, exists := cl.State(ctx, p.Instance)
 	if !exists {
+		// Don't report a dead context as a missing container — the message would send
+		// the operator to recreate a sandbox that is fine.
+		if ctx.Err() != nil {
+			return fmt.Errorf("container refresh aborted: %w", ctx.Err())
+		}
 		return fmt.Errorf("sandbox container %q not found on its host — was it removed?", p.Instance)
 	}
+	started := false
 	if st != "running" {
 		if err := cl.Start(ctx, p.Instance); err != nil {
 			return fmt.Errorf("start sandbox container %q: %w", p.Instance, err)
 		}
+		started = true
 	}
 	ip, err := cl.IP(ctx, p.Instance)
 	if err != nil {
 		return err
 	}
-	if containerSSHConfigHasIP(cfg.SSH.SSHConfigFile, ip) {
-		return nil // ssh_config already targets the current IP — nothing to do
+	if !containerSSHConfigHasIP(cfg.SSH.SSHConfigFile, ip) {
+		// The endpoint moved: re-point the generated ssh_config + known_hosts at the
+		// current IP, PRESERVING the pinned host key material — the container's
+		// filesystem (and thus its sshd host key) survives stop/start, so trust is
+		// never re-scanned from the wire; a different container squatting the address
+		// must still fail strict host-key checking.
+		if err := rewriteKnownHostsAddr(cfg.SSH.KnownHosts, ip); err != nil {
+			return fmt.Errorf("rewrite known_hosts: %w", err)
+		}
+		sbDir := xdg.SandboxDir(cfg.SandboxID)
+		if _, err := writeContainerSSHConfig(sbDir, cfg.SandboxID, ip, cfg.SSH.IdentityFile, cfg.SSH.KnownHosts, p.Host, p.HostInstance); err != nil {
+			return fmt.Errorf("rewrite ssh config: %w", err)
+		}
 	}
-	sbDir := xdg.SandboxDir(cfg.SandboxID)
-	known, err := writeContainerKnownHosts(ctx, cl, sbDir, ip)
-	if err != nil {
-		return err
+	if started {
+		// Readiness gate for the just-started sshd (it may still be binding, and the
+		// dial that follows has no retry) — the scan output is DISCARDED; trust stays
+		// pinned in the preserved known_hosts.
+		if _, err := cl.Keyscan(ctx, ip, 22); err != nil {
+			return fmt.Errorf("container %q sshd not reachable at %s: %w", p.Instance, ip, err)
+		}
 	}
-	_, err = writeContainerSSHConfig(sbDir, cfg.SandboxID, ip, cfg.SSH.IdentityFile, known, p.Host, p.HostInstance)
-	return err
+	return nil
 }
 
 // containerSSHConfigHasIP reports whether the generated ssh_config already targets ip on the

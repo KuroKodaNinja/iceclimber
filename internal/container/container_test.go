@@ -198,6 +198,17 @@ func TestIP_EmptyIsError(t *testing.T) {
 	}
 }
 
+func TestStart_AssemblesPodmanStart(t *testing.T) {
+	r := &fakeRunner{}
+	if err := New(r).Start(context.Background(), "icx-box"); err != nil {
+		t.Fatal(err)
+	}
+	call := r.lastMatching("start")
+	if call == nil || !contains(call, "icx-box") {
+		t.Fatalf("expected `podman start icx-box`, got %v", r.calls)
+	}
+}
+
 func TestEnsureImage_BuildsWhenAbsent_SkipsWhenPresent(t *testing.T) {
 	// absent: image exists fails -> build+commit
 	r := &fakeRunner{fail: map[string]bool{"image exists": true}}

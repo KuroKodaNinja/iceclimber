@@ -548,6 +548,21 @@ func newSandboxStatusCmd() *cobra.Command {
 			}
 			w := cmd.OutOrStdout()
 
+			// For a CONTAINER sandbox, dial BEFORE sampling state: the dial self-heals a
+			// stopped container (decision #112), and status should report the healed
+			// reality — not a pre-dial "Exited" beside a succeeding summary. Lima keeps
+			// state-first: its line is instant and is the answer when the VM is stopped
+			// (a dial there would just block for the full timeout before any output).
+			sctx, cancel := context.WithTimeout(cmd.Context(), 20*time.Second)
+			defer cancel()
+			var sess *session
+			var serr error
+			dialed := false
+			if isContainerProvider(cfg.Provider) {
+				sess, serr = openSession(sctx, cfg, transport)
+				dialed = true
+			}
+
 			// VM/container line.
 			if cfg.Provider != nil {
 				vm := "unknown"
@@ -571,11 +586,11 @@ func newSandboxStatusCmd() *cobra.Command {
 			}
 
 			// iceclimber summary: best-effort (a stopped/unreachable box just shows the reason).
-			sctx, cancel := context.WithTimeout(cmd.Context(), 20*time.Second)
-			defer cancel()
-			sess, err := openSession(sctx, cfg, transport)
-			if err != nil {
-				fmt.Fprintf(w, "iceclimber: unreachable (%v)\n", err)
+			if !dialed {
+				sess, serr = openSession(sctx, cfg, transport)
+			}
+			if serr != nil {
+				fmt.Fprintf(w, "iceclimber: unreachable (%v)\n", serr)
 				return nil
 			}
 			defer sess.Close()

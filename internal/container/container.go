@@ -271,6 +271,8 @@ func (c *Client) State(ctx context.Context, name string) (status string, exists 
 }
 
 // Start starts a stopped sandbox container (a host reboot leaves containers stopped).
+// The bridge IP is assigned anew on start — it is NOT stable across restart (see IP) —
+// so callers must re-resolve the address and refresh anything that recorded the old one.
 func (c *Client) Start(ctx context.Context, name string) error {
 	_, err := c.podman(ctx, "start", name)
 	return err
