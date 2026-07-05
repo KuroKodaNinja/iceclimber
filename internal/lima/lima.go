@@ -153,6 +153,27 @@ func Shell(ctx context.Context, name string, args ...string) error {
 	return nil
 }
 
+// RunScript runs a shell script inside the instance AS ROOT via `sudo sh -c <script>` (the
+// script is an ARGUMENT — the remote shell reads NO stdin). Both properties are load-bearing:
+//   - Stdin=nil: it does not inherit the caller's os.Stdin, so `sandbox create` works from a
+//     background/CI/non-tty context (inheriting a dead/piped stdin got the ssh child SIGKILLed).
+//   - `-c` not `-s`: feeding the script on stdin (`sh -s`) HANGS when the script's own firewall
+//     rules disrupt the SSH channel mid-apply — the remote read/return-path stalls forever.
+//
+// WaitDelay bounds a stuck limactl whose mux'd ssh child keeps the stderr pipe open after the
+// context is cancelled, so a cancelled Run() actually returns instead of blocking on Wait().
+func RunScript(ctx context.Context, name, script string) error {
+	cmd := exec.CommandContext(ctx, "limactl", "shell", name, "sudo", "sh", "-c", script)
+	cmd.Stdin = nil
+	cmd.WaitDelay = 5 * time.Second
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("limactl shell %s (script): %w: %s", name, err, strings.TrimSpace(errb.String()))
+	}
+	return nil
+}
+
 // KnownHostsFile records the instance's SSH host key into <dir>/known_hosts via
 // ssh-keyscan, returning the file path. Retries a few times (ssh-keyscan transiently
 // fails under connection churn / while the box is still settling). Mirrors the functional

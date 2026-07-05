@@ -363,11 +363,18 @@ func hostArch() string {
 	}
 }
 
-// applyAirgap is the egress-isolation SEAM (§18.3): it applies the embedded firewall inside
-// the guest as root via `limactl shell … sudo sh -c <airgap.sh>`. Isolated as one clear
-// function so a stronger (VM-external) mechanism can drop in here without touching create.
+// applyAirgap is the egress-isolation SEAM (§18.3): it applies the embedded firewall inside the
+// guest as root, feeding the script on stdin (`sudo sh -s up`). NON-interactive (RunScript, not
+// Shell) so create works from a background/CI/non-tty context — inheriting a dead os.Stdin got
+// the ssh child SIGKILLed. Isolated as one clear function so a stronger (VM-external) mechanism
+// can drop in here without touching create.
 func applyAirgap(ctx context.Context, instance string) error {
-	return lima.Shell(ctx, instance, "sudo", "sh", "-c", string(lima.AirgapScript))
+	// Non-interactive (RunScript = `sudo sh -c`, no stdin) so create works headless AND the
+	// firewall apply can't hang on a stdin-fed remote shell. Bounded so a stuck apply fails in
+	// ~90s instead of blocking create indefinitely. airgap.sh defaults its action to "up".
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	return lima.RunScript(ctx, instance, string(lima.AirgapScript))
 }
 
 // bootstrapSandbox provisions a freshly-created box: it opens the mutating-ops session and

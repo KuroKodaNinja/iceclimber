@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -239,5 +240,23 @@ func TestPathDenyURL(t *testing.T) {
 				t.Errorf("pathDenyURL(host=%q path=%q url=%q) = %q, want %q", c.host, c.path, c.url, got, c.want)
 			}
 		})
+	}
+}
+
+// TestEgressEnvScript_BypassesLLMAPI is the paired guard to internal/lima airgap_test's
+// "requires Anthropic ranges": the firewall opens a DIRECT 443 hole to Anthropic (decision
+// #109), and the agent's client must actually USE it rather than tunnel its LLM API through
+// the MITM proxy — so egress-env.sh must exclude the Anthropic host from HTTPS_PROXY via
+// NO_PROXY. Without this the headless agent 403s on its own model (host not on the allow-list).
+func TestEgressEnvScript_BypassesLLMAPI(t *testing.T) {
+	s := egressEnvScript(8443)
+	for _, want := range []string{"NO_PROXY", "no_proxy", "api.anthropic.com"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("egress-env.sh must carve the agent's LLM API out of the proxy; missing %q:\n%s", want, s)
+		}
+	}
+	// The proxy itself must still be set (this is proxy-mode egress, not open egress).
+	if !strings.Contains(s, "HTTPS_PROXY=http://127.0.0.1:8443") {
+		t.Errorf("egress-env.sh should still route package managers through the proxy:\n%s", s)
 	}
 }

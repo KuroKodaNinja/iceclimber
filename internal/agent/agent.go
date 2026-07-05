@@ -42,6 +42,17 @@ type Descriptor struct {
 	// Popo contract is persistent context every turn. Empty = the harness has no
 	// such flag (nana then launches it without wiring NANA.md in).
 	SystemPromptFlag string
+	// AutonomousArgs disable the harness's OWN interactive permission prompts so the
+	// agent can act without a human at a tty. nana injects them only on a HEADLESS run
+	// (no tty / a print flag): there's no one to approve, and the real boundary is
+	// external — the air-gapped box, the non-sudo agent user, and Popo gating every
+	// egress. Without them a headless agent can run nothing (not even `popo`), so it's
+	// inert. Interactive runs keep the harness's native prompts. Skipped when the
+	// operator already passed a permission flag. Empty = the harness needs none.
+	AutonomousArgs []string
+	// PermissionFlags are the harness's own permission-mode flags; if the operator
+	// passes any, nana does NOT inject AutonomousArgs (their choice wins).
+	PermissionFlags []string
 }
 
 // Claude is the Claude Code agent. Its native binary is dynamically linked against
@@ -64,6 +75,11 @@ var Claude = Descriptor{
 	PrintFlags:       []string{"-p", "--print"},
 	StreamArgs:       []string{"--output-format", "stream-json", "--verbose"},
 	SystemPromptFlag: "--append-system-prompt",
+	// Headless Claude Code has no tty to answer its own permission prompts, so bypass
+	// them: the sandbox air-gap + non-sudo user + Popo egress gate ARE the boundary.
+	// (The flag is refused only for uid 0; the agent runs as a non-root user.)
+	AutonomousArgs:  []string{"--dangerously-skip-permissions"},
+	PermissionFlags: []string{"--dangerously-skip-permissions", "--permission-mode"},
 }
 
 // registry holds the known agents. Add a Descriptor here to support a new agent.

@@ -109,6 +109,10 @@ func TestRenderRun(t *testing.T) {
 		`| "$popo" log "$log"`,    // …rotating, reopen-safe
 		`| tee -a "$log"`,         // fallback when popo is absent
 		`exec "$bin" "$@"`,        // interactive: clean tty
+		// headless bypasses the harness's own permission prompts (no tty to answer them;
+		// Popo + the air-gap are the boundary) — unless the operator picked a mode already.
+		`--dangerously-skip-permissions|--dangerously-skip-permissions=*|--permission-mode|--permission-mode=*) have_perm=1 ;;`,
+		`[ "$have_perm" = 0 ] && set -- '--dangerously-skip-permissions' "$@"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("run script missing %q:\n%s", want, got)
@@ -123,6 +127,16 @@ func TestRenderRun_NoStreamArgs(t *testing.T) {
 	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md", "/r/popo", "/r")
 	if strings.Contains(got, "have_fmt") || strings.Contains(got, "output-format") {
 		t.Errorf("agent without StreamArgs should not inject a stream block:\n%s", got)
+	}
+}
+
+// TestRenderRun_NoAutonomousArgs: an agent that declares no AutonomousArgs gets no
+// permission-bypass block (only agents that opt in have their headless prompts bypassed).
+func TestRenderRun_NoAutonomousArgs(t *testing.T) {
+	d := Descriptor{Name: "x", DisplayName: "X", Bin: "x", PrintFlags: []string{"-p"}}
+	got := renderRun(d, "/r/agent/x", "/r/agent/x/x", "/r/skill/NANA.md", "/r/popo", "/r")
+	if strings.Contains(got, "have_perm") || strings.Contains(got, "skip-permissions") {
+		t.Errorf("agent without AutonomousArgs should not inject a permission-bypass block:\n%s", got)
 	}
 }
 

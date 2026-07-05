@@ -228,6 +228,14 @@ func egressEnvScript(port int) string {
 		"export https_proxy=$HTTPS_PROXY\n" +
 		"export HTTP_PROXY=$HTTPS_PROXY\n" +
 		"export http_proxy=$HTTPS_PROXY\n" +
+		// The agent's LLM API is the ONE thing Popo does NOT bridge: its streaming/TLS control
+		// channel can't be MITM'd, so it connects DIRECTLY through the firewall's direct-443
+		// Anthropic hole (internal/lima/airgap.sh, decision #109). NO_PROXY makes the Node/
+		// Claude-Code client skip HTTPS_PROXY for those hosts so it actually uses that hole;
+		// without it the client tunnels to the proxy, which denies api.anthropic.com (not on
+		// the allow-list). Package managers never hit anthropic.com, so this is a no-op for them.
+		`export NO_PROXY="api.anthropic.com,.anthropic.com${NO_PROXY:+,$NO_PROXY}"` + "\n" +
+		"export no_proxy=\"$NO_PROXY\"\n" +
 		`CA="$ICECLIMBER_HOME/certs/egress-ca.pem"` + "\n" +
 		"export SSL_CERT_FILE=\"$CA\"\n" +
 		"export REQUESTS_CA_BUNDLE=\"$CA\"\n" +

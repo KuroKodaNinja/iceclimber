@@ -63,6 +63,24 @@ func renderRun(d Descriptor, dir, binPath, nanaPath, popoPath, root string) stri
 		fmt.Fprintf(&b, "fi\n")
 	}
 
+	// On a headless run there's no tty to answer the harness's own permission prompts, so
+	// the agent could otherwise run nothing (not even `popo`). Bypass them — the air-gap,
+	// the non-sudo user, and Popo's egress gate are the real boundary — unless the operator
+	// already chose a permission mode explicitly.
+	if len(d.AutonomousArgs) > 0 {
+		fmt.Fprintf(&b, "if [ \"$headless\" = 1 ]; then\n")
+		fmt.Fprintf(&b, "  have_perm=0\n")
+		if len(d.PermissionFlags) > 0 {
+			pats := make([]string, 0, len(d.PermissionFlags)*2)
+			for _, f := range d.PermissionFlags {
+				pats = append(pats, f, f+"=*")
+			}
+			fmt.Fprintf(&b, "  for a in \"$@\"; do case \"$a\" in %s) have_perm=1 ;; esac; done\n", strings.Join(pats, "|"))
+		}
+		fmt.Fprintf(&b, "  [ \"$have_perm\" = 0 ] && set -- %s \"$@\"\n", shellQuoteArgs(d.AutonomousArgs))
+		fmt.Fprintf(&b, "fi\n")
+	}
+
 	if d.SystemPromptFlag != "" {
 		// Prepend the system-prompt args (NANA.md contents) ahead of the operator's args.
 		fmt.Fprintf(&b, "nana=%s\n", remote.ShellQuote(nanaPath))
