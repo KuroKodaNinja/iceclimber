@@ -1,9 +1,11 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -476,5 +478,63 @@ func TestCA_LoadOrCreate_Persists(t *testing.T) {
 	leafCert, _ := x509.ParseCertificate(leaf.Certificate[0])
 	if _, err := leafCert.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); err != nil {
 		t.Errorf("minted leaf does not chain to the CA: %v", err)
+	}
+}
+
+// TestProxy_Passthrough_TunnelsRawBytesNoMITM verifies a Passthrough verdict makes the proxy
+// a transparent TCP tunnel: raw bytes flow both ways with NO TLS termination (the mechanism
+// that lets the air-gapped agent's LLM API stay end-to-end, decision #111).
+func TestProxy_Passthrough_TunnelsRawBytesNoMITM(t *testing.T) {
+	// upstream: reads a line, echoes it back with a prefix — a stand-in for the LLM API.
+	up, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer up.Close()
+	go func() {
+		c, err := up.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		line, _ := bufio.NewReader(c).ReadString('\n')
+		_, _ = io.WriteString(c, "echo:"+line)
+	}()
+
+	ca, err := NewCA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := New(ca, func(Request) Verdict { return Verdict{Allow: true, Passthrough: true} }, nil, nil)
+	pl, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pl.Close()
+	go p.Serve(pl)
+
+	cc, err := net.Dial("tcp", pl.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cc.Close()
+	fmt.Fprintf(cc, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", up.Addr().String(), up.Addr().String())
+	cbr := bufio.NewReader(cc)
+	status, _ := cbr.ReadString('\n')
+	if !strings.Contains(status, "200") {
+		t.Fatalf("expected 200 Connection established, got %q", status)
+	}
+	for { // consume the rest of the 200 response headers
+		l, _ := cbr.ReadString('\n')
+		if l == "\r\n" || l == "\n" || l == "" {
+			break
+		}
+	}
+	// raw tunnel: the bytes we send must reach the upstream and come straight back — proof
+	// there is no MITM in the middle (we never presented/validated a leaf cert).
+	_, _ = io.WriteString(cc, "ping\n")
+	resp, _ := cbr.ReadString('\n')
+	if !strings.Contains(resp, "echo:ping") {
+		t.Fatalf("passthrough tunnel did not forward raw bytes end-to-end: %q", resp)
 	}
 }

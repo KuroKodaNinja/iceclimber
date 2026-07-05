@@ -30,6 +30,11 @@ type Verdict struct {
 	Allow       bool
 	RewriteHost string
 	Reason      string
+	// Passthrough tunnels the CONNECT as raw bytes instead of MITM-ing it: TLS stays
+	// end-to-end between the sandbox and the upstream, and the proxy never sees the payload.
+	// Used for the agent's LLM API, whose streaming/TLS control channel can't be intercepted
+	// (decision #111). The host is still gated + audited; only decryption is skipped.
+	Passthrough bool
 }
 
 // Decider judges a request at CONNECT (domain-level; only the host is known then). Full-URL
@@ -149,6 +154,15 @@ func (p *Proxy) handleConn(c net.Conn) {
 	if _, err := io.WriteString(c, "HTTP/1.1 200 Connection established\r\n\r\n"); err != nil {
 		return
 	}
+	// Passthrough (the LLM API): raw bidirectional tunnel, no TLS termination — the
+	// sandbox's TLS goes end-to-end to the upstream and streaming stays intact.
+	if v.Passthrough {
+		if p.audit != nil {
+			p.audit(pr, v, http.StatusOK)
+		}
+		p.tunnel(br, c, authority)
+		return
+	}
 	tlsConn := tls.Server(&bufConn{br, c}, &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		// Mint for the ADMITTED CONNECT host, not the client-chosen SNI: SNI is
@@ -180,6 +194,24 @@ func (p *Proxy) handleConn(c net.Conn) {
 			return
 		}
 	}
+}
+
+// tunnel bidirectionally copies bytes between the sandbox client and the upstream after a
+// passthrough CONNECT. It reads from br (which holds any bytes already buffered past the
+// CONNECT line — e.g. the client's TLS ClientHello) and writes to the raw client conn; the
+// sandbox's TLS is end-to-end to the upstream, so the proxy never decrypts. The first
+// direction to close ends the tunnel.
+func (p *Proxy) tunnel(br *bufio.Reader, client net.Conn, authority string) {
+	up, err := net.DialTimeout("tcp", authority, 15*time.Second)
+	if err != nil {
+		return
+	}
+	defer up.Close()
+	_ = client.SetReadDeadline(time.Time{}) // no idle bound during a live LLM stream
+	done := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(up, br); done <- struct{}{} }()     // client → upstream (incl. buffered bytes)
+	go func() { _, _ = io.Copy(client, up); done <- struct{}{} }() // upstream → client
+	<-done
 }
 
 // canonHost canonicalizes a host for policy matching and leaf minting: lower-cased (DNS is

@@ -243,20 +243,37 @@ func TestPathDenyURL(t *testing.T) {
 	}
 }
 
-// TestEgressEnvScript_BypassesLLMAPI is the paired guard to internal/lima airgap_test's
-// "requires Anthropic ranges": the firewall opens a DIRECT 443 hole to Anthropic (decision
-// #109), and the agent's client must actually USE it rather than tunnel its LLM API through
-// the MITM proxy — so egress-env.sh must exclude the Anthropic host from HTTPS_PROXY via
-// NO_PROXY. Without this the headless agent 403s on its own model (host not on the allow-list).
-func TestEgressEnvScript_BypassesLLMAPI(t *testing.T) {
+// TestEgressEnvScript_RoutesLLMAPIThroughProxy: the LLM API now rides the proxy as a no-MITM
+// CONNECT passthrough (decision #111), so egress-env.sh must NOT carve it out with NO_PROXY —
+// routing it THROUGH the proxy is what lets a zero-internet container reach its model over the
+// ssh -R tunnel. This retires the #109/#110 direct-hole/NO_PROXY approach.
+func TestEgressEnvScript_RoutesLLMAPIThroughProxy(t *testing.T) {
 	s := egressEnvScript(8443)
-	for _, want := range []string{"NO_PROXY", "no_proxy", "api.anthropic.com"} {
-		if !strings.Contains(s, want) {
-			t.Errorf("egress-env.sh must carve the agent's LLM API out of the proxy; missing %q:\n%s", want, s)
-		}
+	if strings.Contains(s, "NO_PROXY") || strings.Contains(s, "no_proxy") {
+		t.Errorf("egress-env.sh must NOT set NO_PROXY (the LLM API rides the proxy passthrough now):\n%s", s)
 	}
-	// The proxy itself must still be set (this is proxy-mode egress, not open egress).
 	if !strings.Contains(s, "HTTPS_PROXY=http://127.0.0.1:8443") {
-		t.Errorf("egress-env.sh should still route package managers through the proxy:\n%s", s)
+		t.Errorf("egress-env.sh should route all egress (incl. the LLM API) through the proxy:\n%s", s)
+	}
+}
+
+// TestProxyPolicy_LLMAPIPassthrough: the policy passes the agent's LLM API through (no MITM),
+// auto-allowed, without prompting — the proxy-side of the retired direct-Anthropic hole.
+func TestProxyPolicy_LLMAPIPassthrough(t *testing.T) {
+	if !isLLMAPIHost("api.anthropic.com") || !isLLMAPIHost("statsig.anthropic.com") {
+		t.Fatal("Anthropic hosts should be LLM-API passthrough hosts")
+	}
+	if isLLMAPIHost("pypi.org") {
+		t.Fatal("non-Anthropic hosts must not be passthrough")
+	}
+	// a policy with a deny-all unlisted stance still passes the LLM API through
+	pp := &proxyPolicy{policy: newTestPolicy(t, nil, "deny"), cache: map[string]proxy.Verdict{}}
+	v := pp.decide(proxy.Request{Method: "CONNECT", Host: "api.anthropic.com", URL: "https://api.anthropic.com/"})
+	if !v.Allow || !v.Passthrough {
+		t.Fatalf("LLM API verdict = %+v, want Allow+Passthrough", v)
+	}
+	// a normal host under deny-all is still denied (passthrough didn't loosen the gate)
+	if v2 := pp.decide(proxy.Request{Method: "CONNECT", Host: "pypi.org", URL: "https://pypi.org/"}); v2.Allow {
+		t.Fatalf("non-LLM host should stay gated: %+v", v2)
 	}
 }
