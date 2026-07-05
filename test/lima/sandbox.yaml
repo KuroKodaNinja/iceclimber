@@ -14,9 +14,9 @@ minimumLimaVersion: 2.0.0
 base:
 - template:_images/alpine-3.23
 
-# Apple Virtualization.framework — fast, no QEMU dependency on Apple Silicon.
-# Fall back to "qemu" (requires the qemu package) if vz misbehaves.
-vmType: vz
+# vmType is deliberately unset: Lima picks the platform default — vz on modern
+# macOS (fast, no QEMU dependency), qemu (KVM) on a Linux host — so the
+# functional gate runs on both controller OSes.
 
 cpus: 1
 memory: 1GiB

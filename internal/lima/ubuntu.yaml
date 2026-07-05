@@ -11,8 +11,9 @@ minimumLimaVersion: 2.0.0
 base:
 - template:_images/ubuntu-24.04
 
-# Apple Virtualization.framework — fast on Apple Silicon.
-vmType: vz
+# vmType is deliberately unset: Lima picks the platform default — vz (Apple
+# Virtualization.framework) on modern macOS, qemu on a Linux host — so the same
+# template provisions on both controller OSes.
 
 # Sized by `sandbox create` flags (--cpus/--memory/--disk) via limactl overrides;
 # these are the template defaults (2 CPU / 4 GiB / 20 GiB, §18.2).

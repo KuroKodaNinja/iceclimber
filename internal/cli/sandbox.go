@@ -190,9 +190,10 @@ func newSandboxCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create [name]",
 		Short: "Provision a local Lima sandbox and register it (default name: dev)",
-		Long: "Brings up an Ubuntu (vz) Lima VM, records its SSH details + host key into the\n" +
-			"registry, applies the egress air-gap, and bootstraps it (protocol tree + popo,\n" +
-			"proxy egress). With --shell it drops you in with an auto-serve for the session.",
+		Long: "Brings up an Ubuntu Lima VM (vz on macOS, qemu/KVM on Linux), records its SSH\n" +
+			"details + host key into the registry, applies the egress air-gap, and bootstraps\n" +
+			"it (protocol tree + popo, proxy egress). With --shell it drops you in with an\n" +
+			"auto-serve for the session.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.ToLower(distro) != "ubuntu" {

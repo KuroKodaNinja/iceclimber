@@ -19,8 +19,8 @@ minimumLimaVersion: 2.0.0
 base:
 - template:_images/alpine-3.23
 
-# Apple Virtualization.framework. Fall back to "qemu" if vz misbehaves.
-vmType: vz
+# vmType is deliberately unset: Lima picks the platform default — vz on modern
+# macOS, qemu (KVM) on a Linux host.
 
 # Heavier than the functional box: it carries the relayed-in Claude Code binary
 # (~220 MB) + a ~210 MB python-build-standalone runtime + wheels.

@@ -15,8 +15,8 @@ minimumLimaVersion: 2.0.0
 base:
 - template:_images/ubuntu-24.04
 
-# Apple Virtualization.framework — fast on Apple Silicon (same as the musl box).
-vmType: vz
+# vmType is deliberately unset (same as the musl box): Lima picks the platform
+# default — vz on modern macOS, qemu (KVM) on a Linux host.
 
 # PyTorch CPU wheels are large (~200MB download, ~1GB installed) and `import torch`
 # wants real memory, so this box is sized larger than the minimal musl sandbox.

@@ -50,17 +50,24 @@ func TestSSHConfigFieldMissingFile(t *testing.T) {
 }
 
 // TestEmbeddedAssets: the template + air-gap script are embedded and non-empty, and carry
-// the load-bearing markers the CLI/contract rely on (vz VM, the non-sudo agent user, the
+// the load-bearing markers the CLI/contract rely on (the non-sudo agent user, the
 // default-drop egress with no public destinations).
 func TestEmbeddedAssets(t *testing.T) {
 	tmpl := string(UbuntuTemplate)
-	for _, want := range []string{"vmType: vz", "useradd", "agent"} {
+	for _, want := range []string{"useradd", "agent"} {
 		if !strings.Contains(tmpl, want) {
 			t.Errorf("ubuntu.yaml missing %q", want)
 		}
 	}
+	// vmType must stay UNSET so Lima picks the platform default — vz on modern macOS,
+	// qemu on a Linux host. A pinned vz broke `sandbox create` on every Linux controller.
+	if strings.Contains(tmpl, "vmType:") {
+		t.Error("ubuntu.yaml must not pin vmType (Lima's platform default serves both OSes)")
+	}
 	scr := string(AirgapScript)
-	for _, want := range []string{"OUTPUT DROP", "--dport 53", "ESTABLISHED,RELATED"} {
+	// --ctorigdstport 53 (not plain --dport) is load-bearing on Linux/qemu hosts:
+	// Lima's in-guest LIMADNS DNAT rewrites the dport before the filter chain runs.
+	for _, want := range []string{"OUTPUT DROP", "--ctorigdstport 53", "ESTABLISHED,RELATED"} {
 		if !strings.Contains(scr, want) {
 			t.Errorf("airgap.sh missing %q", want)
 		}

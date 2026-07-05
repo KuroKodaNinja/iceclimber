@@ -36,8 +36,13 @@ up() {
 	iptables -F OUTPUT
 	iptables -A OUTPUT -o lo -j ACCEPT
 	iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-	iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-	iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+	# DNS — match the connection's ORIGINAL destination port, not the packet's: under
+	# Lima's qemu user-net (Linux hosts) an in-guest LIMADNS nat/OUTPUT rule DNATs
+	# 192.168.5.3:53 to the host gateway at a DYNAMIC high port BEFORE this filter
+	# chain runs, so a plain `--dport 53` never matches and the default-drop silently
+	# kills DNS. vz (macOS) has no in-guest DNAT; the original dport is 53 either way.
+	iptables -A OUTPUT -m conntrack --ctproto udp --ctorigdstport 53 -j ACCEPT
+	iptables -A OUTPUT -m conntrack --ctproto tcp --ctorigdstport 53 -j ACCEPT
 	iptables -A OUTPUT -p udp --sport 68 --dport 67 -j ACCEPT   # DHCP renewal
 	iptables -A OUTPUT -p tcp -d "$ANTHROPIC_V4" --dport 443 -j ACCEPT  # the agent's LLM API
 	iptables -P OUTPUT DROP                                      # default-drop last
