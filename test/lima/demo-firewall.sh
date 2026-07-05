@@ -39,8 +39,11 @@ up() {
 	iptables -F OUTPUT
 	iptables -A OUTPUT -o lo -j ACCEPT
 	iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-	iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-	iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+	# DNS by ORIGINAL destination port (same fix as internal/lima/airgap.sh, #114):
+	# on a Linux/qemu host Lima's in-guest LIMADNS DNAT rewrites the dport before
+	# this chain runs, so a plain --dport 53 silently kills DNS. Identical under vz.
+	iptables -A OUTPUT -m conntrack --ctproto udp --ctorigdstport 53 -j ACCEPT
+	iptables -A OUTPUT -m conntrack --ctproto tcp --ctorigdstport 53 -j ACCEPT
 	iptables -A OUTPUT -p udp --sport 68 --dport 67 -j ACCEPT   # DHCP renewal
 	iptables -A OUTPUT -p tcp -d "$ANTHROPIC_V4" --dport 443 -j ACCEPT
 	iptables -P OUTPUT DROP                                      # default-drop last
