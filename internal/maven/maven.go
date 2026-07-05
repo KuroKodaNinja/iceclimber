@@ -16,6 +16,8 @@ package maven
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,8 +32,14 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 )
 
-// coursierLauncherURL is the stable 25 kB JAR-based launcher (run with `java -jar`).
-const coursierLauncherURL = "https://github.com/coursier/launchers/raw/master/coursier"
+// coursierLauncherURL is the polyglot Coursier launcher (a shell/JAR hybrid, run with
+// `java -jar`). It is pinned to an IMMUTABLE commit (never `master`) and verified against
+// coursierLauncherSHA256 below: the launcher executes as code (on the sandbox JDK, or the
+// controller's java for Tier 1), so a moved/compromised ref must not slip in unverified.
+// To upgrade, bump the commit + the SHA-256 together (sha256 of
+// https://raw.githubusercontent.com/coursier/launchers/<commit>/coursier).
+const coursierLauncherURL = "https://raw.githubusercontent.com/coursier/launchers/15f36c167c30be237105f923151adaf177e7ee61/coursier"
+const coursierLauncherSHA256 = "c62c6feb15bf9cb9374dc61431c8f96f1d9cfd84ea79b40aa239b29f293623bf"
 
 // Config holds the resolver's dependencies.
 type Config struct {
@@ -213,12 +221,17 @@ func (m *Manager) controllerLauncher(ctx context.Context) (string, error) {
 		return "", err
 	}
 	dst := filepath.Join(cache, "coursier.jar")
-	if fi, err := os.Stat(dst); err == nil && fi.Size() > 0 {
+	// The cache is keyed on the pinned CHECKSUM, not merely size>0: a truncated, corrupted, or
+	// tampered cache entry no longer counts as present and is re-fetched + re-verified.
+	if cached, err := os.ReadFile(dst); err == nil && sha256Hex(cached) == coursierLauncherSHA256 {
 		return dst, nil
 	}
 	data, err := m.download(ctx, coursierLauncherURL)
 	if err != nil {
 		return "", fmt.Errorf("fetch coursier launcher: %w", err)
+	}
+	if got := sha256Hex(data); got != coursierLauncherSHA256 {
+		return "", fmt.Errorf("coursier launcher checksum mismatch (refusing to run unverified code): got %s, want %s", got, coursierLauncherSHA256)
 	}
 	tmp := dst + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
@@ -228,6 +241,12 @@ func (m *Manager) controllerLauncher(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return dst, nil
+}
+
+// sha256Hex returns the lowercase hex SHA-256 of b, for pinned-launcher verification.
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 func (m *Manager) download(ctx context.Context, url string) ([]byte, error) {

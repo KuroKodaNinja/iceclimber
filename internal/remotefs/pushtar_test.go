@@ -160,3 +160,47 @@ func TestPushTarGz_Bulk(t *testing.T) {
 		t.Errorf("top-level component was not stripped in the streamed tar")
 	}
 }
+
+// gzTarSymlink builds a gzipped tar whose sole payload is a symlink top/bin/link -> linkname.
+func gzTarSymlink(t *testing.T, linkname string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	for _, h := range []*tar.Header{
+		{Name: "top/", Typeflag: tar.TypeDir, Mode: 0o755},
+		{Name: "top/bin/", Typeflag: tar.TypeDir, Mode: 0o755},
+		{Name: "top/bin/link", Typeflag: tar.TypeSymlink, Linkname: linkname},
+	} {
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// TestPushTarGz_RejectsEscapingSymlink is the zip-slip-via-symlink guard: a symlink whose
+// target is absolute or escapes the install root via ".." must be refused on BOTH extraction
+// paths (per-file SFTP and bulk exec), while a legit internal relative link is allowed.
+func TestPushTarGz_RejectsEscapingSymlink(t *testing.T) {
+	for _, bad := range []string{"/etc/passwd", "../../../../etc", "../../secret"} {
+		if err := PushTarGz(context.Background(), newRecFS(), bytes.NewReader(gzTarSymlink(t, bad)), "/target"); err == nil {
+			t.Errorf("per-file push must reject escaping symlink -> %q", bad)
+		}
+		if err := PushTarGz(context.Background(), &bulkFS{recFS: newRecFS()}, bytes.NewReader(gzTarSymlink(t, bad)), "/target"); err == nil {
+			t.Errorf("bulk push must reject escaping symlink -> %q", bad)
+		}
+	}
+	if err := PushTarGz(context.Background(), newRecFS(), bytes.NewReader(gzTarSymlink(t, "run")), "/target"); err != nil {
+		t.Errorf("internal relative symlink should be allowed (per-file): %v", err)
+	}
+	if err := PushTarGz(context.Background(), &bulkFS{recFS: newRecFS()}, bytes.NewReader(gzTarSymlink(t, "run")), "/target"); err != nil {
+		t.Errorf("internal relative symlink should be allowed (bulk): %v", err)
+	}
+}

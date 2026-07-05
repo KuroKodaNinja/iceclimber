@@ -71,6 +71,9 @@ func startEgressProxy(ctx context.Context, sess *session, cfg *config.Config, ou
 	// + rewrite table), reusing the interactive approver when serve is supervised.
 	pp := newProxyPolicy(sess.policy, sess.approver, cfg.SandboxID)
 	p := proxy.New(ca, pp.decide, audit, nil)
+	// SSRF floor at dial time: refuse any upstream that resolves to a loopback/link-local/
+	// metadata address (DNS rebinding included), complementing the literal-IP check in evaluate.
+	p.SetDialGuard(webfetch.BlockedIP)
 	// Package/path-level enforcement on an already-admitted host: (1) a deny rule whose glob
 	// includes a path blocks just that URL; (2) a denied package's artifact (on a name-less
 	// CDN, possibly a different host) is blocked via the resolved/learned artifact set — the
@@ -361,6 +364,17 @@ func (pp *proxyPolicy) decide(r proxy.Request) proxy.Verdict {
 }
 
 func (pp *proxyPolicy) evaluate(r proxy.Request, resolved, rewriteHost string) proxy.Verdict {
+	// SSRF floor (wins over everything, including an operator allow-list): the proxy dials
+	// FROM the controller, so a loopback/link-local/metadata literal IP would target the
+	// controller's own localhost services or its cloud-metadata endpoint — never the sandbox's.
+	// RFC1918 stays allowed (the sandbox's legitimate internal mirror network). A hostname that
+	// RESOLVES to a blocked IP is caught at dial time by the proxy's DialGuard.
+	if ip := net.ParseIP(r.Host); ip != nil && webfetch.BlockedIP(ip) {
+		return proxy.Verdict{Allow: false, Reason: "blocked address (SSRF floor)"}
+	}
+	if ip := net.ParseIP(rewriteHost); ip != nil && webfetch.BlockedIP(ip) {
+		return proxy.Verdict{Allow: false, Reason: "rewrite to a blocked address (SSRF floor)"}
+	}
 	// Precedence: an explicit store Deny always wins; then operator-listed allowed_domains
 	// pre-allow (so a config allow-list works even under unlisted_domain_policy: deny);
 	// then the store/unlisted decision.

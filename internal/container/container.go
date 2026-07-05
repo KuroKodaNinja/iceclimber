@@ -36,6 +36,18 @@ const DefaultImage = "iceclimber-sandbox:base"
 // used for the `--isolation gvisor` tier (RunSpec.Runtime).
 const RunscPath = "/usr/local/bin/runsc"
 
+// runsc is pinned to a specific gVisor release with a checksum baked into THIS source (not
+// "latest", not the release's own same-origin sidecar): the binary is installed as root and
+// run as the container runtime, so a rolled or compromised release must not land unverified.
+// To upgrade, bump the release + both per-arch SHA-512s together (from
+// https://storage.googleapis.com/gvisor/releases/release/<date>/<arch>/runsc.sha512).
+const runscRelease = "20260622"
+
+var runscSHA512 = map[string]string{
+	"x86_64":  "6df95d09363dbd9ee5d5c889c1549b457e1783b039ff60a8f9f16f8c94c774a2ca2eef5b1c370e36b863f6b0407b53ba3c69051c6ef051253843dabf89a6de4e",
+	"aarch64": "6d43f7c99dc182ad3750390c811537ee312fca5938245c65f0c5a23b9d38e8b7fddc1f49a816e6696d708582d813ac2d87ee98f7b46b8a6f5e6241c9eba69443",
+}
+
 // Runner executes a command on the Linux host that owns the containers. Combined
 // stdout is returned; on failure the error carries stderr. This is the platform seam:
 // LocalRunner on native Linux, LimaRunner (limactl shell) on macOS.
@@ -241,22 +253,44 @@ func (c *Client) Keyscan(ctx context.Context, host string, port int) (string, er
 }
 
 // EnsureRunsc installs the gVisor runtime (runsc) on the host if absent, so the
-// `--isolation gvisor` tier can run. It downloads the arch-matched release binary (systrap
-// platform — no /dev/kvm, so it works nested inside a Lima VM). Idempotent.
+// `--isolation gvisor` tier can run. It downloads the pinned, arch-matched release binary
+// (systrap platform — no /dev/kvm, so it works nested inside a Lima VM), verifies it against
+// the SHA-512 baked into this source (runscInstallScript), and only then installs it as the
+// container runtime. Idempotent.
 func (c *Client) EnsureRunsc(ctx context.Context) error {
 	if out, err := c.r.Run(ctx, RunscPath, "--version"); err == nil && strings.Contains(out, "runsc") {
 		return nil
 	}
-	script := "set -e; arch=$(uname -m); " +
-		`url="https://storage.googleapis.com/gvisor/releases/release/latest/${arch}"; ` +
-		"wget -qO " + RunscPath + ` "${url}/runsc"; chmod 0755 ` + RunscPath
-	if _, err := c.r.Run(ctx, "sudo", "sh", "-c", script); err != nil {
+	if _, err := c.r.Run(ctx, "sudo", "sh", "-c", runscInstallScript()); err != nil {
 		return fmt.Errorf("install runsc (gVisor): %w", err)
 	}
 	if out, err := c.r.Run(ctx, RunscPath, "--version"); err != nil || !strings.Contains(out, "runsc") {
 		return fmt.Errorf("runsc still unavailable after install")
 	}
 	return nil
+}
+
+// runscInstallScript renders the root-side install script: resolve the host arch, pick the
+// matching source-pinned SHA-512, download the pinned release into a temp dir, verify the
+// checksum (fail-closed — `sha512sum -c` exits non-zero on mismatch, so `set -e` aborts before
+// install), then atomically install it 0755 at RunscPath. The checksum is compared against
+// OUR embedded hash, not the release's own sidecar, so a compromised bucket can't self-certify.
+func runscInstallScript() string {
+	base := "https://storage.googleapis.com/gvisor/releases/release/" + runscRelease
+	return fmt.Sprintf(`set -e
+arch=$(uname -m)
+case "$arch" in
+x86_64) want=%q ;;
+aarch64) want=%q ;;
+*) echo "unsupported arch for runsc: $arch" >&2; exit 1 ;;
+esac
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+cd "$tmp"
+wget -q "%s/${arch}/runsc"
+printf '%%s  runsc\n' "$want" | sha512sum -c -
+install -m 0755 runsc %s`,
+		runscSHA512["x86_64"], runscSHA512["aarch64"], base, RunscPath)
 }
 
 // State returns the container's run status ("running", "exited", …) and whether it

@@ -139,6 +139,33 @@ func TestEnsureRunsc_InstallsWhenAbsent(t *testing.T) {
 	}
 }
 
+// TestRunscInstallScript_PinsAndVerifies is the supply-chain guard: the runsc install must
+// pull a PINNED release (never the mutable "latest") and verify the download against the
+// source-embedded SHA-512 (fail-closed) before installing it as a root-run container runtime.
+func TestRunscInstallScript_PinsAndVerifies(t *testing.T) {
+	s := runscInstallScript()
+	if strings.Contains(s, "release/latest") {
+		t.Error("runsc must be pinned to a dated release, not mutable 'latest'")
+	}
+	if !strings.Contains(s, "release/"+runscRelease) {
+		t.Errorf("script should pin release %s: %q", runscRelease, s)
+	}
+	if !strings.Contains(s, "sha512sum -c") {
+		t.Error("script must verify the download with sha512sum -c (fail-closed)")
+	}
+	for arch, want := range runscSHA512 {
+		if !strings.Contains(s, want) {
+			t.Errorf("script must embed the %s SHA-512 to verify against", arch)
+		}
+	}
+	// The verification must precede installation, or a bad binary is placed before the check.
+	if idxOf(s, "sha512sum -c") > idxOf(s, "install -m 0755") {
+		t.Error("checksum verification must come before install")
+	}
+}
+
+func idxOf(hay, needle string) int { return strings.Index(hay, needle) }
+
 // installFakeRunner distinguishes the `runsc --version` probe from the install command.
 type installFakeRunner struct {
 	onVersion  func() (string, error)

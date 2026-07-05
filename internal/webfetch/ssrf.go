@@ -27,15 +27,18 @@ func checkSSRF(rawURL string) error {
 	if ip == nil {
 		return nil // a hostname — the literal-IP floor doesn't apply (6b resolves)
 	}
-	if blockedIP(ip) {
+	if BlockedIP(ip) {
 		return fmt.Errorf("refusing to fetch blocked address %s", u.Hostname())
 	}
 	return nil
 }
 
-// blockedIP covers loopback (127/8, ::1), link-local (169.254/16 incl. the
+// BlockedIP covers loopback (127/8, ::1), link-local (169.254/16 incl. the
 // 169.254.169.254 metadata address, fe80::/10), and the unspecified address.
-func blockedIP(ip net.IP) bool {
+// It deliberately does NOT include RFC1918/private ranges — those are the
+// legitimate internal network for the sandbox venue (the mirror, internal docs).
+// Shared by the webfetch floor and the egress proxy's SSRF floor.
+func BlockedIP(ip net.IP) bool {
 	return ip.IsLoopback() ||
 		ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() ||

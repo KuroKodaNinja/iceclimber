@@ -61,6 +61,19 @@ func safeRel(rel string) bool {
 	return clean != ".." && !strings.HasPrefix(clean, "../")
 }
 
+// safeLink reports whether a symlink at (stripped) path rel with target linkname stays within
+// the install root. An ABSOLUTE target, or a relative one that resolves outside target via
+// "..", is a zip-slip vector: a later archive entry written THROUGH the escaping link lands
+// outside the sandbox install root (safeRel guards the entry's own path but not a symlink's
+// target). Legit runtime symlinks are relative and internal (e.g. bin/python3 -> python3.12),
+// so this rejects only escaping links.
+func safeLink(rel, linkname string) bool {
+	if linkname == "" || path.IsAbs(linkname) {
+		return false
+	}
+	return safeRel(path.Join(path.Dir(rel), linkname))
+}
+
 // restrip gunzips gz and writes a plain tar to w with the top-level component
 // stripped from every entry — the stream handed to a remote `tar -x`.
 func restrip(gz io.Reader, w io.Writer) error {
@@ -85,6 +98,9 @@ func restrip(gz io.Reader, w io.Writer) error {
 		}
 		if !safeRel(rel) {
 			return fmt.Errorf("unsafe path in archive: %q", hdr.Name)
+		}
+		if hdr.Typeflag == tar.TypeSymlink && !safeLink(rel, hdr.Linkname) {
+			return fmt.Errorf("unsafe symlink in archive: %q -> %q", hdr.Name, hdr.Linkname)
 		}
 		out := &tar.Header{
 			Typeflag: hdr.Typeflag,
@@ -142,6 +158,9 @@ func pushPerFile(ctx context.Context, fs FS, gz io.Reader, target string) error 
 		}
 		if !safeRel(rel) {
 			return fmt.Errorf("unsafe path in archive: %q", hdr.Name)
+		}
+		if hdr.Typeflag == tar.TypeSymlink && !safeLink(rel, hdr.Linkname) {
+			return fmt.Errorf("unsafe symlink in archive: %q -> %q", hdr.Name, hdr.Linkname)
 		}
 		dst := path.Join(target, rel)
 		switch hdr.Typeflag {

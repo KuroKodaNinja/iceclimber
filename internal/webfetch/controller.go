@@ -118,7 +118,7 @@ func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error
 // private ranges — Popo sits outside the corporate network, so a controller-venue
 // fetch resolving to a private IP is an internal-pivot SSRF.
 func controllerBlockedIP(ip net.IP) bool {
-	return blockedIP(ip) || ip.IsPrivate()
+	return BlockedIP(ip) || ip.IsPrivate()
 }
 
 func flattenHeaders(h http.Header) map[string]string {

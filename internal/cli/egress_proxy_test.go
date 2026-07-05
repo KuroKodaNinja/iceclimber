@@ -277,3 +277,29 @@ func TestProxyPolicy_LLMAPIPassthrough(t *testing.T) {
 		t.Fatalf("non-LLM host should stay gated: %+v", v2)
 	}
 }
+
+// TestProxyPolicy_SSRFFloor asserts the SSRF floor OVERRIDES an operator allow-list: a
+// loopback/link-local/metadata literal IP is refused even when config-allowed, because the
+// proxy dials from the controller (so the IP targets the controller, not the sandbox). A
+// private RFC1918 IP stays allowable — that's the sandbox's legitimate internal network.
+func TestProxyPolicy_SSRFFloor(t *testing.T) {
+	blocked := []string{"169.254.169.254", "127.0.0.1", "::1"}
+	for _, host := range blocked {
+		// Config-allow the host: without the floor decide() would allow it.
+		pol := newTestPolicy(t, []egress.AllowedDomain{{Pattern: host}}, "gate")
+		pp := newProxyPolicy(pol, &fakeApprover{choice: webfetch.ApproveRemember}, "s")
+		v := pp.decide(proxy.Request{Method: "CONNECT", Host: host, URL: "https://" + host + "/"})
+		if v.Allow {
+			t.Errorf("SSRF floor must deny %s even when config-allowed: %+v", host, v)
+		}
+		if !strings.Contains(v.Reason, "SSRF") {
+			t.Errorf("%s denial reason should name the SSRF floor: %q", host, v.Reason)
+		}
+	}
+	// A private IP is NOT floored (legitimate internal mirror) — config-allowed → allowed.
+	pol := newTestPolicy(t, []egress.AllowedDomain{{Pattern: "10.0.0.5"}}, "gate")
+	pp := newProxyPolicy(pol, nil, "s")
+	if v := pp.decide(proxy.Request{Method: "CONNECT", Host: "10.0.0.5", URL: "https://10.0.0.5/"}); !v.Allow {
+		t.Errorf("RFC1918 host must remain allowable (internal mirror), got %+v", v)
+	}
+}

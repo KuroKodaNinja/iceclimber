@@ -538,3 +538,28 @@ func TestProxy_Passthrough_TunnelsRawBytesNoMITM(t *testing.T) {
 		t.Fatalf("passthrough tunnel did not forward raw bytes end-to-end: %q", resp)
 	}
 }
+
+// TestDialGuard_BlocksResolvedIP is the SSRF-floor guard: a DialGuard that blocks loopback
+// must refuse a dial to a reachable 127.0.0.1 listener (the Control hook fires with the
+// resolved ip:port, so a rebinding hostname is caught the same way), while an unguarded proxy
+// dials it fine. Both the MITM upstream transport and the passthrough tunnel use p.dialer().
+func TestDialGuard_BlocksResolvedIP(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	guarded := New(nil, nil, nil, nil)
+	guarded.SetDialGuard(func(ip net.IP) bool { return ip.IsLoopback() })
+	if _, err := guarded.dialer().Dial("tcp", ln.Addr().String()); err == nil {
+		t.Fatal("dial to a loopback upstream must be blocked by the SSRF floor")
+	}
+
+	open := New(nil, nil, nil, nil)
+	c, err := open.dialer().Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("unguarded dial should succeed: %v", err)
+	}
+	_ = c.Close()
+}

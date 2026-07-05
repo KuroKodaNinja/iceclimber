@@ -1,10 +1,42 @@
 package maven
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
 )
+
+type rtFunc func(*http.Request) (*http.Response, error)
+
+func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestControllerLauncher_PinnedAndVerified is the supply-chain guard for the Coursier
+// launcher (executed as code): the source URL must be an immutable commit (not `master`), and
+// a download whose bytes don't match the pinned SHA-256 must fail closed — never get cached or
+// run.
+func TestControllerLauncher_PinnedAndVerified(t *testing.T) {
+	if strings.Contains(coursierLauncherURL, "/master/") || strings.Contains(coursierLauncherURL, "/raw/master") {
+		t.Error("coursier launcher must be pinned to an immutable commit, not master")
+	}
+	if coursierLauncherSHA256 == "" {
+		t.Fatal("coursier launcher must carry a pinned SHA-256")
+	}
+	m := New(Config{
+		CacheDir: t.TempDir(),
+		HTTPClient: &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader([]byte("TAMPERED-LAUNCHER")))}, nil
+		})},
+	})
+	_, err := m.controllerLauncher(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("a launcher whose bytes fail the pin must be rejected, got err=%v", err)
+	}
+}
 
 func TestRef(t *testing.T) {
 	cases := map[pkg.Spec]string{

@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/http/httputil"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -49,6 +51,13 @@ type AuditFunc func(Request, Verdict, int)
 // on an otherwise-allowed registry). Returns (denied, reason). nil = no path-level policy.
 type PathDenier func(Request) (bool, string)
 
+// DialGuard is the SSRF floor: it reports whether a RESOLVED upstream IP is one the proxy
+// must never connect to. The proxy dials from the controller, so an unguarded CONNECT lets
+// the sandbox reach the controller's own loopback services or its cloud-metadata endpoint —
+// this refuses those at dial time, catching a hostname that RESOLVES to a blocked address
+// (DNS rebinding), not just a literal-IP CONNECT. nil = no floor. Returns true to BLOCK.
+type DialGuard func(net.IP) bool
+
 // maxObserveBytes caps the body a ResponseObserver will buffer — package indexes are small;
 // anything larger streams unobserved so a mislabeled artifact can't sit in controller memory.
 const maxObserveBytes = 4 << 20 // 4 MiB
@@ -63,10 +72,38 @@ type Proxy struct {
 	observe       func(Request, []byte)
 	audit         AuditFunc
 	tr            *http.Transport
+	blocked       DialGuard
 }
 
 // SetPathDenier installs the per-request path-level veto (see PathDenier).
 func (p *Proxy) SetPathDenier(fn PathDenier) { p.pathDeny = fn }
+
+// SetDialGuard installs the SSRF floor consulted at dial time on BOTH the MITM upstream
+// path and the raw passthrough tunnel (see DialGuard). Must be set before Serve.
+func (p *Proxy) SetDialGuard(fn DialGuard) { p.blocked = fn }
+
+// dialer returns a net.Dialer whose Control hook enforces the SSRF floor: it runs after DNS
+// resolution with the concrete ip:port about to be dialed, for EVERY candidate address, so a
+// hostname resolving to a blocked IP is refused just like a literal-IP CONNECT. A nil guard
+// dials normally (stdlib behavior), so the proxy's dialing is unchanged when no floor is set.
+func (p *Proxy) dialer() *net.Dialer {
+	return &net.Dialer{
+		Timeout: 15 * time.Second,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			if p.blocked == nil {
+				return nil
+			}
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				host = address
+			}
+			if ip := net.ParseIP(host); ip != nil && p.blocked(ip) {
+				return fmt.Errorf("egress denied: blocked address %s (SSRF floor)", host)
+			}
+			return nil
+		},
+	}
+}
 
 // SetResponseObserver installs a hook that inspects the FULL body of selected responses
 // (learn-on-serve). For a 200 response to a request where shouldObserve is true and the body
@@ -92,7 +129,14 @@ func New(ca *CA, decide Decider, audit AuditFunc, upstream *http.Transport) *Pro
 			IdleConnTimeout:       90 * time.Second,
 		}
 	}
-	return &Proxy{ca: ca, decide: decide, audit: audit, tr: upstream}
+	p := &Proxy{ca: ca, decide: decide, audit: audit, tr: upstream}
+	// Enforce the SSRF floor on the MITM upstream path too (the passthrough tunnel dials via
+	// p.dialer() directly). If the caller supplied its own DialContext we leave it — the test
+	// transports don't, so this applies the floor by default without touching their setup.
+	if upstream.DialContext == nil {
+		upstream.DialContext = p.dialer().DialContext
+	}
+	return p
 }
 
 // Serve accepts connections (typically from the reverse-tunnel listener) until ln closes.
@@ -202,7 +246,7 @@ func (p *Proxy) handleConn(c net.Conn) {
 // sandbox's TLS is end-to-end to the upstream, so the proxy never decrypts. The first
 // direction to close ends the tunnel.
 func (p *Proxy) tunnel(br *bufio.Reader, client net.Conn, authority string) {
-	up, err := net.DialTimeout("tcp", authority, 15*time.Second)
+	up, err := p.dialer().DialContext(context.Background(), "tcp", authority)
 	if err != nil {
 		return
 	}
