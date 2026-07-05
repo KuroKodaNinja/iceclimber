@@ -79,24 +79,35 @@ make gh-release VERSION=v0.2.0     # builds, then `gh release create` uploads di
 
 ### 0. (Optional) spin up a local sandbox
 
-Don't have a box yet? On macOS with [Lima](https://lima-vm.io) installed, one command
-provisions a local one, registers it, air-gaps it, and bootstraps it:
+Don't have a box yet? `iceclimber sandbox create` provisions one, registers it, air-gaps it,
+and bootstraps it — with a choice of **isolation backend**:
 
 ```sh
-iceclimber sandbox create dev        # → a local Ubuntu VM, air-gapped + bootstrapped
-iceclimber sandbox shell dev         # jump in (auto-starts serve so egress works)
-iceclimber sandbox list              # every sandbox you have (local + remote)
-iceclimber sandbox rm dev            # tear the VM + registry entry down
+iceclimber sandbox create dev                        # Lima VM per sandbox (default)
+iceclimber sandbox create dev --provider container   # podman container on an internal no-NAT bridge
+iceclimber sandbox shell dev                         # jump in (auto-starts serve so egress works)
+iceclimber sandbox list                              # every sandbox (local + remote)
+iceclimber sandbox rm dev                            # tear it down
 ```
 
-`sandbox` is the **multi-sandbox management surface**, not a VM manager — `create` is a thin
-Lima wrapper; `list`/`status`/`shell`/`rm` work over **remote** sandboxes too (any config in the
-registry). A created box is a real iceclimber sandbox: **air-gapped by default** — direct egress
-is firewalled off *except* 443 to the agent's own LLM API (so a Claude agent in the box reaches
-its model directly; Popo bridges everything else — packages, web, runtimes). The agent runs as a
-non-sudo user so it can't lift the lockdown. Config + state live in the registry at
-`$XDG_CONFIG_HOME/iceclimber/<id>/` (default `~/.config/iceclimber/<id>/`); `--sandbox <id>`
-selects any of them. If you already have a box, skip to step 1.
+`sandbox` is the **multi-sandbox management surface**, not a VM manager; `list`/`status`/`shell`/`rm`
+work over **remote** sandboxes too (any config in the registry). Every created box is
+**air-gapped by default**, and the agent reaches its model through **Popo's proxy — a no-MITM
+CONNECT passthrough** (the LLM API's streaming/TLS is tunneled, never intercepted); Popo bridges
+everything else (packages, web, runtimes).
+
+Two backends, same registry + SSH/SFTP transport:
+- **`--provider lima`** (default): one Ubuntu VM per sandbox; egress is firewalled in-guest and the
+  workload runs as a non-sudo user (workload-external air-gap).
+- **`--provider container`** ([decision #111](./ice-climbers-plan.md)): a container on an **internal
+  no-NAT bridge**, on a Linux host that is native on Linux or **one shared Lima VM on macOS** (same
+  code both places). The air-gap is **host-enforced and guest-root-proof** — even container-root has
+  no route out — and the box has **zero direct internet** (everything, incl. the LLM API, rides Popo
+  over the SSH reverse tunnel). `--isolation gvisor` adds a userspace-kernel boundary. Create/rm are
+  ~1s once the shared host is warm.
+
+Config + state live at `$XDG_CONFIG_HOME/iceclimber/<id>/` (default `~/.config/iceclimber/<id>/`);
+`--sandbox <id>` selects any of them. If you already have a box, skip to step 1.
 
 ### 1. Point at the sandbox
 

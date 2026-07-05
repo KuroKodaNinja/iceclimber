@@ -109,10 +109,18 @@ type Config struct {
 
 // Provider is the provisioning metadata for a managed local sandbox (§18).
 type Provider struct {
-	Type     string `yaml:"type"`     // "lima" (the only backend today)
-	Instance string `yaml:"instance"` // the Lima instance name, e.g. "iceclimber-<id>"
+	Type     string `yaml:"type"`     // "lima" | "container"
+	Instance string `yaml:"instance"` // lima: the VM name; container: the container name (both "iceclimber-<id>")
 	Distro   string `yaml:"distro"`   // "ubuntu" | "alpine"
 	Arch     string `yaml:"arch"`     // "aarch64" | "x86_64"
+
+	// Container-backend fields (Type == "container", decision #111). The sandbox is a
+	// container on an internal no-NAT bridge; the Linux host is native (Linux) or a shared
+	// Lima VM (macOS). Empty on the lima backend.
+	Host         string `yaml:"host,omitempty"`          // "native" (Linux host) | "lima" (VM host, macOS)
+	HostInstance string `yaml:"host_instance,omitempty"` // the shared Lima VM name when Host == "lima"
+	Network      string `yaml:"network,omitempty"`       // the internal (no-NAT) bridge the container sits on
+	Isolation    string `yaml:"isolation,omitempty"`     // "runc" (default) | "gvisor" — the isolation-strength dial
 }
 
 // DefaultDispatchConcurrency is the worker-pool size applied when dispatch_concurrency is unset.

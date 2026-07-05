@@ -355,3 +355,42 @@ func TestValidateDurationAndConcurrency(t *testing.T) {
 		}
 	}
 }
+
+// TestLoad_ContainerProvider round-trips the container-backend Provider block (decision
+// #111): a sandbox that is a container on an internal bridge, hosted in a Lima VM, dialed
+// through a generated ssh_config (ProxyJump). All container fields must survive load.
+func TestLoad_ContainerProvider(t *testing.T) {
+	path := writeTemp(t, `
+sandbox_id: cbox
+ssh:
+  host: 10.89.0.7
+  user: root
+  use_ssh_config: true
+  ssh_config_file: /some/generated/ssh_config
+provider:
+  type: container
+  instance: iceclimber-cbox
+  distro: ubuntu
+  arch: aarch64
+  host: lima
+  host_instance: iceclimber-host
+  network: iceclimber-airgap
+  isolation: gvisor
+`)
+	cfg, err := Load(path, "")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p := cfg.Provider
+	if p == nil {
+		t.Fatal("provider block not parsed")
+	}
+	if p.Type != "container" || p.Host != "lima" || p.HostInstance != "iceclimber-host" ||
+		p.Network != "iceclimber-airgap" || p.Isolation != "gvisor" {
+		t.Fatalf("container provider fields lost: %+v", p)
+	}
+	// the container backend dials through an ssh_config (ProxyJump), not a direct host
+	if cfg.SSH.UseSSHConfig == nil || !*cfg.SSH.UseSSHConfig {
+		t.Fatal("container backend should keep use_ssh_config true for ProxyJump")
+	}
+}

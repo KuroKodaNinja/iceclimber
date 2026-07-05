@@ -177,6 +177,8 @@ func validSandboxName(id string) error {
 func newSandboxCreateCmd() *cobra.Command {
 	var (
 		distro      string
+		provider    string
+		isolation   string
 		cpus        int
 		memory      int
 		disk        int
@@ -195,8 +197,8 @@ func newSandboxCreateCmd() *cobra.Command {
 			if strings.ToLower(distro) != "ubuntu" {
 				return fmt.Errorf("--distro %q not supported yet (only 'ubuntu' is wired; alpine is deferred, §18.5)", distro)
 			}
-			if !lima.Available() {
-				return fmt.Errorf("limactl not found on PATH — install Lima to create a local sandbox (https://lima-vm.io)")
+			if provider != "lima" && provider != "container" {
+				return fmt.Errorf("--provider %q not supported (use 'lima' or 'container')", provider)
 			}
 			name := nextCreateName()
 			if len(args) == 1 {
@@ -209,6 +211,29 @@ func newSandboxCreateCmd() *cobra.Command {
 				return fmt.Errorf("sandbox %q already exists (%s) — pick another name or `sandbox rm %s` first", name, sandboxConfigPath(name), name)
 			}
 			out := cmd.OutOrStdout()
+
+			// Container backend (decision #111): a podman container on an internal no-NAT
+			// bridge — host-enforced, guest-root-proof air-gap; hosted natively on Linux or
+			// in a shared Lima VM on macOS. The SSH/SFTP transport + ssh -R egress carry over.
+			if provider == "container" {
+				ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
+				defer cancel()
+				fmt.Fprintf(out, "creating sandbox %q (container backend, isolation=%s)…\n", name, isolationOrDefault(isolation))
+				cfg, err := createContainerSandbox(ctx, out, name, isolation)
+				if err != nil {
+					return err
+				}
+				if err := bootstrapSandbox(ctx, cfg); err != nil {
+					return fmt.Errorf("bootstrap: %w", err)
+				}
+				fmt.Fprintln(out, "  bootstrapped (protocol tree + popo, proxy trust)")
+				return finishCreate(cmd, cfg, dropShell, makeDefault, agentName)
+			}
+
+			// Lima (vz) backend — the original per-VM sandbox.
+			if !lima.Available() {
+				return fmt.Errorf("limactl not found on PATH — install Lima to create a local sandbox (https://lima-vm.io)")
+			}
 			instance := "iceclimber-" + name
 
 			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
@@ -258,32 +283,12 @@ func newSandboxCreateCmd() *cobra.Command {
 			}
 			fmt.Fprintln(out, "  bootstrapped (protocol tree + popo, proxy trust)")
 
-			// 6. Default pointer: first sandbox wins; --default reassigns.
-			if makeDefault || len(listSandboxes()) == 1 {
-				if err := writeDefaultSandbox(name); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not set default pointer: %v\n", err)
-				} else {
-					fmt.Fprintf(out, "  set as default sandbox\n")
-				}
-			}
-
-			// --agent is not wired into create yet: install it explicitly afterward.
-			if agentName != "" {
-				fmt.Fprintf(out, "  note: --agent is not wired into create yet — run `iceclimber agent install %s --sandbox %s`\n", agentName, name)
-			}
-
-			if dropShell {
-				fmt.Fprintf(out, "  jumping in (auto-serve for the session)…\n")
-				return autoServeShell(cmd, cfg, false)
-			}
-			fmt.Fprintf(out, "\nsandbox %q ready. Next:\n", name)
-			fmt.Fprintf(out, "  iceclimber sandbox shell %s        # jump in (auto-serve)\n", name)
-			fmt.Fprintf(out, "  iceclimber agent install claude --sandbox %s\n", name)
-			fmt.Fprintf(out, "  iceclimber sandbox status %s\n", name)
-			return nil
+			return finishCreate(cmd, cfg, dropShell, makeDefault, agentName)
 		},
 	}
 	cmd.Flags().StringVar(&distro, "distro", "ubuntu", "guest distro (only 'ubuntu' is wired today)")
+	cmd.Flags().StringVar(&provider, "provider", "lima", "isolation backend: 'lima' (per-VM) or 'container' (podman on an internal no-NAT bridge — VM-external air-gap, decision #111)")
+	cmd.Flags().StringVar(&isolation, "isolation", "runc", "container isolation-strength dial: 'runc' (default) or 'gvisor' (stronger, userspace kernel) — container backend only")
 	cmd.Flags().IntVar(&cpus, "cpus", 2, "vCPUs for the VM")
 	cmd.Flags().IntVar(&memory, "memory", 4, "memory in GiB")
 	cmd.Flags().IntVar(&disk, "disk", 20, "disk in GiB")
@@ -337,6 +342,40 @@ func newManagedConfig(name, instance, distro, host string, port int, usr, identi
 			Arch:     hostArch(),
 		},
 	}
+}
+
+// finishCreate is the shared create tail for both backends: set the default pointer,
+// note --agent, then either drop into an auto-serve shell or print next steps.
+func finishCreate(cmd *cobra.Command, cfg *config.Config, dropShell, makeDefault bool, agentName string) error {
+	out := cmd.OutOrStdout()
+	name := cfg.SandboxID
+	if makeDefault || len(listSandboxes()) == 1 {
+		if err := writeDefaultSandbox(name); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not set default pointer: %v\n", err)
+		} else {
+			fmt.Fprintf(out, "  set as default sandbox\n")
+		}
+	}
+	if agentName != "" {
+		fmt.Fprintf(out, "  note: --agent is not wired into create yet — run `iceclimber agent install %s --sandbox %s`\n", agentName, name)
+	}
+	if dropShell {
+		fmt.Fprintf(out, "  jumping in (auto-serve for the session)…\n")
+		return autoServeShell(cmd, cfg, false)
+	}
+	fmt.Fprintf(out, "\nsandbox %q ready. Next:\n", name)
+	fmt.Fprintf(out, "  iceclimber sandbox shell %s        # jump in (auto-serve)\n", name)
+	fmt.Fprintf(out, "  iceclimber agent install claude --sandbox %s\n", name)
+	fmt.Fprintf(out, "  iceclimber sandbox status %s\n", name)
+	return nil
+}
+
+// isolationOrDefault renders the isolation tier for display ("" ⇒ "runc").
+func isolationOrDefault(s string) string {
+	if s == "" {
+		return "runc"
+	}
+	return s
 }
 
 // writeSandboxConfig marshals cfg to its registry config.yaml.
@@ -451,10 +490,19 @@ func sandboxListRowFor(e sandboxEntry, def string) sandboxListRow {
 		p := e.Cfg.Provider
 		r.Provider = p.Type + ":" + p.Distro
 		r.VMStatus = "unknown"
-		if info, exists, err := lima.Instance(p.Instance); err == nil && exists {
-			r.VMStatus = info.Status
-		} else if err == nil {
-			r.VMStatus = "absent"
+		switch p.Type {
+		case "container":
+			if st, exists := containerProviderStatus(context.Background(), p); exists {
+				r.VMStatus = st
+			} else {
+				r.VMStatus = "absent"
+			}
+		default: // lima
+			if info, exists, err := lima.Instance(p.Instance); err == nil && exists {
+				r.VMStatus = info.Status
+			} else if err == nil {
+				r.VMStatus = "absent"
+			}
 		}
 	} else {
 		r.Provider = "remote"
@@ -499,13 +547,22 @@ func newSandboxStatusCmd() *cobra.Command {
 			}
 			w := cmd.OutOrStdout()
 
-			// VM line.
+			// VM/container line.
 			if cfg.Provider != nil {
 				vm := "unknown"
-				if info, exists, ierr := lima.Instance(cfg.Provider.Instance); ierr == nil && exists {
-					vm = info.Status
-				} else if ierr == nil {
-					vm = "absent"
+				switch cfg.Provider.Type {
+				case "container":
+					if st, exists := containerProviderStatus(cmd.Context(), cfg.Provider); exists {
+						vm = st
+					} else {
+						vm = "absent"
+					}
+				default: // lima
+					if info, exists, ierr := lima.Instance(cfg.Provider.Instance); ierr == nil && exists {
+						vm = info.Status
+					} else if ierr == nil {
+						vm = "absent"
+					}
 				}
 				fmt.Fprintf(w, "vm:        %s (%s %s) — %s\n", cfg.Provider.Instance, cfg.Provider.Type, cfg.Provider.Distro, vm)
 			} else {
@@ -636,9 +693,12 @@ func newSandboxRmCmd() *cobra.Command {
 			managed := lerr == nil && cfg.Provider != nil
 			w := cmd.OutOrStdout()
 
+			isContainer := managed && cfg.Provider.Type == "container"
 			if !force {
 				what := "forget the registry entry (remote/unmanaged — the VM is untouched)"
-				if managed {
+				if isContainer {
+					what = fmt.Sprintf("remove the container %q (the shared host VM is left running) and the registry entry", cfg.Provider.Instance)
+				} else if managed {
 					what = fmt.Sprintf("DESTROY the Lima VM %q and remove the registry entry", cfg.Provider.Instance)
 				}
 				ok, cerr := confirm(cmd, fmt.Sprintf("Remove sandbox %q? This will %s. [y/N]: ", id, what))
@@ -651,14 +711,21 @@ func newSandboxRmCmd() *cobra.Command {
 				}
 			}
 
-			// Destroy the VM ONLY when iceclimber created it (has a provider block).
+			// Tear down the backend ONLY when iceclimber created it (has a provider block).
 			if managed {
 				ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Minute)
 				defer cancel()
-				if err := lima.Delete(ctx, cfg.Provider.Instance); err != nil {
+				if isContainer {
+					// Remove just the container — the shared host VM may back other sandboxes.
+					if err := containerDelete(ctx, cfg.Provider); err != nil {
+						return fmt.Errorf("remove container %q: %w", cfg.Provider.Instance, err)
+					}
+					fmt.Fprintf(w, "removed container %q (shared host VM left running)\n", cfg.Provider.Instance)
+				} else if err := lima.Delete(ctx, cfg.Provider.Instance); err != nil {
 					return fmt.Errorf("delete lima instance %q: %w", cfg.Provider.Instance, err)
+				} else {
+					fmt.Fprintf(w, "deleted lima instance %q\n", cfg.Provider.Instance)
 				}
-				fmt.Fprintf(w, "deleted lima instance %q\n", cfg.Provider.Instance)
 			}
 
 			// Drop the registry dir.
