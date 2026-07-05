@@ -3,11 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/agent"
+	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -85,28 +87,25 @@ func newAgentInstallCmd() *cobra.Command {
 				token = t
 			}
 
-			ctx, _, sess, done, err := openCommandSession(cmd, 15*time.Minute, "agent install")
-			if err != nil {
-				return err
-			}
-			defer done()
-
-			res, err := newAgentInstaller(sess).Install(ctx, d, token)
-			if err != nil {
-				return err
-			}
-			recordAgentCaps(ctx, sess, d, res)
-
-			w := cmd.OutOrStdout()
-			fmt.Fprintf(w, "installed %s (%s) %s\n", d.DisplayName, d.Name, res.Version)
-			fmt.Fprintf(w, "  agent:  %s\n", res.Bin)
-			if res.AuthConfigured {
-				fmt.Fprintf(w, "  auth:   configured (%s) → %s\n", d.TokenEnv, res.EnvFile)
-			} else {
-				fmt.Fprintf(w, "  auth:   skipped — set %s before running the agent\n", d.TokenEnv)
-			}
-			fmt.Fprintf(w, "  launch: %s   (run in the sandbox — starts the agent, authenticated + wired to NANA.md)\n", res.Launcher)
-			return nil
+			// Fleet-aware (§14.2/14.5): the descriptor + token resolve ONCE above; the relay +
+			// auth fan out per member. The same subscription token is written (0600) to each box.
+			return runFleetMutation(cmd, 15*time.Minute, "agent install", "agent install "+d.Name,
+				func(ctx context.Context, cfg *config.Config, sess *session, out io.Writer) error {
+					res, err := newAgentInstaller(sess).Install(ctx, d, token)
+					if err != nil {
+						return err
+					}
+					recordAgentCaps(ctx, sess, d, res)
+					fmt.Fprintf(out, "installed %s (%s) %s\n", d.DisplayName, d.Name, res.Version)
+					fmt.Fprintf(out, "  agent:  %s\n", res.Bin)
+					if res.AuthConfigured {
+						fmt.Fprintf(out, "  auth:   configured (%s) → %s\n", d.TokenEnv, res.EnvFile)
+					} else {
+						fmt.Fprintf(out, "  auth:   skipped — set %s before running the agent\n", d.TokenEnv)
+					}
+					fmt.Fprintf(out, "  launch: %s   (run in the sandbox — starts the agent, authenticated + wired to NANA.md)\n", res.Launcher)
+					return nil
+				})
 		},
 	}
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "read the auth token from this file (a shell 'export VAR=...' line or a bare token)")
