@@ -117,6 +117,17 @@ func waitAll(t *testing.T, tm *teatest.TestModel, subs ...string) {
 	}, teatest.WithDuration(30*time.Second), teatest.WithCheckInterval(15*time.Millisecond))
 }
 
+// waitConfirmFocus blocks until the bootstrap form's confirm field actually HAS focus,
+// keyed on its per-field help bindings ("y Yes") — huh renders help for the focused
+// field only. Both bootstrap fields live in ONE group, so the confirm's title is on
+// screen from the first frame and waiting on it synchronizes nothing; huh's field
+// advance is async (#49), so a "y" typed right after enter can land in the still-
+// focused select and vanish (a -race-only flake: the slowdown widens that window).
+func waitConfirmFocus(t *testing.T, tm *teatest.TestModel) {
+	t.Helper()
+	waitText(t, tm, "y Yes")
+}
+
 func send(tm *teatest.TestModel, t tea.KeyType) { tm.Send(tea.KeyMsg{Type: t}) }
 func press(tm *teatest.TestModel, s string) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)})
@@ -653,7 +664,7 @@ func TestFlow_BootstrapConfirm(t *testing.T) {
 	press(tm, "b")
 	waitText(t, tm, "Provisioning mode")
 	send(tm, tea.KeyEnter) // keep the default "re-provision" (safe) → advance to the confirm
-	waitText(t, tm, "Re-provision this sandbox?")
+	waitConfirmFocus(t, tm)
 	press(tm, "y") // accept
 	select {
 	case <-ops.bootstrap:
@@ -687,7 +698,7 @@ func TestFlow_NotBootstrappedThenBootstrap(t *testing.T) {
 	press(tm, "b")
 	waitText(t, tm, "Provisioning mode")
 	send(tm, tea.KeyEnter) // keep the safe re-provision → confirm
-	waitText(t, tm, "Re-provision this sandbox?")
+	waitConfirmFocus(t, tm)
 	press(tm, "y")
 	select {
 	case <-ops.bootstrap:
@@ -734,7 +745,7 @@ func TestFlow_BootstrapReset(t *testing.T) {
 	waitText(t, tm, "Provisioning mode")
 	send(tm, tea.KeyDown)  // re-provision → DESTRUCTIVE reset
 	send(tm, tea.KeyEnter) // accept reset → confirm
-	waitText(t, tm, "Re-provision this sandbox?")
+	waitConfirmFocus(t, tm)
 	press(tm, "y") // proceed
 	select {
 	case <-ops.reset:
