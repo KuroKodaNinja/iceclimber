@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/protocol"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
@@ -21,10 +20,19 @@ func newStatusCmd() *cobra.Command {
 		Short: "Show sandbox liveness, queue depth, runtimes, and the agent's capabilities",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(cfgFile, sandboxID)
+			// Fleet-aware (§14.2/14.6): no --sandbox ⇒ every sandbox as a table; a single
+			// target ⇒ the detailed view. --json keeps the single-box shape (fleet json TBD).
+			_, targets, err := fleetTargetsRead()
 			if err != nil {
 				return err
 			}
+			if len(targets) != 1 {
+				if jsonOutput {
+					return fmt.Errorf("--json is single-box — name one with --sandbox (%d targets)", len(targets))
+				}
+				return statusFleetTable(cmd, targets)
+			}
+			cfg := targets[0]
 			ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
 			defer cancel()
 			sess, err := openSession(ctx, cfg, transport)

@@ -346,19 +346,36 @@ func Load(path, selectSandbox string) (*Config, error) {
 	return nil, err
 }
 
-// loadOne reads, parses, and validates a single config file.
+// loadOne reads, parses, and validates a single config file. A fleet file (a `sandboxes:`
+// map, §14.1) is handled too: the requested single member is extracted (selectSandbox names
+// it, or the sole member when the fleet has exactly one).
 func loadOne(path, selectSandbox string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
+	if isFleetData(data) {
+		f, err := parseFleetData(path, data)
+		if err != nil {
+			return nil, err
+		}
+		return f.single(selectSandbox)
+	}
 	var c Config
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
-	// Port is intentionally NOT defaulted to 22 here: 0 means "unset" so an
-	// ssh_config Port can win during resolution; the dial layer applies the 22
-	// default last (after `ssh -G`). Display sites use portOr22 for a friendly value.
+	finalize(&c)
+	if err := c.validate(selectSandbox); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// finalize applies home-expansion and defaults shared by single- and fleet-member loading.
+// Port is intentionally NOT defaulted to 22 here: 0 means "unset" so an ssh_config Port can
+// win during resolution; the dial layer applies the 22 default last (after `ssh -G`).
+func finalize(c *Config) {
 	c.SSH.IdentityFile = expandHome(c.SSH.IdentityFile)
 	c.SSH.KnownHosts = expandHome(c.SSH.KnownHosts)
 	c.SSH.SSHConfigFile = expandHome(c.SSH.SSHConfigFile)
@@ -368,10 +385,6 @@ func loadOne(path, selectSandbox string) (*Config, error) {
 	if c.CacheDir == "" {
 		c.CacheDir = xdg.Cache()
 	}
-	if err := c.validate(selectSandbox); err != nil {
-		return nil, err
-	}
-	return &c, nil
 }
 
 // sandboxSearchPaths are the per-sandbox config conventions --sandbox selects from when
