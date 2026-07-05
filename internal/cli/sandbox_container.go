@@ -15,6 +15,7 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/container"
 	"github.com/KuroKodaNinja/iceclimber/internal/lima"
 	"github.com/KuroKodaNinja/iceclimber/internal/xdg"
+	"github.com/spf13/cobra"
 )
 
 // The container backend (decision #111): a sandbox is a podman container on an INTERNAL
@@ -106,10 +107,14 @@ func createContainerSandbox(ctx context.Context, out io.Writer, name, isolation 
 	}
 	cl := container.New(r)
 
-	// isolation-strength dial: default runc/crun, or gVisor's runsc.
+	// isolation-strength dial: default runc/crun, or gVisor's runsc (installed on demand).
 	runtimePath := ""
 	if isolation == "gvisor" {
-		runtimePath = "/usr/local/bin/runsc"
+		fmt.Fprintln(out, "  ensuring the gVisor runtime (runsc) in the host…")
+		if err := cl.EnsureRunsc(ctx); err != nil {
+			return nil, err
+		}
+		runtimePath = container.RunscPath
 	}
 
 	fmt.Fprintln(out, "  ensuring the internal (no-NAT) air-gap network…")
@@ -290,3 +295,153 @@ func containerDelete(ctx context.Context, p *config.Provider) error {
 
 // isContainerProvider reports whether cfg is a container-backed sandbox.
 func isContainerProvider(p *config.Provider) bool { return p != nil && p.Type == "container" }
+
+// newSandboxHostCmd manages the shared Linux host VM that backs container sandboxes on macOS
+// (on native Linux there is no VM — containers run on the host directly).
+func newSandboxHostCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "host",
+		Short: "Manage the shared Linux host VM that backs `--provider container` sandboxes (macOS)",
+	}
+	cmd.AddCommand(newSandboxHostStatusCmd(), newSandboxHostRmCmd())
+	return cmd
+}
+
+func newSandboxHostStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Show the shared container host VM and what it backs",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			out := cmd.OutOrStdout()
+			if hostKindForOS() == "native" {
+				fmt.Fprintln(out, "container backend runs natively on this Linux host — no managed host VM")
+				return nil
+			}
+			users := containerSandboxesUsingHost()
+			info, exists, _ := lima.Instance(containerHostInstance)
+			state := "absent"
+			if exists {
+				state = info.Status
+			}
+			fmt.Fprintf(out, "host VM:   %s — %s\n", containerHostInstance, state)
+			fmt.Fprintf(out, "backing:   %d container sandbox(es)%s\n", len(users), parenNames(users))
+			if exists && info.Status == "Running" {
+				runner := container.LimaRunner{Instance: containerHostInstance}
+				pod := "podman: unreachable"
+				if container.New(runner).Available(cmd.Context()) {
+					pod = "podman: ready"
+				}
+				runsc := "runsc: not installed"
+				if _, err := runner.Run(cmd.Context(), container.RunscPath, "--version"); err == nil {
+					runsc = "runsc: installed (gVisor tier ready)"
+				}
+				fmt.Fprintf(out, "runtime:   %s · %s\n", pod, runsc)
+			}
+			return nil
+		},
+	}
+}
+
+func newSandboxHostRmCmd() *cobra.Command {
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "rm",
+		Short: "Destroy the shared container host VM (and every container on it)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			out := cmd.OutOrStdout()
+			if hostKindForOS() == "native" {
+				fmt.Fprintln(out, "nothing to remove — the container backend runs natively (no host VM)")
+				return nil
+			}
+			users := containerSandboxesUsingHost()
+			if len(users) > 0 && !force {
+				return fmt.Errorf("%d container sandbox(es) still use the host VM%s — remove them first (`sandbox rm <id>`), or pass --force to destroy them all",
+					len(users), parenNames(users))
+			}
+			if _, exists, _ := lima.Instance(containerHostInstance); !exists {
+				fmt.Fprintln(out, "host VM already absent")
+				return nil
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Minute)
+			defer cancel()
+			if err := lima.Delete(ctx, containerHostInstance); err != nil {
+				return fmt.Errorf("delete host VM %q: %w", containerHostInstance, err)
+			}
+			fmt.Fprintf(out, "destroyed host VM %q\n", containerHostInstance)
+			if len(users) > 0 {
+				fmt.Fprintf(out, "note: %d registry entry(ies) still reference the destroyed host%s — `sandbox rm` them to clean up\n",
+					len(users), parenNames(users))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&force, "force", false, "destroy the host VM even if container sandboxes still use it")
+	return cmd
+}
+
+// containerSandboxesUsingHost returns the ids of container sandboxes bound to the shared host VM.
+func containerSandboxesUsingHost() []string {
+	var ids []string
+	for _, e := range listSandboxes() {
+		if e.Cfg != nil && isContainerProvider(e.Cfg.Provider) && e.Cfg.Provider.HostInstance == containerHostInstance {
+			ids = append(ids, e.ID)
+		}
+	}
+	return ids
+}
+
+// parenNames renders a name list as " (a, b)" or "" when empty.
+func parenNames(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(ids, ", ") + ")"
+}
+
+// refreshContainerSSH makes a container sandbox reachable after a possible restart: a host
+// reboot leaves the container STOPPED, and on restart podman may hand it a NEW bridge IP,
+// making the stored ssh_config stale. So before every dial we start the container if stopped,
+// re-resolve its IP, and rewrite the ssh_config + known_hosts if the IP moved. A no-op for
+// non-container providers (and cheap when nothing changed). Called from openSessionWith.
+func refreshContainerSSH(ctx context.Context, cfg *config.Config) error {
+	p := cfg.Provider
+	if !isContainerProvider(p) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	cl := container.New(runnerForProvider(p))
+	st, exists := cl.State(ctx, p.Instance)
+	if !exists {
+		return fmt.Errorf("sandbox container %q not found on its host — was it removed?", p.Instance)
+	}
+	if st != "running" {
+		if err := cl.Start(ctx, p.Instance); err != nil {
+			return fmt.Errorf("start sandbox container %q: %w", p.Instance, err)
+		}
+	}
+	ip, err := cl.IP(ctx, p.Instance)
+	if err != nil {
+		return err
+	}
+	if containerSSHConfigHasIP(cfg.SSH.SSHConfigFile, ip) {
+		return nil // ssh_config already targets the current IP — nothing to do
+	}
+	sbDir := xdg.SandboxDir(cfg.SandboxID)
+	known, err := writeContainerKnownHosts(ctx, cl, sbDir, ip)
+	if err != nil {
+		return err
+	}
+	_, err = writeContainerSSHConfig(sbDir, cfg.SandboxID, ip, cfg.SSH.IdentityFile, known, p.Host, p.HostInstance)
+	return err
+}
+
+// containerSSHConfigHasIP reports whether the generated ssh_config already targets ip on the
+// container's HostName line (the jump line is a different address), so a restart-rewrite is
+// only done when the IP actually changed.
+func containerSSHConfigHasIP(sshCfgPath, ip string) bool {
+	data, err := os.ReadFile(sshCfgPath)
+	return err == nil && strings.Contains(string(data), "HostName "+ip+"\n")
+}

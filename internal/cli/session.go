@@ -219,6 +219,11 @@ func openLockedSession(ctx context.Context, cfg *config.Config, transport, mode 
 // password typed once is reused on reconnect (see superviseServe). A nil prompter
 // uses the default /dev/tty prompter.
 func openSessionWith(ctx context.Context, cfg *config.Config, transport string, prompter remote.PasswordPrompter) (*session, error) {
+	// A container sandbox may have been restarted (host reboot ⇒ stopped + new bridge IP);
+	// start it if needed and refresh the ssh_config before dialing. No-op for other providers.
+	if err := refreshContainerSSH(ctx, cfg); err != nil {
+		return nil, err
+	}
 	dc := dialConfig(cfg)
 	if prompter != nil {
 		dc.Prompter = prompter

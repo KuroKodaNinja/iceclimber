@@ -32,6 +32,10 @@ var provisionScript string
 // DefaultImage is the committed sandbox base image tag.
 const DefaultImage = "iceclimber-sandbox:base"
 
+// RunscPath is where the gVisor runtime (runsc) is installed on the host — the OCI runtime
+// used for the `--isolation gvisor` tier (RunSpec.Runtime).
+const RunscPath = "/usr/local/bin/runsc"
+
 // Runner executes a command on the Linux host that owns the containers. Combined
 // stdout is returned; on failure the error carries stderr. This is the platform seam:
 // LocalRunner on native Linux, LimaRunner (limactl shell) on macOS.
@@ -167,12 +171,14 @@ func (c *Client) Run(ctx context.Context, spec RunSpec) (id string, err error) {
 	if spec.Image == "" {
 		spec.Image = DefaultImage
 	}
-	args := []string{"run", "-d", "--name", spec.Name, "--network", spec.Network}
+	var args []string
 	if spec.Runtime != "" {
+		// --runtime is a GLOBAL podman flag — it must precede the `run` subcommand, not follow it.
 		args = append(args, "--runtime", spec.Runtime)
 	}
 	// sshd -D -e: foreground, log to stderr (captured by `podman logs`).
-	args = append(args, spec.Image, "/usr/sbin/sshd", "-D", "-e")
+	args = append(args, "run", "-d", "--name", spec.Name, "--network", spec.Network,
+		spec.Image, "/usr/sbin/sshd", "-D", "-e")
 	return c.podman(ctx, args...)
 }
 
@@ -234,6 +240,25 @@ func (c *Client) Keyscan(ctx context.Context, host string, port int) (string, er
 	}
 }
 
+// EnsureRunsc installs the gVisor runtime (runsc) on the host if absent, so the
+// `--isolation gvisor` tier can run. It downloads the arch-matched release binary (systrap
+// platform — no /dev/kvm, so it works nested inside a Lima VM). Idempotent.
+func (c *Client) EnsureRunsc(ctx context.Context) error {
+	if out, err := c.r.Run(ctx, RunscPath, "--version"); err == nil && strings.Contains(out, "runsc") {
+		return nil
+	}
+	script := "set -e; arch=$(uname -m); " +
+		`url="https://storage.googleapis.com/gvisor/releases/release/latest/${arch}"; ` +
+		"wget -qO " + RunscPath + ` "${url}/runsc"; chmod 0755 ` + RunscPath
+	if _, err := c.r.Run(ctx, "sudo", "sh", "-c", script); err != nil {
+		return fmt.Errorf("install runsc (gVisor): %w", err)
+	}
+	if out, err := c.r.Run(ctx, RunscPath, "--version"); err != nil || !strings.Contains(out, "runsc") {
+		return fmt.Errorf("runsc still unavailable after install")
+	}
+	return nil
+}
+
 // State returns the container's run status ("running", "exited", …) and whether it
 // exists at all — the container-backend analogue of lima.Instance for list/status.
 func (c *Client) State(ctx context.Context, name string) (status string, exists bool) {
@@ -243,6 +268,12 @@ func (c *Client) State(ctx context.Context, name string) (status string, exists 
 	}
 	s := strings.TrimSpace(out)
 	return s, s != ""
+}
+
+// Start starts a stopped sandbox container (a host reboot leaves containers stopped).
+func (c *Client) Start(ctx context.Context, name string) error {
+	_, err := c.podman(ctx, "start", name)
+	return err
 }
 
 // Stop stops a running sandbox container.

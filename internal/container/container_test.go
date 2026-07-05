@@ -103,10 +103,67 @@ func TestRun_AssemblesSshdOnInternalNet(t *testing.T) {
 			t.Fatalf("run args missing %q: %v", want, run)
 		}
 	}
+	// --runtime is a GLOBAL podman flag: it must come BEFORE the `run` subcommand.
+	if idx(run, "--runtime") > idx(run, "run") {
+		t.Fatalf("--runtime must precede `run` (global flag): %v", run)
+	}
 	// air-gap: must NOT publish a port to the host (egress/exposure minimal; reach via bridge IP).
 	if strings.Contains(strings.Join(run, " "), "-p ") {
 		t.Fatalf("sandbox container must not publish host ports: %v", run)
 	}
+}
+
+func TestEnsureRunsc_InstallsWhenAbsent(t *testing.T) {
+	// runsc --version fails until installed; the install command must download to RunscPath.
+	calls := 0
+	r := &installFakeRunner{onVersion: func() (string, error) {
+		calls++
+		if calls == 1 {
+			return "", fmt.Errorf("not found")
+		}
+		return "runsc version release-x", nil
+	}}
+	if err := New(r).EnsureRunsc(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !r.sawInstall {
+		t.Fatal("expected a runsc download/install command")
+	}
+	// present → no install
+	r2 := &installFakeRunner{onVersion: func() (string, error) { return "runsc version release-y", nil }}
+	if err := New(r2).EnsureRunsc(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if r2.sawInstall {
+		t.Fatal("must not reinstall runsc when already present")
+	}
+}
+
+// installFakeRunner distinguishes the `runsc --version` probe from the install command.
+type installFakeRunner struct {
+	onVersion  func() (string, error)
+	sawInstall bool
+}
+
+func (f *installFakeRunner) Run(_ context.Context, argv ...string) (string, error) {
+	joined := strings.Join(argv, " ")
+	if strings.Contains(joined, "runsc --version") || (strings.HasSuffix(argv[0], "runsc") && contains(argv, "--version")) {
+		return f.onVersion()
+	}
+	if strings.Contains(joined, "gvisor/releases") {
+		f.sawInstall = true
+		return "", nil
+	}
+	return "", nil
+}
+
+func idx(ss []string, want string) int {
+	for i, s := range ss {
+		if s == want {
+			return i
+		}
+	}
+	return len(ss)
 }
 
 func TestRun_NoRuntimeFlagWhenDefault(t *testing.T) {

@@ -88,6 +88,7 @@ iceclimber sandbox create dev --provider container   # podman container on an in
 iceclimber sandbox shell dev                         # jump in (auto-starts serve so egress works)
 iceclimber sandbox list                              # every sandbox (local + remote)
 iceclimber sandbox rm dev                            # tear it down
+iceclimber sandbox host status                       # the shared container host VM + what it backs
 ```
 
 `sandbox` is the **multi-sandbox management surface**, not a VM manager; `list`/`status`/`shell`/`rm`
@@ -103,8 +104,10 @@ Two backends, same registry + SSH/SFTP transport:
   no-NAT bridge**, on a Linux host that is native on Linux or **one shared Lima VM on macOS** (same
   code both places). The air-gap is **host-enforced and guest-root-proof** — even container-root has
   no route out — and the box has **zero direct internet** (everything, incl. the LLM API, rides Popo
-  over the SSH reverse tunnel). `--isolation gvisor` adds a userspace-kernel boundary. Create/rm are
-  ~1s once the shared host is warm.
+  over the SSH reverse tunnel). `--isolation gvisor` adds a userspace-kernel boundary (runsc is
+  installed on demand). Create/rm are ~1s once the shared host is warm; a restarted container
+  auto-recovers (re-resolves its IP) on the next command, and the shared host VM is managed via
+  `sandbox host status|rm`.
 
 Config + state live at `$XDG_CONFIG_HOME/iceclimber/<id>/` (default `~/.config/iceclimber/<id>/`);
 `--sandbox <id>` selects any of them. If you already have a box, skip to step 1.

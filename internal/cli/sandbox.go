@@ -44,6 +44,7 @@ func newSandboxCmd() *cobra.Command {
 		newSandboxStatusCmd(),
 		newSandboxShellCmd(),
 		newSandboxRmCmd(),
+		newSandboxHostCmd(),
 	)
 	return cmd
 }
