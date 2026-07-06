@@ -6,10 +6,12 @@
 #
 # Allowed egress: loopback, established/related (so the inbound SSH session's replies flow),
 # DNS, DHCP renewal, and 443 to the agent's LLM API (Anthropic's published, stable ingress
-# ranges). The API allowance is load-bearing: a Claude agent running IN the box reaches its
-# model DIRECTLY (its streaming/TLS control channel must not be MITM'd) — that's the ONE thing
-# Popo does NOT bridge. Everything else the agent needs (packages, web, runtimes) has no direct
-# route and rides Popo's reverse-tunnel proxy over the (inbound) SSH link (loopback → tunnel).
+# ranges). Everything the agent needs (packages, web, runtimes) — AND, by default, its own LLM
+# API — has no other direct route and rides Popo's reverse-tunnel proxy over the (inbound) SSH
+# link (loopback → tunnel): the LLM API rides it as a no-MITM CONNECT-passthrough so its
+# streaming/TLS control channel is never intercepted (decision #111, which retired the mandatory
+# NO_PROXY carve-out — the client no longer bypasses the proxy). The direct 443 allowance here
+# is the FALLBACK for a no-proxy (strict relay air-gap) run, where nothing is serving the tunnel.
 # Everything else is dropped, for both IPv4 and IPv6.
 #
 # INPUT is left ACCEPT so the host-initiated SSH session keeps working.

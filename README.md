@@ -402,9 +402,10 @@ operation the agent requests, with context, and you approve inline:
 ### Other Popo commands
 
 Global flags on every command: `--config` (default `iceclimber.yaml`), `--sandbox`
-(a guard **and a selector** — with the default `--config` it also finds
-`iceclimber-<id>.yaml` in the cwd or `~/.config/iceclimber/<id>/config.yaml`, so one directory
-can drive several sandboxes; `all`/globs are reserved for the fleet phase),
+(a guard **and a fleet selector** — with the default `--config` it finds each box's
+`~/.config/iceclimber/<id>/config.yaml`, so one controller drives the whole fleet; `--sandbox all`,
+a glob like `web-*`, or a comma-list fans a command out across the matching boxes — read
+commands default to `all`, mutations require an explicit selector — see [Fleet](#fleet)),
 `--transport auto|sftp|exec`, and `--json` (where supported). Tab completion for your
 shell: `iceclimber completion bash|zsh|fish --help` has install instructions.
 
@@ -429,6 +430,29 @@ shell: `iceclimber completion bash|zsh|fish --help` has install instructions.
 | `agent wrap [claude] [--bin <path>]` | Wrap an agent binary **already on the sandbox** (pre-baked image / out-of-band install) with the same `nana`/auth/NANA.md launcher — **no relay**. Binary found on PATH by default, or pass `--bin` |
 | `web fetch <url>` | Run a fetch yourself (same gating) |
 | `skill print` / `skill path` | The `NANA.md` contract (`--protocol` for the raw `PROTOCOL.md`) |
+
+---
+
+### Fleet
+
+**One controller, many boxes.** Each `iceclimber sandbox create` registers a box under
+`~/.config/iceclimber/<id>/`, and that
+registry **is** the fleet — no separate fleet file to maintain (an operator-authored
+`defaults:` + `sandboxes:` config is an alternative). `--sandbox` selects targets across it:
+
+```sh
+iceclimber status                              # read: defaults to ALL boxes → a fleet table
+iceclimber install python --sandbox all        # fan out to every box (resolve-version-once)
+iceclimber install pip rich --sandbox web-*    # a glob
+iceclimber bootstrap --sandbox alpha,beta      # a comma-list
+```
+
+Reads (`status`) default to **all**; mutations (`install*`, `bootstrap`, `agent install`) require
+an explicit `--sandbox` so a forgotten flag never fans out by accident — unless there's only one
+box. Fan-out is bounded-concurrent and **keep-going**: each box's output is `[box]`-prefixed and a
+summary reports which succeeded/failed (exit non-zero if any did). A heterogeneous fleet (musl +
+glibc, different arches) resolves one version and installs the right per-platform asset on each.
+Full targeting rules are plan §14.
 
 ---
 
@@ -525,14 +549,18 @@ context. To learn the protocol by hand, see [`test/PLAYGROUND.md`](test/PLAYGROU
 
 [MIT](LICENSE).
 
-**Status:** v1 plus a run of increments are complete and verified end to end against
-a real Alpine/musl sandbox — including a real Claude agent under a true network
-air-gap. What's shipped: the maildir protocol + gated `web.fetch`; **three languages**
-— **Python** (pip), **JavaScript/Node** (npm), and **Java** (Maven/Coursier) — each
-with runtime install + packages over **Tier 0 (mirror)** and **Tier 1 (relay)**; and
-the **TUI-first operator console** (bare `iceclimber`: serve embedded, inline
-approvals, install/bootstrap forms, a live status panel, and egress-rule management).
-The [acceptance demo](DEMO.md) re-proves the premise across all three languages. Next
-up is **multi-sandbox** (a fleet list/switcher); other extensions (sub-agent
-`web.research`, a Tier 2 build environment) are parked as demand-driven work (plan §0;
-decisions #46–#54).
+**Status:** v1 plus a long run of increments are complete and verified end to end
+against real Alpine/musl **and** glibc sandboxes — including a real Claude agent under a
+true network air-gap. What's shipped: the maildir protocol + gated `web.fetch`; **four
+languages** — **Python** (pip), **JavaScript/Node** (npm), **Java** (Maven/Coursier),
+and **Rust** (cargo) — each with runtime install + packages over **Tier 0 (mirror)** and
+**Tier 1 (relay)**; the **TUI-first operator console** (bare `iceclimber`: serve
+embedded, inline approvals, install/bootstrap forms, a live status panel, and
+egress-rule management); a self-provisioning **`iceclimber sandbox`** with a Lima-VM
+backend and a **guest-root-proof container backend** (`--provider container`, podman on
+an internal no-NAT bridge, optional gVisor); and the **fleet foundation** — one
+controller drives many boxes, with `--sandbox all`/glob/comma-list fanning installs,
+bootstrap, agent install, and status out across them. The [acceptance demo](DEMO.md)
+re-proves the premise across the languages. Next up is the **fleet console** (a
+multi-box TUI overview); other extensions (sub-agent `web.research`, a Tier 2 build
+environment) are parked as demand-driven work (plan §0; decisions #46–#54).
