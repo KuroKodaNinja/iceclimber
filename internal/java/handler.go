@@ -1,14 +1,14 @@
 package java
 
 import (
+	"github.com/KuroKodaNinja/iceclimber/internal/pins"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
 // RecommendedLine is the JDK feature version iceclimber installs when the caller doesn't ask
-// for a specific one — the current recommended LTS. Single source of truth for the console's
-// blank default, the `popo java.install` (no version / "latest") path, and NANA.md.
-const RecommendedLine = "21"
+// for a specific one — the current recommended LTS. Pinned centrally in internal/pins.
+var RecommendedLine = pins.Rt("java").RecommendedLine
 
 // ResolveLine maps a caller's version request to a concrete feature version: an empty value or
 // "latest" (case-insensitive) becomes RecommendedLine; anything else is used verbatim. External

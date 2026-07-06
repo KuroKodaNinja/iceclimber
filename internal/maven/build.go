@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/java"
+	"github.com/KuroKodaNinja/iceclimber/internal/pins"
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
 	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
@@ -21,8 +22,8 @@ import (
 )
 
 // DefaultMavenToolVersion is the Apache Maven distribution relayed into the sandbox to
-// run the build. Pinned; the archive host keeps every release.
-const DefaultMavenToolVersion = "3.9.9"
+// run the build. Pinned centrally in internal/pins; the archive host keeps every release.
+var DefaultMavenToolVersion = pins.P.Tools.MavenToolVersion
 
 func mavenToolURL(v string) string {
 	return fmt.Sprintf("https://archive.apache.org/dist/maven/maven-3/%s/binaries/apache-maven-%s-bin.tar.gz", v, v)

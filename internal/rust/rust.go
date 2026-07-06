@@ -1,15 +1,15 @@
 package rust
 
 import (
+	"github.com/KuroKodaNinja/iceclimber/internal/pins"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
 // RecommendedLine is the Rust line iceclimber installs when the caller doesn't ask for a
 // specific one — the current stable toolchain (resolved to a concrete version at install).
-// Single source of truth for the console's blank default, the `popo rust.install` (no version
-// / "latest") path, and NANA.md.
-const RecommendedLine = "stable"
+// Pinned centrally in internal/pins.
+var RecommendedLine = pins.Rt("rust").RecommendedLine
 
 // ResolveLine maps a caller's version request to a concrete line: an empty value or "latest"
 // (case-insensitive) becomes RecommendedLine ("stable"); anything else is used verbatim (an

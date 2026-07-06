@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -140,33 +141,32 @@ func newInstallMavenCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx, _, sess, done, err := openCommandSession(cmd, 15*time.Minute, "install")
-			if err != nil {
-				return err
-			}
-			defer done()
-
-			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			deps := mavenDeps(sess, pr)
-			if mirror != "" {
-				deps.MirrorURL = mirror
-			}
-			res, err := maven.Run(ctx, deps, javaVersion, specs, tier)
-			finish()
-			if err != nil {
-				return err
-			}
-			w := cmd.OutOrStdout()
-			for _, p := range res.Installed {
-				fmt.Fprintf(w, "resolved %s:%s (%s)\n", p.Name, p.Version, p.Tier)
-			}
-			for _, f := range res.Failed {
-				fmt.Fprintf(w, "FAILED   %s:%s: %s\n", f.Name, f.Version, f.Error)
-			}
-			if res.Classpath != "" {
-				fmt.Fprintf(w, "classpath: %s\n", res.Classpath)
-			}
-			return nil
+			// Fleet-aware (§14.2): resolves single-box (live progress) or fans out across the
+			// --sandbox targets (per-box, keep-going, summary). Packages resolve per box against
+			// that box's JDK/platform, so there's no resolve-once step (unlike runtime installs).
+			return runFleetMutation(cmd, 15*time.Minute, "install", "install maven",
+				func(ctx context.Context, _ *config.Config, sess *session, out io.Writer) error {
+					pr, finish := installProgress(out, sess.transport)
+					deps := mavenDeps(sess, pr)
+					if mirror != "" {
+						deps.MirrorURL = mirror
+					}
+					res, err := maven.Run(ctx, deps, javaVersion, specs, tier)
+					finish()
+					if err != nil {
+						return err
+					}
+					for _, p := range res.Installed {
+						fmt.Fprintf(out, "resolved %s:%s (%s)\n", p.Name, p.Version, p.Tier)
+					}
+					for _, f := range res.Failed {
+						fmt.Fprintf(out, "FAILED   %s:%s: %s\n", f.Name, f.Version, f.Error)
+					}
+					if res.Classpath != "" {
+						fmt.Fprintf(out, "classpath: %s\n", res.Classpath)
+					}
+					return nil
+				})
 		},
 	}
 	cmd.Flags().StringVar(&javaVersion, "java", "", "target JDK feature version, e.g. 21 (required)")
@@ -218,33 +218,30 @@ func newInstallNpmCmd() *cobra.Command {
 			if project != "" && len(args) > 0 {
 				return fmt.Errorf("--project installs a package.json; don't also pass package names")
 			}
-			ctx, _, sess, done, err := openCommandSession(cmd, 10*time.Minute, "install")
-			if err != nil {
-				return err
-			}
-			defer done()
-
-			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			var out npm.Result
-			if project != "" {
-				out, err = npm.RunProject(ctx, npmDeps(sess, pr), nodeVersion, project, tier)
-			} else {
-				out, err = npm.Run(ctx, npmDeps(sess, pr), nodeVersion, parseNpmSpecs(args), tier)
-			}
-			finish()
-			if err != nil {
-				return err
-			}
-			w := cmd.OutOrStdout()
-			for _, p := range out.Installed {
-				fmt.Fprintf(w, "installed %s %s (%s)\n", p.Name, p.Version, p.Tier)
-			}
-			for _, f := range out.Failed {
-				fmt.Fprintf(w, "FAILED   %s %s: %s\n", f.Name, f.Version, f.Error)
-			}
-			fmt.Fprintf(w, "%d installed, %d failed\n", len(out.Installed), len(out.Failed))
-			fmt.Fprintf(w, "the agent should export NODE_PATH=%s\n", out.NodePath)
-			return nil
+			return runFleetMutation(cmd, 10*time.Minute, "install", "install npm",
+				func(ctx context.Context, _ *config.Config, sess *session, w io.Writer) error {
+					pr, finish := installProgress(w, sess.transport)
+					var out npm.Result
+					var err error
+					if project != "" {
+						out, err = npm.RunProject(ctx, npmDeps(sess, pr), nodeVersion, project, tier)
+					} else {
+						out, err = npm.Run(ctx, npmDeps(sess, pr), nodeVersion, parseNpmSpecs(args), tier)
+					}
+					finish()
+					if err != nil {
+						return err
+					}
+					for _, p := range out.Installed {
+						fmt.Fprintf(w, "installed %s %s (%s)\n", p.Name, p.Version, p.Tier)
+					}
+					for _, f := range out.Failed {
+						fmt.Fprintf(w, "FAILED   %s %s: %s\n", f.Name, f.Version, f.Error)
+					}
+					fmt.Fprintf(w, "%d installed, %d failed\n", len(out.Installed), len(out.Failed))
+					fmt.Fprintf(w, "the agent should export NODE_PATH=%s\n", out.NodePath)
+					return nil
+				})
 		},
 	}
 	cmd.Flags().StringVar(&nodeVersion, "node", "", "target node version line, e.g. 20 (required)")
@@ -314,20 +311,17 @@ func newInstallPipCmd() *cobra.Command {
 		Short: "Install pip packages into an installed runtime (Tier 0 mirror / Tier 1 relay)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, _, sess, done, err := openCommandSession(cmd, 10*time.Minute, "install")
-			if err != nil {
-				return err
-			}
-			defer done()
-
-			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			out, err := pip.Run(ctx, pipDeps(sess, pr), pyVersion, parseSpecs(args), tier, pipArgs)
-			finish()
-			if err != nil {
-				return err
-			}
-			printOutcome(cmd, out)
-			return nil
+			return runFleetMutation(cmd, 10*time.Minute, "install", "install pip",
+				func(ctx context.Context, _ *config.Config, sess *session, w io.Writer) error {
+					pr, finish := installProgress(w, sess.transport)
+					out, err := pip.Run(ctx, pipDeps(sess, pr), pyVersion, parseSpecs(args), tier, pipArgs)
+					finish()
+					if err != nil {
+						return err
+					}
+					printOutcomeTo(w, out)
+					return nil
+				})
 		},
 	}
 	cmd.Flags().StringVar(&pyVersion, "python", "", "target python minor version, e.g. 3.12 (required)")
@@ -351,24 +345,23 @@ func newInstallCondaCmd() *cobra.Command {
 			if file != "" && (len(args) > 0 || pyVersion != "" || len(condaArgs) > 0) {
 				return fmt.Errorf("--file builds a whole environment.yml (its own channels); don't also pass --python, --conda-arg, or package names")
 			}
-			ctx, _, sess, done, err := openCommandSession(cmd, 15*time.Minute, "install")
-			if err != nil {
-				return err
-			}
-			defer done()
-			pr, finish := installProgress(cmd.OutOrStdout(), sess.transport)
-			var out pkg.Outcome
-			if file != "" {
-				out, err = conda.RunManifest(ctx, condaDeps(sess, pr), file, tier)
-			} else {
-				out, err = conda.Run(ctx, condaDeps(sess, pr), pyVersion, parseSpecs(args), tier, condaArgs)
-			}
-			finish()
-			if err != nil {
-				return err
-			}
-			printOutcome(cmd, out)
-			return nil
+			return runFleetMutation(cmd, 15*time.Minute, "install", "install conda",
+				func(ctx context.Context, _ *config.Config, sess *session, w io.Writer) error {
+					pr, finish := installProgress(w, sess.transport)
+					var out pkg.Outcome
+					var err error
+					if file != "" {
+						out, err = conda.RunManifest(ctx, condaDeps(sess, pr), file, tier)
+					} else {
+						out, err = conda.Run(ctx, condaDeps(sess, pr), pyVersion, parseSpecs(args), tier, condaArgs)
+					}
+					finish()
+					if err != nil {
+						return err
+					}
+					printOutcomeTo(w, out)
+					return nil
+				})
 		},
 	}
 	cmd.Flags().StringVar(&pyVersion, "python", "", "target python minor version, e.g. 3.12 (required unless --file)")
@@ -388,8 +381,11 @@ func parseSpecs(args []string) []pkg.Spec {
 	return specs
 }
 
-func printOutcome(cmd *cobra.Command, out pkg.Outcome) {
-	w := cmd.OutOrStdout()
+func printOutcome(cmd *cobra.Command, out pkg.Outcome) { printOutcomeTo(cmd.OutOrStdout(), out) }
+
+// printOutcomeTo renders a package outcome to w (the fleet fan-out passes a [box]-prefixed
+// writer; single-box passes stdout).
+func printOutcomeTo(w io.Writer, out pkg.Outcome) {
 	for _, p := range out.Installed {
 		fmt.Fprintf(w, "installed %s %s (%s)\n", p.Name, p.Version, p.Tier)
 	}

@@ -76,6 +76,64 @@ func TestEnsureNetwork_CreatesInternalWhenAbsent(t *testing.T) {
 	}
 }
 
+// funcRunner answers each call from a closure, for stateful (call-order-dependent) fakes.
+type funcRunner struct {
+	fn func(argv []string) (string, error)
+}
+
+func (f funcRunner) Run(_ context.Context, argv ...string) (string, error) { return f.fn(argv) }
+
+// TestEnsureNetwork_ToleratesConcurrentCreate: a `network create` that loses the race (another
+// `sandbox create` on the same host created it first) must still succeed, not error out.
+func TestEnsureNetwork_ToleratesConcurrentCreate(t *testing.T) {
+	inspects := 0
+	r := funcRunner{fn: func(argv []string) (string, error) {
+		j := strings.Join(argv, " ")
+		switch {
+		case strings.Contains(j, "network inspect"):
+			inspects++
+			if inspects == 1 {
+				return "", fmt.Errorf("no such network") // absent on the first check
+			}
+			return "[{}]", nil // a peer created it while we were racing
+		case strings.Contains(j, "network create"):
+			return "", fmt.Errorf("network already exists")
+		}
+		return "", nil
+	}}
+	if err := New(r).EnsureNetwork(context.Background(), "airgap"); err != nil {
+		t.Fatalf("a lost create race should still succeed: %v", err)
+	}
+}
+
+// TestEnsureImage_UniqueBuilderPerCall: two builds must use DISTINCT builder-container names, so
+// a concurrent build's `rm -f` can't tear down the other's in-flight builder.
+func TestEnsureImage_UniqueBuilderPerCall(t *testing.T) {
+	r := &fakeRunner{fail: map[string]bool{"image exists": true}} // absent → build each time
+	c := New(r)
+	for i := 0; i < 2; i++ {
+		if err := c.EnsureImage(context.Background(), "img:base", "ubuntu:24.04"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var names []string
+	for _, call := range r.calls {
+		if strings.Contains(strings.Join(call, " "), "run --name") {
+			for k, a := range call {
+				if a == "--name" && k+1 < len(call) {
+					names = append(names, call[k+1])
+				}
+			}
+		}
+	}
+	if len(names) != 2 {
+		t.Fatalf("expected 2 builder runs, got %v", names)
+	}
+	if names[0] == names[1] {
+		t.Errorf("concurrent builds must use distinct builder names, both were %q", names[0])
+	}
+}
+
 func TestEnsureNetwork_SkipsWhenPresent(t *testing.T) {
 	r := &fakeRunner{respond: map[string]string{"network inspect": "[{...}]"}} // present
 	if err := New(r).EnsureNetwork(context.Background(), "airgap"); err != nil {

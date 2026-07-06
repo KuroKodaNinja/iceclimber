@@ -15,12 +15,14 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/pins"
 	"github.com/KuroKodaNinja/iceclimber/internal/relay"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
-const (
-	distBase      = "https://static.rust-lang.org/dist"
+// distBase is pinned centrally in internal/pins; stableChannel derives from it.
+var (
+	distBase      = pins.Rt("rust").DistBase
 	stableChannel = distBase + "/channel-rust-stable.toml"
 )
 

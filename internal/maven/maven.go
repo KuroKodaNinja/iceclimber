@@ -27,19 +27,17 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/pins"
 	"github.com/KuroKodaNinja/iceclimber/internal/pkg"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 )
 
-// coursierLauncherURL is the polyglot Coursier launcher (a shell/JAR hybrid, run with
-// `java -jar`). It is pinned to an IMMUTABLE commit (never `master`) and verified against
-// coursierLauncherSHA256 below: the launcher executes as code (on the sandbox JDK, or the
-// controller's java for Tier 1), so a moved/compromised ref must not slip in unverified.
-// To upgrade, bump the commit + the SHA-256 together (sha256 of
-// https://raw.githubusercontent.com/coursier/launchers/<commit>/coursier).
-const coursierLauncherURL = "https://raw.githubusercontent.com/coursier/launchers/15f36c167c30be237105f923151adaf177e7ee61/coursier"
-const coursierLauncherSHA256 = "c62c6feb15bf9cb9374dc61431c8f96f1d9cfd84ea79b40aa239b29f293623bf"
+// The polyglot Coursier launcher (a shell/JAR hybrid, run with `java -jar`) executes as code
+// (on the sandbox JDK, or the controller's java for Tier 1), so it is pinned to an IMMUTABLE
+// commit and verified against a sha256. Both are pinned centrally in internal/pins.
+var coursierLauncherURL = pins.P.Tools.CoursierLauncher.URL
+var coursierLauncherSHA256 = pins.P.Tools.CoursierLauncher.SHA256
 
 // Config holds the resolver's dependencies.
 type Config struct {

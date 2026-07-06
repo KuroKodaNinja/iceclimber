@@ -1,15 +1,15 @@
 package node
 
 import (
+	"github.com/KuroKodaNinja/iceclimber/internal/pins"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
 // RecommendedLine is the Node version line iceclimber installs when the caller doesn't ask
 // for a specific one — the current, most-capable line, not a conservative older LTS (musl
-// arm64 also needs Node ≥ 24). It is the single source of truth: the console's blank default,
-// the `popo node.install` (no version / "latest") path, and NANA.md all resolve to it.
-const RecommendedLine = "24"
+// arm64 also needs Node ≥ 24). Pinned centrally in internal/pins.
+var RecommendedLine = pins.Rt("node").RecommendedLine
 
 // ResolveLine maps a caller's version request to a concrete line: an empty value or "latest"
 // (case-insensitive) becomes RecommendedLine; anything else is used verbatim. This is what lets

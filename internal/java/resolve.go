@@ -7,14 +7,15 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/pins"
 	"github.com/KuroKodaNinja/iceclimber/internal/relay"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
 // Adoptium (Eclipse Temurin) publishes a queryable assets API with per-build
 // SHA256 checksums — the analog of Python's PBS metadata. musl builds are the
-// "alpine-linux" os; glibc builds are "linux".
-const adoptiumAPI = "https://api.adoptium.net/v3"
+// "alpine-linux" os; glibc builds are "linux". Pinned centrally in internal/pins.
+var adoptiumAPI = pins.Rt("java").AdoptiumAPI
 
 // adoptiumAsset is one element of the /v3/assets/latest response.
 type adoptiumAsset struct {

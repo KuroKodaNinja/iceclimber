@@ -9,16 +9,17 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/pins"
 	"github.com/KuroKodaNinja/iceclimber/internal/relay"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
-// Node distribution sources. glibc builds come from nodejs.org/dist; musl builds
-// from the unofficial-builds mirror. Both publish an index.json (each version's
-// available platform "files") and a per-version SHASUMS256.txt.
-const (
-	distBaseGlibc = "https://nodejs.org/dist"
-	distBaseMusl  = "https://unofficial-builds.nodejs.org/download/release"
+// Node distribution sources (pinned centrally in internal/pins). glibc builds come from
+// nodejs.org/dist; musl builds from the unofficial-builds mirror. Both publish an index.json
+// (each version's available platform "files") and a per-version SHASUMS256.txt.
+var (
+	distBaseGlibc = pins.Rt("node").DistBaseGlibc
+	distBaseMusl  = pins.Rt("node").DistBaseMusl
 )
 
 // indexEntry is one record from index.json.

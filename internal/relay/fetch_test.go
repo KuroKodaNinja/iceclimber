@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs"
 	"github.com/KuroKodaNinja/iceclimber/internal/remotefs/remotefstest"
@@ -163,5 +164,26 @@ func TestExistsAndVerifyRun(t *testing.T) {
 	err := VerifyRun(ctx, remotefstest.LocalRunner{}, "echo boom >&2; exit 3")
 	if err == nil || !strings.Contains(err.Error(), "exit 3") || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("failing verify should carry exit code + stderr, got %v", err)
+	}
+}
+
+// TestAcquireLock_RespectsContext: while the per-asset lock is held, a second acquire must
+// honor its context deadline (poll a non-blocking flock) instead of blocking forever.
+func TestAcquireLock_RespectsContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "asset.lock")
+	held, err := acquireLock(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := acquireLock(ctx, path); err == nil {
+		t.Fatal("second acquire must fail while the lock is held")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("acquire ignored the ~150ms deadline: waited %v", elapsed)
 	}
 }

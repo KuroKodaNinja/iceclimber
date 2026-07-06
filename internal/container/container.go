@@ -16,11 +16,19 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"github.com/KuroKodaNinja/iceclimber/internal/pins"
 )
+
+// builderSeq makes each EnsureImage builder-container name unique within a process (paired with
+// the pid across processes), so concurrent builds on one host don't share a builder.
+var builderSeq uint64
 
 // provisionScript builds the sandbox base image's contents (sshd with TCP forwarding
 // on — required for the `ssh -R` egress tunnel — a non-sudo `agent` workload user, and
@@ -36,17 +44,12 @@ const DefaultImage = "iceclimber-sandbox:base"
 // used for the `--isolation gvisor` tier (RunSpec.Runtime).
 const RunscPath = "/usr/local/bin/runsc"
 
-// runsc is pinned to a specific gVisor release with a checksum baked into THIS source (not
+// runsc is pinned to a specific gVisor release with a checksum verified before install (not
 // "latest", not the release's own same-origin sidecar): the binary is installed as root and
 // run as the container runtime, so a rolled or compromised release must not land unverified.
-// To upgrade, bump the release + both per-arch SHA-512s together (from
-// https://storage.googleapis.com/gvisor/releases/release/<date>/<arch>/runsc.sha512).
-const runscRelease = "20260622"
-
-var runscSHA512 = map[string]string{
-	"x86_64":  "6df95d09363dbd9ee5d5c889c1549b457e1783b039ff60a8f9f16f8c94c774a2ca2eef5b1c370e36b863f6b0407b53ba3c69051c6ef051253843dabf89a6de4e",
-	"aarch64": "6d43f7c99dc182ad3750390c811537ee312fca5938245c65f0c5a23b9d38e8b7fddc1f49a816e6696d708582d813ac2d87ee98f7b46b8a6f5e6241c9eba69443",
-}
+// The release + per-arch SHA-512s are pinned centrally in internal/pins.
+var runscRelease = pins.P.Tools.GvisorRunsc.Release
+var runscSHA512 = pins.P.Tools.GvisorRunsc.SHA512
 
 // Runner executes a command on the Linux host that owns the containers. Combined
 // stdout is returned; on failure the error carries stderr. This is the platform seam:
@@ -126,8 +129,15 @@ func (c *Client) EnsureNetwork(ctx context.Context, name string) error {
 	if _, err := c.podman(ctx, "network", "inspect", name); err == nil {
 		return nil // already present
 	}
-	_, err := c.podman(ctx, "network", "create", "--internal", name)
-	return err
+	if _, err := c.podman(ctx, "network", "create", "--internal", name); err != nil {
+		// A concurrent `sandbox create` on the same host may have won the create race
+		// (check-then-create isn't atomic); an existing network is success, not an error.
+		if _, err2 := c.podman(ctx, "network", "inspect", name); err2 == nil {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // RemoveNetwork deletes the network (force — detaches any lingering endpoints).
@@ -148,8 +158,11 @@ func (c *Client) EnsureImage(ctx context.Context, image, base string) error {
 	if c.ImageExists(ctx, image) {
 		return nil
 	}
-	tmp := "iceclimber-build-" + sanitize(image)
-	_, _ = c.podman(ctx, "rm", "-f", tmp) // clear any stale builder
+	// Unique builder name (pid + monotonic counter): two concurrent `sandbox create` on the
+	// same host must not share one builder container, or one's `rm -f` tears down the other's
+	// in-flight build. Both may still commit the same tag — last writer wins, harmlessly.
+	tmp := fmt.Sprintf("iceclimber-build-%s-%d-%d", sanitize(image), os.Getpid(), atomic.AddUint64(&builderSeq, 1))
+	_, _ = c.podman(ctx, "rm", "-f", tmp) // clear any stale builder of THIS name
 	// Provision on the default network (needs internet to apt-install sshd). Pin public
 	// DNS: the Lima host's resolv.conf is the 127.0.0.53 systemd-resolved stub, which
 	// netavark copies into the container where it isn't reachable — apt then fails to
@@ -245,10 +258,16 @@ func (c *Client) Keyscan(ctx context.Context, host string, port int) (string, er
 			return out, nil
 		}
 		last = fmt.Errorf("ssh-keyscan %s:%d: %v", host, port, err)
-		if time.Now().After(deadline) || ctx.Err() != nil {
+		if time.Now().After(deadline) {
 			return "", last
 		}
-		time.Sleep(2 * time.Second)
+		// Interruptible backoff: a cancelled context aborts immediately instead of sitting out
+		// the full 2s sleep before the next check.
+		select {
+		case <-ctx.Done():
+			return "", last
+		case <-time.After(2 * time.Second):
+		}
 	}
 }
 

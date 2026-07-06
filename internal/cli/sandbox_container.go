@@ -193,6 +193,31 @@ func genSandboxKeypair(sbDir string) (privPath, pub string, err error) {
 	return privPath, strings.TrimSpace(string(pb)), nil
 }
 
+// atomicWriteFile writes data to path via a temp file in the same directory + rename, so a
+// concurrent reader — an ssh/sftp dial that runs refreshContainerSSH while another process is
+// rewriting the shared ssh_config/known_hosts after a container restart — never observes a
+// truncated or half-written file. The rename is atomic on the same filesystem.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp) // harmless no-op once the rename succeeds
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 // writeContainerKnownHosts scans the container's host key at its bridge IP:22 from the
 // host's vantage (also a readiness gate for sshd) and writes the known_hosts file.
 func writeContainerKnownHosts(ctx context.Context, cl *container.Client, sbDir, ip string) (string, error) {
@@ -201,7 +226,7 @@ func writeContainerKnownHosts(ctx context.Context, cl *container.Client, sbDir, 
 		return "", err
 	}
 	path := filepath.Join(sbDir, "known_hosts")
-	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+	if err := atomicWriteFile(path, []byte(line), 0o644); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -230,7 +255,7 @@ func writeContainerSSHConfig(sbDir, name, ip, identity, known, hostKind, hostIns
 		fmt.Fprintf(&b, "  ProxyJump %s\n", jump)
 	}
 	path := filepath.Join(sbDir, "ssh_config")
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+	if err := atomicWriteFile(path, []byte(b.String()), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -285,7 +310,7 @@ func rewriteKnownHostsAddr(path, addr string) error {
 			lines[i] = strings.Join(f, " ")
 		}
 	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	return atomicWriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 }
 
 // containerProviderStatus reports the container's run state for list/status (mirrors the

@@ -1,14 +1,14 @@
 package python
 
 import (
+	"github.com/KuroKodaNinja/iceclimber/internal/pins"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
 // RecommendedLine is the Python minor version iceclimber installs when the caller doesn't ask
-// for a specific one — the current recommended line. Single source of truth for the console's
-// blank default, the `popo python.install` (no version / "latest") path, and NANA.md.
-const RecommendedLine = "3.12"
+// for a specific one — the current recommended line. Pinned centrally in internal/pins.
+var RecommendedLine = pins.Rt("python").RecommendedLine
 
 // ResolveLine maps a caller's version request to a concrete minor: an empty value or "latest"
 // (case-insensitive) becomes RecommendedLine; anything else is used verbatim. External callers

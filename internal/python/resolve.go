@@ -9,13 +9,15 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/KuroKodaNinja/iceclimber/internal/pins"
 	"github.com/KuroKodaNinja/iceclimber/internal/relay"
 	"github.com/KuroKodaNinja/iceclimber/internal/runtime"
 )
 
 // pbsManifestURL publishes metadata about PBS's latest release (tag +
 // asset_url_prefix). The release's SHA256SUMS lists the actual assets + hashes.
-const pbsManifestURL = "https://raw.githubusercontent.com/astral-sh/python-build-standalone/latest-release/latest-release.json"
+// Pinned centrally in internal/pins.
+var pbsManifestURL = pins.Rt("python").ManifestURL
 
 type manifest struct {
 	Tag            string `json:"tag"`

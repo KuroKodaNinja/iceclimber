@@ -226,3 +226,33 @@ func TestRewriteKnownHostsAddr_PreservesKeysAndComments(t *testing.T) {
 		t.Fatalf("rewrite mismatch:\ngot  %q\nwant %q", got, want)
 	}
 }
+
+// TestAtomicWriteFile round-trips content + perm and never leaves a .tmp sibling behind — the
+// property that keeps a concurrent ssh dial from reading a half-written ssh_config/known_hosts.
+func TestAtomicWriteFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ssh_config")
+	if err := atomicWriteFile(path, []byte("Host x\n  HostName 10.0.0.1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(got), "10.0.0.1") {
+		t.Fatalf("content round-trip failed: %q err=%v", got, err)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Errorf("perm = %v, want 0600", fi.Mode().Perm())
+	}
+	// Overwrite (the rewrite-on-IP-change path) still lands atomically with no temp residue.
+	if err := atomicWriteFile(path, []byte("Host x\n  HostName 10.0.0.2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		if strings.Contains(e.Name(), ".tmp") {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
+	}
+	if len(ents) != 1 {
+		t.Errorf("expected exactly ssh_config in dir, got %d entries", len(ents))
+	}
+}

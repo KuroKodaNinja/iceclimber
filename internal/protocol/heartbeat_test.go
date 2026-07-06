@@ -36,6 +36,28 @@ func TestWriteHeartbeat_AdvancesSeqAndFires(t *testing.T) {
 	}
 }
 
+// TestSeedSeq_ContinuesAcrossReconnect: a reconnect builds a FRESH Dispatcher (seq back at 0);
+// seedSeq must adopt the on-disk sequence so the next heartbeat continues monotonically (43,
+// not a backwards jump to 1).
+func TestSeedSeq_ContinuesAcrossReconnect(t *testing.T) {
+	ctx, fs, tree, _ := setup(t)
+	if err := fs.WriteFile(ctx, tree.Heartbeat(), []byte("42 2020-01-01T00:00:00Z\n")); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDispatcher(fs, tree, nil)
+	d.seedSeq(ctx)
+	if d.seq != 42 {
+		t.Fatalf("seedSeq: seq = %d, want 42", d.seq)
+	}
+	if err := d.WriteHeartbeat(ctx); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := fs.ReadFile(ctx, tree.Heartbeat())
+	if f := strings.Fields(string(data)); len(f) == 0 || f[0] != "43" {
+		t.Fatalf("post-reconnect heartbeat = %q, want seq 43", data)
+	}
+}
+
 // TestServe_HeartbeatNotStarvedByLongHandler is the root-cause regression: a handler
 // that blocks the single-threaded drain loop must NOT stall the heartbeat — it runs on
 // its own goroutine now, so seq keeps advancing while the long handler is in flight.

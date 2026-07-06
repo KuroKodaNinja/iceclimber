@@ -1,0 +1,42 @@
+# Central registry of every upstream version, source URL, and checksum iceclimber pins.
+#
+# THIS IS THE SINGLE PLACE TO EDIT to bump a pin. Do not scatter version/URL/checksum
+# constants back into the individual runtime packages — they read from here (internal/pins),
+# which parses and validates this file once at startup (go:embed).
+
+runtimes:
+  # recommended_line: the default version "line" a bare `install <lang>` resolves to the
+  # latest patch WITHIN (resolved dynamically against the upstream index below, not a hard
+  # pin). The *_url / *_base fields are the upstream sources each resolver fetches.
+  python:
+    recommended_line: "3.12"
+    manifest_url: "https://raw.githubusercontent.com/astral-sh/python-build-standalone/latest-release/latest-release.json"
+  node:
+    recommended_line: "24"
+    dist_base_glibc: "https://nodejs.org/dist"
+    dist_base_musl: "https://unofficial-builds.nodejs.org/download/release"
+  java:
+    recommended_line: "21"
+    adoptium_api: "https://api.adoptium.net/v3"
+  rust:
+    recommended_line: "stable"
+    dist_base: "https://static.rust-lang.org/dist"
+
+tools:
+  # maven_tool_version: the Apache Maven the `maven build` command provisions.
+  maven_tool_version: "3.9.9"
+
+  # coursier_launcher: the JVM dependency-resolver launcher, EXECUTED AS CODE. Pinned to an
+  # IMMUTABLE commit and verified against sha256 — bump the url (commit) and sha256 together.
+  coursier_launcher:
+    url: "https://raw.githubusercontent.com/coursier/launchers/15f36c167c30be237105f923151adaf177e7ee61/coursier"
+    sha256: "c62c6feb15bf9cb9374dc61431c8f96f1d9cfd84ea79b40aa239b29f293623bf"
+
+  # gvisor_runsc: the gVisor OCI runtime for the `--isolation gvisor` tier, installed as ROOT.
+  # Pinned to a dated release and verified against the per-arch sha512 — bump release and both
+  # hashes together (from .../releases/release/<release>/<arch>/runsc.sha512).
+  gvisor_runsc:
+    release: "20260622"
+    sha512:
+      x86_64: "6df95d09363dbd9ee5d5c889c1549b457e1783b039ff60a8f9f16f8c94c774a2ca2eef5b1c370e36b863f6b0407b53ba3c69051c6ef051253843dabf89a6de4e"
+      aarch64: "6d43f7c99dc182ad3750390c811537ee312fca5938245c65f0c5a23b9d38e8b7fddc1f49a816e6696d708582d813ac2d87ee98f7b46b8a6f5e6241c9eba69443"

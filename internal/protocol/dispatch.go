@@ -189,6 +189,7 @@ func (d *Dispatcher) Serve(ctx context.Context, interval time.Duration) error {
 // next tick retries, and the drain loop's own error drives reconnect; meanwhile the
 // console's freshness indicator shows the heartbeat going stale.
 func (d *Dispatcher) heartbeatLoop(ctx context.Context, interval time.Duration) {
+	d.seedSeq(ctx) // continue the on-disk sequence across a reconnect rather than resetting to 0
 	_ = d.WriteHeartbeat(ctx)
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -198,6 +199,22 @@ func (d *Dispatcher) heartbeatLoop(ctx context.Context, interval time.Duration) 
 			return
 		case <-t.C:
 			_ = d.WriteHeartbeat(ctx)
+		}
+	}
+}
+
+// seedSeq initializes d.seq from the existing heartbeat file so a reconnect (which builds a
+// fresh Dispatcher) keeps the sequence monotonically increasing instead of restarting at 0.
+// Best-effort: a missing/malformed file leaves seq at 0 (first boot). Called once at the start
+// of heartbeatLoop, before any WriteHeartbeat, so it preserves d.seq's single-writer invariant.
+func (d *Dispatcher) seedSeq(ctx context.Context) {
+	data, err := d.fs.ReadFile(ctx, d.tree.Heartbeat())
+	if err != nil {
+		return
+	}
+	if fields := strings.Fields(string(data)); len(fields) > 0 {
+		if n, err := strconv.ParseInt(fields[0], 10, 64); err == nil && n > d.seq {
+			d.seq = n
 		}
 	}
 }

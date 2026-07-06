@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/progress"
 	"github.com/KuroKodaNinja/iceclimber/internal/remote"
@@ -80,9 +81,10 @@ func (f *Fetcher) Fetch(ctx context.Context, a Asset) (string, error) {
 		return dst, nil
 	}
 
-	// Serialize the download per asset across goroutines AND processes (blocking flock:
-	// waiting for a concurrent downloader then hitting its cache beats racing it).
-	lock, err := acquireLock(dst + ".lock")
+	// Serialize the download per asset across goroutines AND processes (waiting for a concurrent
+	// downloader then hitting its cache beats racing it). ctx-aware, so a cancelled/timed-out
+	// install aborts the wait instead of blocking forever on a stuck peer.
+	lock, err := acquireLock(ctx, dst+".lock")
 	if err != nil {
 		return "", err
 	}
@@ -226,16 +228,29 @@ func fileSHA256(p string) (string, error) {
 // flock is a held cross-process advisory lock (blocking exclusive).
 type flock struct{ f *os.File }
 
-func acquireLock(path string) (*flock, error) {
+func acquireLock(ctx context.Context, path string) (*flock, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		_ = f.Close()
-		return nil, err
+	// Poll a NON-blocking flock so ctx cancellation aborts the wait — a blocking LOCK_EX would
+	// ignore the deadline and hang on a stuck peer holding the lock.
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return &flock{f: f}, nil
+		}
+		if err != syscall.EWOULDBLOCK {
+			_ = f.Close()
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			_ = f.Close()
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
-	return &flock{f: f}, nil
 }
 
 func (l *flock) release() {
