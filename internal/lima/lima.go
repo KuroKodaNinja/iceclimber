@@ -179,6 +179,14 @@ func RunScript(ctx context.Context, name, script string) error {
 // fails under connection churn / while the box is still settling). Mirrors the functional
 // harness's keyscanToFile, but writes to a stable per-sandbox path rather than a temp file.
 func KnownHostsFile(name, dir string) (string, error) {
+	return KnownHostsFileAt(name, filepath.Join(dir, "known_hosts"))
+}
+
+// KnownHostsFileAt is KnownHostsFile with an explicit destination path — used when an
+// instance's key must live under a name other than "known_hosts" (e.g. the container
+// backend pins its Lima jump VM into <sbDir>/jump_known_hosts, keeping the container hop's
+// own known_hosts distinct).
+func KnownHostsFileAt(name, path string) (string, error) {
 	_, port, _, _, err := SSHDetails(name)
 	if err != nil {
 		return "", err
@@ -187,10 +195,9 @@ func KnownHostsFile(name, dir string) (string, error) {
 	if h := hostFor(name); h != "" {
 		host = h
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, "known_hosts")
 
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {

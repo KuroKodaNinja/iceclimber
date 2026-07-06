@@ -13,6 +13,28 @@ import (
 	"github.com/KuroKodaNinja/iceclimber/internal/xdg"
 )
 
+// TestRenderJumpBlock_VerifiesHostKey guards the jump-host hardening: the ProxyJump stanza must
+// pin the jump host's key (accept-new against a real known_hosts file) and NEVER fall back to
+// StrictHostKeyChecking=no / UserKnownHostsFile=/dev/null — the habit that's fine on a loopback
+// hop but dangerous the day the jump is a real remote bastion.
+func TestRenderJumpBlock_VerifiesHostKey(t *testing.T) {
+	kh := jumpKnownHostsPath("/state/box")
+	block := renderJumpBlock("icx-jump-box", "127.0.0.1", 52724, "bob", "/id", kh)
+
+	if strings.Contains(block, "StrictHostKeyChecking no") || strings.Contains(block, "/dev/null") {
+		t.Fatalf("jump block must not skip host-key verification:\n%s", block)
+	}
+	if !strings.Contains(block, "StrictHostKeyChecking accept-new") {
+		t.Errorf("jump block should pin with accept-new:\n%s", block)
+	}
+	if !strings.Contains(block, "UserKnownHostsFile "+kh) {
+		t.Errorf("jump block should reference the pinned known_hosts %q:\n%s", kh, block)
+	}
+	if !strings.HasSuffix(kh, "/jump_known_hosts") {
+		t.Errorf("jump known_hosts must be distinct from the container hop's known_hosts, got %q", kh)
+	}
+}
+
 // TestContainerSSHConfigHasIP: the restart-refresh only rewrites the ssh_config when the
 // container's bridge IP actually changed (a host reboot can hand it a new one).
 func TestContainerSSHConfigHasIP(t *testing.T) {

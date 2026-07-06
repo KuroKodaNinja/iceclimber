@@ -162,6 +162,10 @@ func createContainerSandbox(ctx context.Context, out io.Writer, name, isolation 
 	if err != nil {
 		return nil, fmt.Errorf("record container host key: %w", err)
 	}
+	// Pin the jump host's key up front (no-op on native Linux) so the ProxyJump verifies it.
+	if err := pinJumpHostKey(sbDir, hostKind, hostInstance); err != nil {
+		return nil, err
+	}
 	sshCfgPath, err := writeContainerSSHConfig(sbDir, name, ip, priv, known, hostKind, hostInstance)
 	if err != nil {
 		return nil, fmt.Errorf("write ssh config: %w", err)
@@ -232,6 +236,39 @@ func writeContainerKnownHosts(ctx context.Context, cl *container.Client, sbDir, 
 	return path, nil
 }
 
+// jumpKnownHostsPath is where the jump host's pinned SSH key lives — kept DISTINCT from the
+// container hop's <sbDir>/known_hosts so the two keys never collide. The ProxyJump block
+// references it with StrictHostKeyChecking accept-new.
+func jumpKnownHostsPath(sbDir string) string { return filepath.Join(sbDir, "jump_known_hosts") }
+
+// renderJumpBlock renders the ProxyJump ssh_config stanza for the jump host, pinning its key
+// against knownHosts with accept-new (pin on first sight, then reject a changed key). It never
+// emits StrictHostKeyChecking=no — "don't verify the jump host" is the habit that turns
+// dangerous the day the jump is a real remote bastion, so the generated config never teaches it.
+func renderJumpBlock(alias, host string, port int, usr, identity, knownHosts string) string {
+	return fmt.Sprintf("Host %s\n  HostName %s\n  Port %d\n  User %s\n  IdentityFile %s\n"+
+		"  UserKnownHostsFile %s\n  StrictHostKeyChecking accept-new\n\n",
+		alias, host, port, usr, identity, knownHosts)
+}
+
+// pinJumpHostKey records the jump host's SSH key into jumpKnownHostsPath, once, at create time —
+// so the ProxyJump's accept-new only ever VERIFIES it thereafter instead of trusting blindly.
+// A no-op when the sandbox has no jump host (native Linux dials the container bridge directly).
+// Today the only backend WITH a jump host reaches it through the shared host VM, which happens
+// to be Lima-provisioned, so the keyscan goes through the lima helper — but the property being
+// enforced is "verify the jump host," independent of how that host was provisioned. Kept out of
+// writeContainerSSHConfig (which also runs on refresh) so a refresh never re-scans/re-trusts the
+// jump host from the wire — the same stance #113 took for the container hop.
+func pinJumpHostKey(sbDir, hostKind, hostInstance string) error {
+	if hostKind != "lima" || hostInstance == "" {
+		return nil // no jump host (native Linux) → nothing to pin
+	}
+	if _, err := lima.KnownHostsFileAt(hostInstance, jumpKnownHostsPath(sbDir)); err != nil {
+		return fmt.Errorf("pin jump host key: %w", err)
+	}
+	return nil
+}
+
 // writeContainerSSHConfig generates the ssh_config Popo dials through: the sandbox sits at
 // its bridge IP:22 inside the Linux host. On macOS a ProxyJump hop reaches it through the
 // shared Lima VM; on native Linux the bridge IP is directly reachable.
@@ -245,9 +282,7 @@ func writeContainerSSHConfig(sbDir, name, ip, identity, known, hostKind, hostIns
 			return "", fmt.Errorf("host VM ssh details: %w", err)
 		}
 		jump = "icx-jump-" + name
-		fmt.Fprintf(&b, "Host %s\n  HostName %s\n  Port %d\n  User %s\n  IdentityFile %s\n"+
-			"  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n\n",
-			jump, host, jport, usr, jid)
+		b.WriteString(renderJumpBlock(jump, host, jport, usr, jid, jumpKnownHostsPath(sbDir)))
 	}
 	fmt.Fprintf(&b, "Host %s\n  HostName %s\n  Port 22\n  User agent\n  IdentityFile %s\n"+
 		"  UserKnownHostsFile %s\n  StrictHostKeyChecking accept-new\n", name, ip, identity, known)
