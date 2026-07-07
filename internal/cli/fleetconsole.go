@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -9,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/KuroKodaNinja/iceclimber/internal/activity"
+	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/tui"
 )
 
@@ -70,6 +73,105 @@ func newFleetModel(ids []string, views map[string]tui.Console) fleetModel {
 		summ[id] = &memberSummary{}
 	}
 	return fleetModel{ids: ids, views: views, summ: summ, w: 100, h: 30}
+}
+
+// runFleetConsole serves EVERY target in one TUI (§14.3). Members start sequentially BEFORE the
+// alt-screen — so each box's first-contact host-key trust prompt and any password prompt run on
+// the tty one at a time (startSandboxWorker's own inline flow), never corrupting the fleet
+// screen. A member that can't lock or dial becomes an "✗ unreachable" row and never aborts the
+// others (§14.7). Then one Bubble Tea program runs the fleet model, with a drain goroutine per
+// worker forwarding its (sandbox-tagged) events via program.Send.
+//
+// Deferred to a later slice (§14.9 discipline): async "connecting…" rows that fill in live
+// (today start blocks on a slow dial, bounded by SSH's own connect timeout), and lock-retry ⛔
+// rows (a locked member is skipped with a notice rather than shown + periodically re-acquired).
+func runFleetConsole(parent context.Context, targets []*config.Config, transport, agentLog string) error {
+	ids := make([]string, 0, len(targets))
+	for _, cfg := range targets {
+		ids = append(ids, cfg.SandboxID)
+	}
+	sort.Strings(ids)
+	byID := map[string]*config.Config{}
+	for _, cfg := range targets {
+		byID[cfg.SandboxID] = cfg
+	}
+
+	views := make(map[string]tui.Console, len(ids))
+	workers := map[string]*sandboxWorker{}
+	locks := map[string]*sandboxLock{}
+	unreachable := map[string]string{} // id → reason (rendered as ✗ unreachable)
+
+	for _, id := range ids {
+		cfg := byID[id]
+		lk, err := acquireServeLock(cfg, "console")
+		if err != nil {
+			unreachable[id] = "locked: " + err.Error()
+			continue
+		}
+		// startSandboxWorker dials + (if needed) prompts host-key trust / password on the tty —
+		// fine here, we are not on the alt-screen yet. A failure leaves the member unreachable.
+		w, err := startSandboxWorker(parent, cfg, transport, agentLog)
+		if err != nil {
+			lk.Release()
+			unreachable[id] = err.Error()
+			continue
+		}
+		locks[id] = lk
+		workers[id] = w
+		// A dummy channel: in fleet mode the worker's real events are drained by this program via
+		// Send, so the view's own event pump must never be armed (the fleet never calls its Init).
+		views[id] = tui.NewConsole(id, make(chan tea.Msg), w.agentLogPath, w.ops).
+			WithSeedCounts(w.seed.Served, w.seed.Approved, w.seed.Denied, w.seed.LastAction).
+			WithEgressLog(auditPath(cfg))
+	}
+	defer func() {
+		for _, w := range workers {
+			w.stop()
+		}
+		for _, lk := range locks {
+			lk.Release()
+		}
+	}()
+
+	// Reachable-with-no-view members (locked/failed) still get a placeholder view so their tab
+	// exists; the overview shows them as unreachable.
+	for id, reason := range unreachable {
+		views[id] = tui.NewConsole(id, make(chan tea.Msg), "", nil)
+		_ = reason
+	}
+
+	model := newFleetModel(ids, views)
+	for id := range workers {
+		if s := model.summ[id]; s != nil {
+			s.started, s.conn = true, tui.ConnConnected
+		}
+	}
+	for id, reason := range unreachable {
+		if s := model.summ[id]; s != nil {
+			s.failed = reason
+		}
+	}
+	if len(workers) == 0 {
+		return fmt.Errorf("no fleet member could be served (all locked or unreachable)")
+	}
+
+	prog := tea.NewProgram(model, tea.WithAltScreen())
+	done := make(chan struct{})
+	for id, w := range workers {
+		go func(id string, ch <-chan tea.Msg) {
+			for {
+				select {
+				case <-done:
+					return
+				case msg := <-ch:
+					prog.Send(tagFleet(id, msg))
+				}
+			}
+		}(id, w.events)
+	}
+	_, err := prog.Run()
+	close(done)
+	return err
 }
 
 func (m fleetModel) Init() tea.Cmd { return fleetTick() }

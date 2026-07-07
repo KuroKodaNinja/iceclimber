@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/KuroKodaNinja/iceclimber/internal/config"
 	"github.com/KuroKodaNinja/iceclimber/internal/xdg"
 	"github.com/spf13/cobra"
 )
@@ -43,22 +42,30 @@ func newRootCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(cfgFile, sandboxID)
+			// Fleet-aware (§14.6): the console resolves its target set — a missing --sandbox
+			// defaults to ALL registered boxes, so one controller drives the whole fleet.
+			_, targets, err := fleetTargetsRead()
 			if err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"no usable config (%v)\nPoint at a sandbox first: `iceclimber init` then edit %s, or pass --config.\n",
 					err, cfgFile)
 				return err
 			}
-			// The console is interactive — only launch it on a real terminal.
-			// Headless (CI, pipes, no TTY) falls back to the unattended serve loop,
-			// so command-line operation keeps working with the TUI present.
+			// The console is interactive — only launch it on a real terminal. Headless
+			// (CI, pipes, no TTY) falls back to the unattended serve loop; a headless fleet
+			// serve is a later slice, so headless targets exactly one box.
 			if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+				if len(targets) != 1 {
+					return fmt.Errorf("headless serve targets one sandbox — pass --sandbox <id> (headless fleet serve is not yet supported)")
+				}
 				fmt.Fprintln(cmd.ErrOrStderr(),
 					"iceclimber: no terminal detected — running headless serve (use subcommands for other actions)")
-				return runHeadless(cmd.Context(), cfg, transport, cmd.OutOrStdout())
+				return runHeadless(cmd.Context(), targets[0], transport, cmd.OutOrStdout())
 			}
-			return runConsole(cmd.Context(), cfg, transport, consoleAgentLog)
+			if len(targets) == 1 {
+				return runConsole(cmd.Context(), targets[0], transport, consoleAgentLog)
+			}
+			return runFleetConsole(cmd.Context(), targets, transport, consoleAgentLog)
 		},
 	}
 	pf := root.PersistentFlags()
