@@ -283,6 +283,16 @@ func windowRows(rows []string, n, scroll int) []string {
 	return rows[start:end]
 }
 
+// ModalView / PasswordView are exported for the fleet console (package cli), which owns a
+// GLOBAL approval/password queue rendered over whatever tab is active (§14.3) and reuses the
+// single-sandbox modal chrome rather than re-implementing it.
+func ModalView(w, h int, req *ApprovalRequest, queued int) string {
+	return modalView(w, h, req, queued)
+}
+
+// PasswordView renders the masked password modal (n = typed length).
+func PasswordView(w, h int, label string, n int) string { return passwordView(w, h, label, n) }
+
 // modalView renders a centred approval modal over a blank screen.
 func modalView(w, h int, req *ApprovalRequest, queued int) string {
 	border := cWarn

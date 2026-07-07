@@ -66,8 +66,9 @@ type ApprovalRequest struct {
 // corrupts the alt-screen. The cli's TUI-backed prompter sends it on the event channel and
 // blocks; the typed value is sent back on Reply (empty string if the operator cancels).
 type PasswordRequest struct {
-	Label string
-	Reply chan string
+	Sandbox string // which box is asking (labels the modal in the fleet console; "" single-box)
+	Label   string
+	Reply   chan string
 }
 
 // InstallRequest is an operator-initiated install (not an agent maildir request),
@@ -346,6 +347,11 @@ func (c Console) WithSeedCounts(served, approved, denied int, last time.Time) Co
 	c.served, c.approved, c.denied, c.lastTS = served, approved, denied, last
 	return c
 }
+
+// Busy reports whether this console is in a mode that owns the keyboard — an open form or a
+// side panel (status/egress). The fleet console consults it for key precedence: a busy member
+// keeps its keys (so esc cancels its form), otherwise fleet-nav keys (tabs/overview) win.
+func (c Console) Busy() bool { return c.form != nil || c.panel != "" }
 
 // markLastAction advances the header's "last action" time from an event's RFC3339 timestamp.
 // Called only for serviced/approved/denied — the operator-facing actions the counters track —
@@ -1127,6 +1133,9 @@ func (c *Console) addNana(raw string) {
 		c.nanaLines = c.nanaLines[len(c.nanaLines)-maxLines:]
 	}
 }
+
+// ModalKey is exported for the fleet console's global approval modal (see ModalView).
+func ModalKey(k string) (int, bool) { return modalKey(k) }
 
 func modalKey(k string) (int, bool) {
 	switch k {
