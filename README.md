@@ -454,6 +454,14 @@ summary reports which succeeded/failed (exit non-zero if any did). A heterogeneo
 glibc, different arches) resolves one version and installs the right per-platform asset on each.
 Full targeting rules are plan §14.
 
+**The fleet console.** Bare `iceclimber` (on a terminal) opens the console over the whole fleet:
+**tab 0** is a live overview — one row per box (link state, heartbeat, serviced count, a
+pending-approvals badge, last action); **tabs 1–9** are the ordinary per-box console (`1`–`9`
+direct, `[`/`]` cycle, `0`/`esc` back to the overview). **Approvals are global** — any box's
+request queues in one modal you answer without switching tabs. A box whose lock another process
+holds shows a `⛔ owned by …` row and **joins live** the moment that owner exits; an unreachable
+box is a row, never a crash. One box → today's single-sandbox console, unchanged.
+
 ---
 
 ## Nana side (the sandbox agent)
