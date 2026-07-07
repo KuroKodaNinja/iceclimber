@@ -47,21 +47,31 @@ type sandboxWorker struct {
 // program isn't on the alt-screen yet), seeds the header counters, and starts the
 // agent-log bridge + the reconnect supervisor. On return the worker is serving and every
 // subsequent auth prompt routes to the console's masked modal.
-func startSandboxWorker(parent context.Context, cfg *config.Config, transport, agentLog string) (*sandboxWorker, error) {
+// uiReadyAtStart controls where the INITIAL dial's prompts go. false (single-box console, and a
+// fleet member started before the alt-screen) → the tty, so trust/password prompts are visible;
+// true (a fleet member joining live AFTER the program is up, e.g. a freed serve.lock) → the
+// masked modal, and an untrusted host key aborts rather than trying to paint its own alt-screen
+// over the running fleet.
+func startSandboxWorker(parent context.Context, cfg *config.Config, transport, agentLog string, uiReadyAtStart bool) (*sandboxWorker, error) {
 	ctx, cancel := context.WithCancel(parent)
 	events := make(chan tea.Msg, 64)
 
-	// The initial connect (and host-key trust prompt) runs before the alt-screen TUI, so its
-	// prompt uses the tty (uiReady=false); once the dial succeeds it flips to true and
-	// reconnect prompts route to the masked modal instead of corrupting the screen. A single
-	// CachingPrompter is reused for reconnects so a password typed now is remembered (and a
-	// single-prompt PAM challenge is reused silently — see kbdAnswers).
+	// A single CachingPrompter is reused for reconnects so a password typed now is remembered
+	// (and a single-prompt PAM challenge is reused silently — see kbdAnswers). uiReady gates
+	// prompt routing: false → tty (pre-alt-screen), true → the masked modal.
 	var uiReady atomic.Bool
+	uiReady.Store(uiReadyAtStart)
 	prompter := remote.NewCachingPrompter(&tuiPasswordPrompter{
 		events: events, done: ctx.Done(), ready: &uiReady, tty: remote.TTYPrompter(),
 	})
 	sess, err := openSessionWith(parent, cfg, transport, prompter)
 	if hke := (*remote.HostKeyError)(nil); errors.As(err, &hke) {
+		if uiReadyAtStart {
+			// Mid-run join: we can't safely run trustHostInteractive's own alt-screen over the
+			// live fleet, so an untrusted key aborts (the member stays ⛔/unreachable).
+			cancel()
+			return nil, fmt.Errorf("host key for %s not trusted (join a fresh console to record it): %w", cfg.SandboxID, err)
+		}
 		// First contact with an untrusted (often ephemeral) sandbox: offer to
 		// record the host key from within the console, then reconnect once.
 		if tErr := trustHostInteractive(parent, cfg, hke); tErr != nil {

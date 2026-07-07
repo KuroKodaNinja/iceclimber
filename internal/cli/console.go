@@ -924,7 +924,7 @@ func runConsole(parent context.Context, cfg *config.Config, transport, agentLog 
 	// All of the per-sandbox machinery — dial (with in-console trust), prompter, activity
 	// logger, agent-log bridge, reconnect supervisor, ops — lives in the sandboxWorker
 	// (the fleet unit; the multi-sandbox console will run N of these into one program).
-	w, err := startSandboxWorker(parent, cfg, transport, agentLog)
+	w, err := startSandboxWorker(parent, cfg, transport, agentLog, false)
 	if err != nil {
 		return err
 	}

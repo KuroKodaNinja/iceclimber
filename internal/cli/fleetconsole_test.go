@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,6 +99,28 @@ func TestFleet_RoutesActivityToOverview(t *testing.T) {
 	}
 	if fm.summ["beta"].served != 0 {
 		t.Errorf("beta serviced = %d, want 0 (must not cross boxes)", fm.summ["beta"].served)
+	}
+}
+
+// TestFleet_LockedThenJoinsLive: a member whose serve.lock another process holds renders a ⛔
+// row with the holder, then joins live (view swapped, "● serving") when the lock frees (§14.4).
+func TestFleet_LockedThenJoinsLive(t *testing.T) {
+	m := newTestFleet("alpha", "beta")
+	nm, _ := m.Update(memberLockedMsg{id: "beta", holder: " by pid 42 · console · since 10:00:00"})
+	fm := nm.(fleetModel)
+	if got := fleetLinkState(fm.summ["beta"]); !strings.Contains(got, "⛔") || !strings.Contains(got, "pid 42") {
+		t.Fatalf("locked beta link = %q, want ⛔ with the holder", got)
+	}
+
+	joined := tui.NewConsole("beta", make(chan tea.Msg), "", nil)
+	nm2, _ := fm.Update(memberJoinedMsg{id: "beta", view: joined})
+	fm2 := nm2.(fleetModel)
+	s := fm2.summ["beta"]
+	if s.holder != "" || !s.started {
+		t.Errorf("joined beta should be unlocked + started, got %+v", s)
+	}
+	if got := fleetLinkState(s); got != "● serving" {
+		t.Errorf("joined beta link = %q, want ● serving", got)
 	}
 }
 

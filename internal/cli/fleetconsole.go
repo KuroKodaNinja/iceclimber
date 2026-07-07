@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,6 +27,7 @@ type memberSummary struct {
 	conn    tui.ConnState // link state once serving
 	started bool          // a worker reported ready at least once
 	failed  string        // start/dial failure → "✗ unreachable" (reason); "" = fine
+	holder  string        // another process holds this box's serve.lock → "⛔ …" (§14.4)
 	hbSeq   string
 	hbAt    time.Time
 	served  int
@@ -47,6 +49,18 @@ type workerReadyMsg struct{ id string }
 type workerFailedMsg struct {
 	id     string
 	reason string
+}
+
+// memberLockedMsg / memberJoinedMsg carry the §14.4 partial-acquisition transitions: a member
+// whose serve.lock another process holds shows a ⛔ row (holder = pid · role), and joins live —
+// its view swapped in — the moment the retry loop acquires the freed lock.
+type memberLockedMsg struct {
+	id     string
+	holder string
+}
+type memberJoinedMsg struct {
+	id   string
+	view tui.Console
 }
 
 // fleetModel is the top tea.Model. Member views are held by value (tui.Console has value-receiver
@@ -75,90 +89,73 @@ func newFleetModel(ids []string, views map[string]tui.Console) fleetModel {
 	return fleetModel{ids: ids, views: views, summ: summ, w: 100, h: 30}
 }
 
-// runFleetConsole serves EVERY target in one TUI (§14.3). Members start sequentially BEFORE the
-// alt-screen — so each box's first-contact host-key trust prompt and any password prompt run on
-// the tty one at a time (startSandboxWorker's own inline flow), never corrupting the fleet
-// screen. A member that can't lock or dial becomes an "✗ unreachable" row and never aborts the
-// others (§14.7). Then one Bubble Tea program runs the fleet model, with a drain goroutine per
-// worker forwarding its (sandbox-tagged) events via program.Send.
+// runFleetConsole serves EVERY target in one TUI (§14.3/§14.4). Members start sequentially BEFORE
+// the alt-screen — so each box's first-contact host-key trust prompt and any password prompt run
+// on the tty one at a time (startSandboxWorker's own inline flow), never corrupting the fleet
+// screen. A member that can't dial is an "✗ unreachable" row; one whose serve.lock another
+// process holds is a "⛔ owned …" row (partial acquisition — serve what's free, show what's not).
+// Neither aborts the others (§14.7). A background loop re-acquires held locks and JOINS the member
+// live — its view swapped in — the moment the other owner exits. One Bubble Tea program runs the
+// fleet model, a drain goroutine per worker forwarding its sandbox-tagged events via program.Send.
 //
-// Deferred to a later slice (§14.9 discipline): async "connecting…" rows that fill in live
-// (today start blocks on a slow dial, bounded by SSH's own connect timeout), and lock-retry ⛔
-// rows (a locked member is skipped with a notice rather than shown + periodically re-acquired).
+// Deferred (§14.9): async "connecting…" rows that fill in live (today the initial start blocks on
+// a slow dial, bounded by SSH's own connect timeout).
 func runFleetConsole(parent context.Context, targets []*config.Config, transport, agentLog string) error {
 	ids := make([]string, 0, len(targets))
-	for _, cfg := range targets {
-		ids = append(ids, cfg.SandboxID)
-	}
-	sort.Strings(ids)
 	byID := map[string]*config.Config{}
 	for _, cfg := range targets {
+		ids = append(ids, cfg.SandboxID)
 		byID[cfg.SandboxID] = cfg
 	}
+	sort.Strings(ids)
 
+	var mu sync.Mutex // guards workers/locks/locked across the initial start, the retry loop, cleanup
 	views := make(map[string]tui.Console, len(ids))
 	workers := map[string]*sandboxWorker{}
 	locks := map[string]*sandboxLock{}
-	unreachable := map[string]string{} // id → reason (rendered as ✗ unreachable)
+	locked := map[string]*config.Config{} // serve.lock held elsewhere → ⛔, retried
+	summ := map[string]*memberSummary{}
+	for _, id := range ids {
+		summ[id] = &memberSummary{}
+	}
 
+	// Phase 1 (pre-alt-screen, sequential): lock + dial each member.
 	for _, id := range ids {
 		cfg := byID[id]
-		lk, err := acquireServeLock(cfg, "console")
-		if err != nil {
-			unreachable[id] = "locked: " + err.Error()
+		lk, holder, ferr := tryFlock(serveLockPath(cfg), "console")
+		if ferr != nil {
+			summ[id].failed = ferr.Error()
+			views[id] = fleetPlaceholderView(id)
 			continue
 		}
-		// startSandboxWorker dials + (if needed) prompts host-key trust / password on the tty —
-		// fine here, we are not on the alt-screen yet. A failure leaves the member unreachable.
-		w, err := startSandboxWorker(parent, cfg, transport, agentLog)
-		if err != nil {
-			lk.Release()
-			unreachable[id] = err.Error()
+		if lk == nil { // another serving process owns it → ⛔ row, retried in Phase 3
+			summ[id].holder = holder
+			locked[id] = cfg
+			views[id] = fleetPlaceholderView(id)
 			continue
 		}
-		locks[id] = lk
-		workers[id] = w
-		// A dummy channel: in fleet mode the worker's real events are drained by this program via
-		// Send, so the view's own event pump must never be armed (the fleet never calls its Init).
-		views[id] = tui.NewConsole(id, make(chan tea.Msg), w.agentLogPath, w.ops).
-			WithSeedCounts(w.seed.Served, w.seed.Approved, w.seed.Denied, w.seed.LastAction).
-			WithEgressLog(auditPath(cfg))
-	}
-	defer func() {
-		for _, w := range workers {
-			w.stop()
-		}
-		for _, lk := range locks {
+		w, err := startSandboxWorker(parent, cfg, transport, agentLog, false)
+		if err != nil {
 			lk.Release()
+			summ[id].failed = err.Error()
+			views[id] = fleetPlaceholderView(id)
+			continue
 		}
-	}()
-
-	// Reachable-with-no-view members (locked/failed) still get a placeholder view so their tab
-	// exists; the overview shows them as unreachable.
-	for id, reason := range unreachable {
-		views[id] = tui.NewConsole(id, make(chan tea.Msg), "", nil)
-		_ = reason
+		locks[id], workers[id] = lk, w
+		summ[id].started, summ[id].conn = true, tui.ConnConnected
+		views[id] = fleetMemberView(cfg, w)
 	}
-
-	model := newFleetModel(ids, views)
-	for id := range workers {
-		if s := model.summ[id]; s != nil {
-			s.started, s.conn = true, tui.ConnConnected
-		}
-	}
-	for id, reason := range unreachable {
-		if s := model.summ[id]; s != nil {
-			s.failed = reason
-		}
-	}
-	if len(workers) == 0 {
-		return fmt.Errorf("no fleet member could be served (all locked or unreachable)")
+	if len(workers) == 0 && len(locked) == 0 {
+		return fmt.Errorf("no fleet member could be served (all unreachable)")
 	}
 
+	model := fleetModel{ids: ids, views: views, summ: summ, w: 100, h: 30}
 	prog := tea.NewProgram(model, tea.WithAltScreen())
 	done := make(chan struct{})
-	for id, w := range workers {
-		go func(id string, ch <-chan tea.Msg) {
+
+	// drain forwards one worker's sandbox-tagged events into the program until shutdown.
+	drain := func(id string, ch <-chan tea.Msg) {
+		go func() {
 			for {
 				select {
 				case <-done:
@@ -167,11 +164,95 @@ func runFleetConsole(parent context.Context, targets []*config.Config, transport
 					prog.Send(tagFleet(id, msg))
 				}
 			}
-		}(id, w.events)
+		}()
 	}
+	mu.Lock()
+	for id, w := range workers {
+		drain(id, w.events)
+	}
+	mu.Unlock()
+
+	// Phase 3: re-acquire held locks and join members live (§14.4).
+	if len(locked) > 0 {
+		go reacquireFleet(parent, done, prog, &mu, locked, workers, locks, transport, agentLog, drain, serveLockPath)
+	}
+
+	defer func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, w := range workers {
+			w.stop()
+		}
+		for _, lk := range locks {
+			lk.Release()
+		}
+	}()
+
 	_, err := prog.Run()
 	close(done)
 	return err
+}
+
+// fleetMemberView builds a live per-sandbox tab view. The dummy channel is never read (the fleet
+// drains the worker's real events via program.Send, so the view's own pump is never armed).
+func fleetMemberView(cfg *config.Config, w *sandboxWorker) tui.Console {
+	return tui.NewConsole(cfg.SandboxID, make(chan tea.Msg), w.agentLogPath, w.ops).
+		WithSeedCounts(w.seed.Served, w.seed.Approved, w.seed.Denied, w.seed.LastAction).
+		WithEgressLog(auditPath(cfg))
+}
+
+// fleetPlaceholderView is the tab body for a member that isn't serving yet (unreachable or ⛔);
+// the overview row carries the real state.
+func fleetPlaceholderView(id string) tui.Console {
+	return tui.NewConsole(id, make(chan tea.Msg), "", nil)
+}
+
+// reacquireFleet retries the serve.lock of every ⛔ member and joins it live the moment the other
+// owner exits (§14.4): it starts the worker mid-run (uiReadyAtStart=true → auth routes to the
+// fleet's modal, an untrusted key aborts rather than painting its own screen), builds the live
+// view, and swaps it in via memberJoinedMsg. A still-held lock refreshes the ⛔ holder text.
+func reacquireFleet(parent context.Context, done chan struct{}, prog *tea.Program, mu *sync.Mutex,
+	locked map[string]*config.Config, workers map[string]*sandboxWorker, locks map[string]*sandboxLock,
+	transport, agentLog string, drain func(string, <-chan tea.Msg), lockPath func(*config.Config) string) {
+	t := time.NewTicker(3 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-parent.Done():
+			return
+		case <-t.C:
+		}
+		mu.Lock()
+		pending := make(map[string]*config.Config, len(locked))
+		for id, cfg := range locked {
+			pending[id] = cfg
+		}
+		mu.Unlock()
+		for id, cfg := range pending {
+			lk, holder, err := tryFlock(lockPath(cfg), "console")
+			if err != nil {
+				continue
+			}
+			if lk == nil { // still owned — refresh the ⛔ holder text
+				prog.Send(memberLockedMsg{id: id, holder: holder})
+				continue
+			}
+			w, werr := startSandboxWorker(parent, cfg, transport, agentLog, true)
+			if werr != nil {
+				lk.Release() // couldn't serve it after all — keep it in `locked` and retry
+				prog.Send(memberLockedMsg{id: id, holder: " (acquired but dial failed: " + werr.Error() + ")"})
+				continue
+			}
+			mu.Lock()
+			workers[id], locks[id] = w, lk
+			delete(locked, id)
+			mu.Unlock()
+			prog.Send(memberJoinedMsg{id: id, view: fleetMemberView(cfg, w)})
+			drain(id, w.events)
+		}
+	}
 }
 
 func (m fleetModel) Init() tea.Cmd { return fleetTick() }
@@ -201,6 +282,17 @@ func (m fleetModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workerFailedMsg:
 		if s := m.summ[msg.id]; s != nil {
 			s.failed = msg.reason
+		}
+		return m, nil
+	case memberLockedMsg:
+		if s := m.summ[msg.id]; s != nil {
+			s.holder = msg.holder
+		}
+		return m, nil
+	case memberJoinedMsg:
+		m.views[msg.id] = msg.view // the lock freed and we acquired it → the live view is ready
+		if s := m.summ[msg.id]; s != nil {
+			s.holder, s.failed, s.started, s.conn = "", "", true, tui.ConnConnected
 		}
 		return m, nil
 	}
@@ -499,6 +591,8 @@ func fleetLinkState(s *memberSummary) string {
 	switch {
 	case s.failed != "":
 		return "✗ unreachable"
+	case s.holder != "" && !s.started:
+		return "⛔ owned" + s.holder // holder text is " by pid N · role · since …"
 	case !s.started:
 		return "· connecting"
 	case s.conn == tui.ConnReconnecting:
