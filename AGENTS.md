@@ -13,9 +13,10 @@ doc: keep it current as decisions settle.
 ## Global guidance (washu kit)
 
 This project follows the user's global coding kit, canonical location
-`~/Coding/ai/washu` (symlinked here as `.agents` for convenience; gitignored, so
-it may be absent — use the canonical path if so). Read `languages/general` +
-`languages/go` and `quality/{testing,security}`. The points that bite here:
+`~/Coding/ai/washu-guidance` (symlinked here as `.agents` for convenience;
+gitignored, so it may be absent — use the canonical path if so). Read
+`standards/languages/general` + `standards/languages/go` and
+`standards/quality/{testing,security}`. The points that bite here:
 simplicity-first (no speculative machinery), errors-as-values, accept-interfaces/
 return-structs, table-driven tests run with `-race`, and secure-by-default (e.g.
 no `InsecureIgnoreHostKey`).
@@ -52,7 +53,7 @@ no `InsecureIgnoreHostKey`).
   `test/lima/demo-verify.sh`) so the premise stays proven for what we've actually
   built, then re-run `make demo`. See [`DEMO.md`](./DEMO.md).
 - **Commits.** Conventional Commits, atomic and self-contained — each commit
-  builds and passes tests on its own. See `.agents/git/commits`.
+  builds and passes tests on its own. See `.agents/standards/git/commits`.
 
 ### Pre-commit/push procedure (definition of done)
 
